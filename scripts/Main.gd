@@ -161,12 +161,23 @@ func _spawn_weapon_pickups() -> void:
 		_place_pickup(pos, pickup_sound)
 
 func _place_pickup(pos: Vector3, pickup_sound: AudioStream) -> void:
+	# Raycast down to find actual ground height at this XZ
+	var space: PhysicsDirectSpaceState3D = get_node("World/Terrain").get_world_3d().direct_space_state
+	var ray := PhysicsRayQueryParameters3D.create(
+		Vector3(pos.x, 200.0, pos.z),
+		Vector3(pos.x, -200.0, pos.z)
+	)
+	ray.collision_mask = 1
+	var hit: Dictionary = space.intersect_ray(ray)
+	var ground_y: float = pos.y
+	if hit:
+		ground_y = hit.position.y
 	var pickup: Node3D = WeaponPickupScene.instantiate()
 	# Pick a random weapon type (excluding pistol which is the default)
 	var preset_index: int = randi() % WEAPON_PRESETS.size()
 	var w: WeaponData = load(WEAPON_PRESETS[preset_index])
 	pickup.weapon_data = w
-	pickup.position = pos
+	pickup.position = Vector3(pos.x, ground_y + 0.8, pos.z)
 	if pickup.has_node("AudioStreamPlayer3D") and pickup_sound:
 		pickup.get_node("AudioStreamPlayer3D").stream = pickup_sound
 	add_child(pickup)
