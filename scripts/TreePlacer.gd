@@ -19,12 +19,12 @@ const BASE_CLEAR_RADIUS := 12.0
 const BLUE_BASE_CENTER := Vector3(0.0, 0.0, 82.0)
 const RED_BASE_CENTER := Vector3(0.0, 0.0, -82.0)
 
-const TREE_SCALE_MIN := 0.8
-const TREE_SCALE_MAX := 1.2
+const TREE_SCALE_MIN := 3
+const TREE_SCALE_MAX := 5
 
-const TREE_DENSITY := 0.5
+const TREE_DENSITY := .1
 
-const CLEARING_CHANCE := 0.05
+const CLEARING_CHANCE := 0.1
 const CLEARING_MIN_RADIUS := 8.0
 const CLEARING_MAX_RADIUS := 15.0
 const CLEARING_COUNT := 20

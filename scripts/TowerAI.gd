@@ -7,19 +7,35 @@ var attack_damage := 15.0
 var attack_cooldown := 1.2
 var _attack_timer := 0.0
 var _dead := false
+var _team_mat: StandardMaterial3D = null
 
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var area: Area3D = $Area3D
 
+const TOWER_MODEL_PATH := "res://assets/kenney_pirate-kit/Models/GLB format/tower-complete-small.glb"
+
 func setup(p_team: int) -> void:
 	team = p_team
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.1, 0.6, 1.0) if team == 0 else Color(1.0, 0.4, 0.1)
-	mesh.material_override = mat
+	# Load and instance the model in code
+	_load_team_model()
 	# Resize collision sphere
 	var shape := SphereShape3D.new()
 	shape.radius = attack_range
 	$Area3D/CollisionShape3D.shape = shape
+
+func _load_team_model() -> void:
+	var gltf := GLTFDocument.new()
+	var state := GLTFState.new()
+	var err := gltf.append_from_file(TOWER_MODEL_PATH, state)
+	if err != OK:
+		print("TowerAI: GLTF failed error=", err)
+		return
+	var root: Node3D = gltf.generate_scene(state)
+	if not root:
+		print("TowerAI: generate_scene failed")
+		return
+	add_child(root)
+	print("TowerAI: loaded model")
 
 func _process(delta: float) -> void:
 	if _dead:
@@ -61,7 +77,7 @@ func _shoot(target: Node3D) -> void:
 		base_mat.albedo_color = Color(0.1, 0.6, 1.0) if team == 0 else Color(1.0, 0.4, 0.1)
 		mesh.material_override = base_mat
 
-func take_damage(amount: float, _source: String) -> void:
+func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void:
 	if _dead:
 		return
 	health -= amount

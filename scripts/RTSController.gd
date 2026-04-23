@@ -58,4 +58,6 @@ func _try_place_tower(screen_pos: Vector2) -> void:
 		return
 	var t := -from.y / dir.y
 	var world_pos := from + dir * t
-	build_system.place_tower(world_pos)
+	var success: bool = build_system.place_tower(world_pos)
+	if not success:
+		print("Not enough points to place tower!")

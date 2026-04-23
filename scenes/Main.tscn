@@ -11,7 +11,7 @@
 [ext_resource type="Script" path="res://scripts/LampPlacer.gd" id="9"]
 [ext_resource type="Script" path="res://scripts/TreePlacer.gd" id="11"]
 [ext_resource type="Environment" path="res://assets/night_environment.tres" id="10"]
-[ext_resource type="Script" path="res://scripts/Minimap.gd" id="11"]
+[ext_resource type="Script" path="res://scripts/Minimap.gd" id="12"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1")
@@ -259,7 +259,7 @@ offset_top = 50.0
 offset_right = -10.0
 offset_bottom = 200.0
 mouse_filter = 2
-script = ExtResource("11")
+script = ExtResource("12")
 
 [node name="AmmoLabel" type="Label" parent="HUD"]
 anchor_left = 1.0
@@ -271,6 +271,18 @@ offset_top = -60.0
 offset_right = -10.0
 offset_bottom = -10.0
 text = "10 / 50"
+horizontal_alignment = 2
+
+[node name="PointsLabel" type="Label" parent="HUD"]
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -160.0
+offset_top = -30.0
+offset_right = -10.0
+offset_bottom = -10.0
+text = "BLUE: 0 | RED: 0"
 horizontal_alignment = 2
 
 [node name="ReloadPrompt" type="Label" parent="HUD"]

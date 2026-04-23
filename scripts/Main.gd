@@ -36,6 +36,7 @@ var _respawn_timer: float = 0.0
 @onready var weapon_label:       Label           = $HUD/WeaponLabel
 @onready var ammo_label:         Label           = $HUD/AmmoLabel
 @onready var reload_prompt:      Label           = $HUD/ReloadPrompt
+@onready var points_label:      Label           = $HUD/PointsLabel
 @onready var minimap:            Control         = $HUD/Minimap
 @onready var audio_mode_switch:  AudioStreamPlayer = $AudioModeSwitch
 @onready var audio_wave:         AudioStreamPlayer = $AudioWave
@@ -62,11 +63,14 @@ func _ready() -> void:
 	fps_player.ammo_label    = ammo_label
 	fps_player.reload_prompt = reload_prompt
 	fps_player.stamina_bar  = $HUD/StaminaBar
+	fps_player.points_label = points_label
 	fps_player.connect("died", _on_player_died)
 	# Spawn weapon pickups after terrain has settled (deferred so LaneData is ready)
 	call_deferred("_spawn_weapon_pickups")
 	# Pass secret paths to LaneData after terrain generates
 	call_deferred("_setup_lane_data")
+	# Spawn preset towers near lane starts (blue team)
+	call_deferred("_spawn_preset_towers")
 
 func _setup_lane_data() -> void:
 	var terrain: Node = $World/Terrain
@@ -81,6 +85,50 @@ func _process(delta: float) -> void:
 			_do_respawn()
 		else:
 			respawn_label.text = "Respawning in %d..." % (int(_respawn_timer) + 1)
+	# Always show team points (both modes)
+	var blue_pts: int = TeamData.get_points(0)
+	var red_pts: int = TeamData.get_points(1)
+	points_label.text = "BLUE: %d | RED: %d" % [blue_pts, red_pts]
+
+func _spawn_preset_towers() -> void:
+	const TOWER_SCENE := preload("res://scenes/Tower.tscn")
+	# Lane positions: get near blue base (z=70-75)
+	var lane_positions: Array = [
+		Vector3(-28.0, 0.0, 70.0),   # Left lane (closer to path)
+		Vector3(-3.0, 0.0, 70.0),   # Mid lane (on edge of path)
+		Vector3(28.0, 0.0, 70.0),    # Right lane (closer to path)
+	]
+	var towers: Node3D = $World/Towers if has_node("World/Towers") else null
+	if not towers:
+		towers = Node3D.new()
+		towers.name = "Towers"
+		add_child(towers)
+	for pos in lane_positions:
+		var tower = TOWER_SCENE.instantiate()
+		# Get terrain height via raycast
+		var terrain_y: float = _get_terrain_height(pos)
+		pos.y = 0
+		# Add to world first (required for _ready to work)
+		$World.add_child(tower)
+		tower.global_position = pos
+		# Then setup (after adding to tree)
+		tower.setup(0)  # Blue team
+		print("Preset tower spawned at ", pos)
+
+func _get_terrain_height(pos: Vector3) -> float:
+	var world_3d: World3D = get_tree().root.get_world_3d()
+	var space: PhysicsDirectSpaceState3D = world_3d.direct_space_state
+	if space == null:
+		return 0.0
+	var from: Vector3 = Vector3(pos.x, 50.0, pos.z)
+	var to: Vector3 = Vector3(pos.x, -10.0, pos.z)
+	var query := PhysicsRayQueryParameters3D.create(from, to)
+	query.collide_with_bodies = true
+	query.collision_mask = 1
+	var result: Dictionary = space.intersect_ray(query)
+	if result.is_empty():
+		return 0.0
+	return result.position.y
 
 func _setup_bases() -> void:
 	var blue_base = $World/BlueBase/BlueBaseInst

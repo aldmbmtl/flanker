@@ -17,7 +17,7 @@ func setup(p_team: int) -> void:
 	mat.albedo_color = Color(0.0, 0.3, 1.0) if team == 0 else Color(1.0, 0.1, 0.1)
 	mesh.material_override = mat
 
-func take_damage(amount: float, _source: String) -> void:
+func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void:
 	if _dead:
 		return
 	health -= amount

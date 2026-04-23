@@ -23,6 +23,7 @@ var _lane_index     := 0
 var _dead           := false
 var _time           := 0.0
 var _strafe_phase   := 0.0
+var points_label: Label = null
 
 var waypoints: Array[Vector3] = []
 var current_waypoint := 0
@@ -246,13 +247,17 @@ func _fire_at(target: Node3D) -> void:
 
 	shoot_audio.play()
 
-func take_damage(amount: float, _source: String) -> void:
+func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void:
 	if _dead:
 		return
 	health -= amount
 	_update_hp_bar()
 	if health <= 0.0:
 		_die()
+		var awarding_team: int = _killer_team if _killer_team >= 0 else 0
+		var pts: int = 10 if _killer_team == -1 else 5
+		TeamData.add_points(awarding_team, pts)
+		_update_points_label()
 
 func _update_hp_bar() -> void:
 	if hp_bar_fg == null:
@@ -264,6 +269,13 @@ func _update_hp_bar() -> void:
 	fg_mat.albedo_color = Color(1.0 - pct, pct * 0.8, 0.05)
 	fg_mat.flags_unshaded = true
 	hp_bar_fg.material_override = fg_mat
+
+func _update_points_label() -> void:
+	if points_label == null:
+		return
+	var blue_pts: int = TeamData.get_points(0)
+	var red_pts: int = TeamData.get_points(1)
+	points_label.text = "BLUE: %d | RED: %d" % [blue_pts, red_pts]
 
 func _die() -> void:
 	if _dead:

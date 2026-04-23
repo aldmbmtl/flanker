@@ -10,18 +10,21 @@ make run       # launch + wait 8s + show logs
 make stop      # kill running instance
 make logs      # print /tmp/flankers.log
 ```
-Game binary: `/usr/bin/godot` (system install, 4.6.2). No `./godot` symlink in repo.
+Game binary: `/usr/bin/godot` (system install, 4.6.2). No `./godot` or `bin/godot` symlink in repo.
 
 ## Architecture
 
 ### Autoload
-`LaneData` is a **global singleton** (`project.godot` → `[autoload]`). All lane path data flows through it. Never hardcode lane positions in other scripts — always use `LaneData.get_lane_points(i)` / `get_lane_waypoints(i, team)`.
+- `LaneData` — global singleton, all lane path data. Use `LaneData.get_lane_points(i)` / `get_lane_waypoints(i, team)`
+- `TeamData` — global singleton, team points/currency tracking. Use `TeamData.get_points(team)` / `TeamData.add_points(team, amount)` / `TeamData.spend_points(team, amount)`
 
 ### Runtime-generated nodes
 Most geometry is built at runtime in `_ready()` — no pre-baked meshes:
 - `TerrainGenerator.gd` — procedural 200×200 mesh + `HeightMapShape3D` collision, new seed each launch
 - `LaneVisualizer.gd` — dirt ribbon meshes along lane curves
 - `LampPlacer.gd` — street lamp nodes placed along lane sample points
+- `TreePlacer.gd` — procedural trees along lane edges (11275 trees per run)
+- `Tower.gd` — towers have no prebaked meshes, setup() generates at runtime
 
 ### Scene tree (Main.tscn)
 ```
@@ -30,6 +33,7 @@ Main (Node, Main.gd)
     Terrain (StaticBody3D, TerrainGenerator.gd)
     LaneVisualizer (Node3D, LaneVisualizer.gd)
     LampPlacer (Node3D, LampPlacer.gd)
+    TreePlacer (Node3D, TreePlacer.gd)
     SunLight (DirectionalLight3D)
     WorldEnvironment → assets/night_environment.tres
     BlueBase / RedBase (Node3D → Base.tscn + OmniLight3D)
@@ -40,6 +44,8 @@ Main (Node, Main.gd)
   HUD (CanvasLayer)
     Crosshair (Control) ← hidden in RTS mode
       ReloadBar (ProgressBar)
+    PointsLabel (Label) ← team points display
+    Minimap (Control, Minimap.gd)
 ```
 
 ### Key data flows

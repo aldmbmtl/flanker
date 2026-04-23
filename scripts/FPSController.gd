@@ -73,6 +73,7 @@ var weapon_label: Label      = null
 var ammo_label: Label        = null
 var reload_prompt: Label     = null
 var stamina_bar: ProgressBar = null
+var points_label: Label    = null
 
 signal died
 signal weapon_changed(slot: int, weapon: WeaponData)
@@ -100,13 +101,16 @@ func set_active(is_active: bool) -> void:
 	if not _dead:
 		camera.current = is_active
 
-func take_damage(amount: float, _source: String) -> void:
+func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void:
 	if _dead:
 		return
 	hp = max(0.0, hp - amount)
 	_update_health_bar()
 	if hp <= 0.0:
 		_on_death()
+		var awarding_team: int = _killer_team if _killer_team >= 0 else 1
+		TeamData.add_points(awarding_team, 50)
+		_update_points_label()
 
 func respawn(spawn_pos: Vector3) -> void:
 	_dead        = false
@@ -482,3 +486,10 @@ func _update_stamina_bar() -> void:
 	if stamina_bar == null:
 		return
 	stamina_bar.value = (_stamina / MAX_STAMINA) * 100.0
+
+func _update_points_label() -> void:
+	if points_label == null:
+		return
+	var blue_pts: int = TeamData.get_points(0)
+	var red_pts: int = TeamData.get_points(1)
+	points_label.text = "BLUE: %d | RED: %d" % [blue_pts, red_pts]

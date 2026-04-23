@@ -48,7 +48,7 @@ func _process(delta: float) -> void:
 	if result.size() > 0:
 		var hit: Object = result.collider
 		if _should_damage(hit):
-			hit.take_damage(damage, source)
+			hit.take_damage(damage, source, shooter_team)
 		queue_free()
 		return
 

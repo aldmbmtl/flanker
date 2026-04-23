@@ -147,30 +147,39 @@ Each run is **procedurally seeded** — the map is different every game:
 ```
 flanker/
 ├── Makefile
-├── project.godot          # input actions, autoload, renderer config
+├── project.godot          # input actions, autoload (LaneData, TeamData), renderer config
 ├── assets/
-│   └── night_environment.tres   # dusk sky, fog, glow settings
+│   ├── night_environment.tres   # dusk sky, fog, glow settings
+│   ├── kenney_pirate-kit/       # 3D models (optional)
+│   └── tower-defense-kit/      # tower models (optional)
 ├── scenes/
 │   ├── Main.tscn          # root scene — all nodes wired here
 │   ├── FPSPlayer.tscn
 │   ├── Minion.tscn
 │   ├── Bullet.tscn
 │   ├── Tower.tscn
-│   └── Base.tscn
+│   ├── Base.tscn
+│   └── WeaponPickup.tscn
 └── scripts/
     ├── Main.gd            # game manager, mode switching, wave announcements
     ├── LaneData.gd        # autoload singleton — Bézier curves, waypoints
+    ├── TeamData.gd        # autoload singleton — team points tracking
     ├── TerrainGenerator.gd  # procedural mesh, collision, biomes, peaks, plateaus
-    ├── LaneVisualizer.gd  # dirt ribbon meshes along lanes
-    ├── LampPlacer.gd      # hanging street lamps along lane edges
-    ├── FPSController.gd   # player movement, shoot, sprint, crouch, zoom, reload
-    ├── RTSController.gd   # top-down camera, tower placement
-    ├── MinionAI.gd        # pathfinding, strafing, ranged shooting, separation
-    ├── MinionSpawner.gd   # wave timer, escalating spawn counts
-    ├── Bullet.gd          # projectile physics, raycast collision, friendly fire
-    ├── TowerAI.gd         # auto-attack enemy minions in range
-    ├── BuildSystem.gd     # RTS tower placement logic
-    └── Base.gd            # base HP, damage, win condition
+    ├── LaneVisualizer.gd    # dirt ribbon meshes along lanes
+    ├── LampPlacer.gd       # hanging street lamps along lane edges
+    ├── TreePlacer.gd       # procedural trees along lane edges
+    ├── FPSController.gd     # player movement, shoot, sprint, crouch, zoom, reload
+    ├── RTSController.gd     # top-down camera, tower placement
+    ├── MinionAI.gd         # pathfinding, strafing, ranged shooting, separation
+    ├── MinionSpawner.gd     # wave timer, escalating spawn counts
+    ├── Bullet.gd            # projectile physics, raycast collision, friendly fire
+    ├── TowerAI.gd           # auto-attack enemy minions in range
+    ├── Tower.gd            # tower setup, state machine
+    ├── BuildSystem.gd       # RTS tower placement logic
+    ├── Base.gd              # base HP, damage, win condition
+    ├── WeaponData.gd        # weapon definitions for pickups
+    ├── WeaponPickup.gd      # weapon pickup interaction
+    └── Minimap.gd           # RTS minimap rendering
 ```
 
 ---
