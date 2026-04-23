@@ -34,6 +34,9 @@ var _respawn_timer: float = 0.0
 @onready var crosshair:          Control         = $HUD/Crosshair
 @onready var respawn_label:      Label           = $HUD/RespawnLabel
 @onready var weapon_label:       Label           = $HUD/WeaponLabel
+@onready var ammo_label:         Label           = $HUD/AmmoLabel
+@onready var reload_prompt:      Label           = $HUD/ReloadPrompt
+@onready var minimap:            Control         = $HUD/Minimap
 @onready var audio_mode_switch:  AudioStreamPlayer = $AudioModeSwitch
 @onready var audio_wave:         AudioStreamPlayer = $AudioWave
 @onready var audio_respawn:      AudioStreamPlayer = $AudioRespawn
@@ -53,9 +56,12 @@ func _ready() -> void:
 	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
 	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
 	# Wire HUD refs into FPS controller
-	fps_player.reload_bar  = $HUD/Crosshair/ReloadBar
-	fps_player.health_bar  = $HUD/HealthBar
-	fps_player.weapon_label = weapon_label
+	fps_player.reload_bar    = $HUD/Crosshair/ReloadBar
+	fps_player.health_bar    = $HUD/HealthBar
+	fps_player.weapon_label  = weapon_label
+	fps_player.ammo_label    = ammo_label
+	fps_player.reload_prompt = reload_prompt
+	fps_player.stamina_bar  = $HUD/StaminaBar
 	fps_player.connect("died", _on_player_died)
 	# Spawn weapon pickups after terrain has settled (deferred so LaneData is ready)
 	call_deferred("_spawn_weapon_pickups")
@@ -97,8 +103,13 @@ func _input(event: InputEvent) -> void:
 func _set_mode(is_fps: bool) -> void:
 	fps_mode = is_fps
 	fps_player.set_active(is_fps)
-	rts_camera.current = !is_fps
-	crosshair.visible  = is_fps
+	rts_camera.current  = !is_fps
+	crosshair.visible   = is_fps
+	minimap.visible     = is_fps
+	ammo_label.visible  = is_fps
+	$HUD/StaminaBar.visible = is_fps
+	if not is_fps and reload_prompt:
+		reload_prompt.visible = false
 	if is_fps:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		mode_label.text = "Mode: FPS  [Tab] to switch"
