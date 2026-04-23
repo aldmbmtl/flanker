@@ -26,6 +26,8 @@ const SNOW_LINE   := 13.0
 # Biome
 const BIOME_BLEND_X := 10.0
 
+var secret_paths_cache: Array = []
+
 func _ready() -> void:
 	var noise := FastNoiseLite.new()
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
@@ -45,6 +47,7 @@ func _ready() -> void:
 		lane_polylines.append(LaneData.get_lane_points(i))
 
 	var secret_paths: Array = _gen_secret_paths(seed_val)
+	secret_paths_cache = secret_paths
 	var plateaus: Array     = _gen_plateaus(seed_val, lane_polylines)
 	var peaks: Array        = _gen_peaks(seed_val, lane_polylines)
 
@@ -344,3 +347,6 @@ func _sample_bezier_2d(p0: Vector2, p1: Vector2, p2: Vector2, p3: Vector2, n: in
 			+ t*t*t        * p3
 		pts.append(pt)
 	return pts
+
+func get_secret_paths() -> Array:
+	return secret_paths_cache

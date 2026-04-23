@@ -40,11 +40,33 @@ var _anim: AnimationPlayer = null
 
 const BulletScene := preload("res://scenes/Bullet.tscn")
 
+const BLUE_MODEL_PATH := "res://assets/kenney_blocky-characters/Models/GLB format/character-e.glb"
+const RED_MODEL_PATH  := "res://assets/kenney_blocky-characters/Models/GLB format/character-b.glb"
+
 func _ready() -> void:
 	add_to_group("minions")
 	call_deferred("_init_visuals")
 
 func _init_visuals() -> void:
+	# Get character nodes from scene tree
+	char_blue = $CharacterBlue
+	char_red  = $CharacterRed
+	
+	# Load and add models at runtime
+	var blue_scene: PackedScene = load(BLUE_MODEL_PATH)
+	if blue_scene:
+		var blue_model: Node = blue_scene.instantiate()
+		char_blue.add_child(blue_model)
+		blue_model.scale = Vector3(0.667, 0.667, 0.667)
+		blue_model.rotate_y(PI)
+	
+	var red_scene: PackedScene = load(RED_MODEL_PATH)
+	if red_scene:
+		var red_model: Node = red_scene.instantiate()
+		char_red.add_child(red_model)
+		red_model.scale = Vector3(0.667, 0.667, 0.667)
+		red_model.rotate_y(PI)
+	
 	# Show the correct character body for this team
 	char_blue.visible = (team == 0)
 	char_red.visible  = (team == 1)

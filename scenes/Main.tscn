@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3 uid="uid://main"]
+[gd_scene load_steps=11 format=3 uid="uid://main"]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/FPSPlayer.tscn" id="2"]
@@ -9,6 +9,7 @@
 [ext_resource type="Script" path="res://scripts/TerrainGenerator.gd" id="7"]
 [ext_resource type="Script" path="res://scripts/LaneVisualizer.gd" id="8"]
 [ext_resource type="Script" path="res://scripts/LampPlacer.gd" id="9"]
+[ext_resource type="Script" path="res://scripts/TreePlacer.gd" id="11"]
 [ext_resource type="Environment" path="res://assets/night_environment.tres" id="10"]
 
 [node name="Main" type="Node"]
@@ -25,6 +26,9 @@ script = ExtResource("8")
 
 [node name="LampPlacer" type="Node3D" parent="World"]
 script = ExtResource("9")
+
+[node name="TreePlacer" type="Node3D" parent="World"]
+script = ExtResource("11")
 
 ; ---- Lighting ----
 [node name="SunLight" type="DirectionalLight3D" parent="World"]

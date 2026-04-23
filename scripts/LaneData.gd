@@ -21,15 +21,33 @@ const LANE_CONTROLS := [
 
 # Cache
 var _lane_points: Array = []  # Array of Array[Vector2]
+var _secret_paths: Array = []  # Array of Array[Vector2]
 
 func _ready() -> void:
 	for i in range(3):
 		var ctrl: Array = LANE_CONTROLS[i]
 		_lane_points.append(_sample_bezier(ctrl[0], ctrl[1], ctrl[2], ctrl[3], SAMPLE_COUNT))
 
+# Called by Main.gd after terrain generates secret paths
+func set_secret_paths(paths: Array) -> void:
+	_secret_paths = paths
+
 # Returns Array[Vector2] of XZ world positions along lane (blue→red direction)
 func get_lane_points(lane_i: int) -> Array:
 	return _lane_points[lane_i]
+
+# Returns secret path points for path_index (0-5), or empty array if invalid
+func get_secret_path_points(path_index: int) -> Array:
+	if path_index < 0 or path_index >= _secret_paths.size():
+		return []
+	return _secret_paths[path_index]
+
+# Returns all secret path points flattened
+func get_all_secret_path_points() -> Array:
+	var all: Array = []
+	for path in _secret_paths:
+		all.append_array(path)
+	return all
 
 # Returns Array[Vector3] waypoints for a minion to follow
 # team 0 = blue (south→north, index order), team 1 = red (north→south, reversed)

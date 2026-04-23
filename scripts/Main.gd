@@ -59,6 +59,14 @@ func _ready() -> void:
 	fps_player.connect("died", _on_player_died)
 	# Spawn weapon pickups after terrain has settled (deferred so LaneData is ready)
 	call_deferred("_spawn_weapon_pickups")
+	# Pass secret paths to LaneData after terrain generates
+	call_deferred("_setup_lane_data")
+
+func _setup_lane_data() -> void:
+	var terrain: Node = $World/Terrain
+	if terrain and terrain.has_method("get_secret_paths"):
+		var secret_paths: Array = terrain.get_secret_paths()
+		LaneData.set_secret_paths(secret_paths)
 
 func _process(delta: float) -> void:
 	if _respawning:

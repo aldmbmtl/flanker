@@ -1,8 +1,6 @@
-[gd_scene load_steps=7 format=3 uid="uid://minion"]
+[gd_scene load_steps=6 format=3 uid="uid://minion"]
 
 [ext_resource type="Script" path="res://scripts/MinionAI.gd" id="1"]
-[ext_resource type="PackedScene" path="res://assets/kenney_blocky-characters/Models/GLB format/character-b.glb" id="2"]
-[ext_resource type="PackedScene" path="res://assets/kenney_blocky-characters/Models/GLB format/character-e.glb" id="3"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
 height = 1.8
@@ -25,15 +23,12 @@ script = ExtResource("1")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.9, 0)
 visible = true
 
-[node name="CharacterModelBlue" type="Node3D" parent="CharacterBlue"]
-instance = ExtResource("2")
-
 [node name="CharacterRed" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.9, 0)
 visible = false
 
-[node name="CharacterModelRed" type="Node3D" parent="CharacterRed"]
-instance = ExtResource("3")
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CapsuleShape3D_1")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("CapsuleShape3D_1")
