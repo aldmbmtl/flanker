@@ -49,6 +49,22 @@ func _spawn_minion(team: int, lane_i: int) -> void:
 	var minion: CharacterBody3D = _minion_scene.instantiate()
 	var waypts: Array[Vector3] = LaneData.get_lane_waypoints(lane_i, team)
 	minion.set("team", team)
-	minion.position = Vector3(waypts[0].x, 1.0, waypts[0].z)
+	var spawn_pos := Vector3(waypts[0].x, 0.0, waypts[0].z)
+	spawn_pos.y = _get_terrain_height(spawn_pos) + 1.0
+	minion.position = spawn_pos
 	get_tree().root.get_node("Main").add_child(minion)
 	minion.setup(team, waypts, lane_i)
+
+func _get_terrain_height(pos: Vector3) -> float:
+	var space: PhysicsDirectSpaceState3D = get_tree().root.get_world_3d().direct_space_state
+	if space == null:
+		return 0.0
+	var from: Vector3 = Vector3(pos.x, 50.0, pos.z)
+	var to: Vector3 = Vector3(pos.x, -10.0, pos.z)
+	var query := PhysicsRayQueryParameters3D.create(from, to)
+	query.collide_with_bodies = true
+	query.collision_mask = 1
+	var result: Dictionary = space.intersect_ray(query)
+	if result.is_empty():
+		return 0.0
+	return result.position.y
