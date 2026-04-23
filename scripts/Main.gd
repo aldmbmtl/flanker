@@ -17,6 +17,7 @@ var _respawning := false
 @onready var wave_announce_label: Label = $HUD/WaveAnnounceLabel
 @onready var crosshair: Control = $HUD/Crosshair
 @onready var respawn_label: Label = $HUD/RespawnLabel
+@onready var minimap: Control = $HUD/Minimap
 
 func _ready() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
@@ -60,6 +61,7 @@ func _set_mode(is_fps: bool) -> void:
 	fps_player.set_active(is_fps)
 	rts_camera.current = !is_fps
 	crosshair.visible = is_fps
+	minimap.visible = is_fps
 	if is_fps:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		mode_label.text = "Mode: FPS  [Tab] to switch"
