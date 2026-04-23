@@ -2,3 +2,4 @@
 .idea
 .ai
 .godot
+*.import
