@@ -1,0 +1,46 @@
+[gd_scene load_steps=7 format=3 uid="uid://minion"]
+
+[ext_resource type="Script" path="res://scripts/MinionAI.gd" id="1"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_1"]
+height = 1.8
+radius = 0.35
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
+height = 1.8
+radius = 0.35
+
+[sub_resource type="BoxMesh" id="BoxMesh_bg"]
+size = Vector3(1.0, 0.12, 0.04)
+
+[sub_resource type="BoxMesh" id="BoxMesh_fg"]
+size = Vector3(1.0, 0.12, 0.04)
+
+[sub_resource type="StandardMaterial3D" id="Mat_bg"]
+albedo_color = Color(0.15, 0.15, 0.15, 1)
+flags_unshaded = true
+
+[sub_resource type="StandardMaterial3D" id="Mat_fg"]
+albedo_color = Color(0.0, 0.8, 0.05, 1)
+flags_unshaded = true
+
+[node name="Minion" type="CharacterBody3D"]
+script = ExtResource("1")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+mesh = SubResource("CapsuleMesh_1")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CapsuleShape3D_1")
+
+[node name="HPBar" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
+
+[node name="Background" type="MeshInstance3D" parent="HPBar"]
+mesh = SubResource("BoxMesh_bg")
+surface_material_override/0 = SubResource("Mat_bg")
+
+[node name="Foreground" type="MeshInstance3D" parent="HPBar"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.02)
+mesh = SubResource("BoxMesh_fg")
+surface_material_override/0 = SubResource("Mat_fg")

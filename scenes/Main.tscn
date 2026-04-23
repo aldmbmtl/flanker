@@ -1,0 +1,231 @@
+[gd_scene load_steps=10 format=3 uid="uid://main"]
+
+[ext_resource type="Script" path="res://scripts/Main.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/FPSPlayer.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/Base.tscn" id="3"]
+[ext_resource type="Script" path="res://scripts/RTSController.gd" id="4"]
+[ext_resource type="Script" path="res://scripts/MinionSpawner.gd" id="5"]
+[ext_resource type="Script" path="res://scripts/BuildSystem.gd" id="6"]
+[ext_resource type="Script" path="res://scripts/TerrainGenerator.gd" id="7"]
+[ext_resource type="Script" path="res://scripts/LaneVisualizer.gd" id="8"]
+[ext_resource type="Script" path="res://scripts/LampPlacer.gd" id="9"]
+[ext_resource type="Environment" path="res://assets/night_environment.tres" id="10"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1")
+
+; ---- World ----
+[node name="World" type="Node3D" parent="."]
+
+[node name="Terrain" type="StaticBody3D" parent="World"]
+script = ExtResource("7")
+
+[node name="LaneVisualizer" type="Node3D" parent="World"]
+script = ExtResource("8")
+
+[node name="LampPlacer" type="Node3D" parent="World"]
+script = ExtResource("9")
+
+; ---- Lighting ----
+[node name="SunLight" type="DirectionalLight3D" parent="World"]
+transform = Transform3D(0.98, -0.08, 0.18, 0, 0.91, 0.41, -0.20, -0.40, 0.89, 0, 40, 0)
+light_color = Color(1.0, 0.45, 0.18, 1)
+light_energy = 0.55
+shadow_enabled = true
+shadow_blur = 2.0
+directional_shadow_mode = 2
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="World"]
+environment = ExtResource("10")
+
+; ---- Bases ----
+[node name="BlueBase" type="Node3D" parent="World"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 84)
+[node name="BlueBaseInst" parent="World/BlueBase" instance=ExtResource("3")]
+[node name="BlueBaseLight" type="OmniLight3D" parent="World/BlueBase"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
+light_color = Color(0.2, 0.45, 1.0, 1)
+light_energy = 3.5
+omni_range = 22.0
+shadow_enabled = false
+
+[node name="RedBase" type="Node3D" parent="World"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -84)
+[node name="RedBaseInst" parent="World/RedBase" instance=ExtResource("3")]
+[node name="RedBaseLight" type="OmniLight3D" parent="World/RedBase"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
+light_color = Color(1.0, 0.2, 0.2, 1)
+light_energy = 3.5
+omni_range = 22.0
+shadow_enabled = false
+
+; ---- FPS Player ----
+[node name="FPSPlayer" parent="." instance=ExtResource("2")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 70)
+
+; ---- RTS Camera ----
+[node name="RTSCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 100, 0)
+projection = 1
+size = 80.0
+current = false
+script = ExtResource("4")
+
+; ---- Systems ----
+[node name="MinionSpawner" type="Node" parent="."]
+script = ExtResource("5")
+
+[node name="BuildSystem" type="Node" parent="."]
+script = ExtResource("6")
+
+; ---- HUD ----
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="ModeLabel" type="Label" parent="HUD"]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 0.0
+offset_left = -300.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = 40.0
+text = "Mode: FPS  [Tab] to switch"
+
+[node name="GameOverLabel" type="Label" parent="HUD"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -60.0
+offset_right = 200.0
+offset_bottom = 60.0
+text = ""
+visible = false
+horizontal_alignment = 1
+vertical_alignment = 1
+add_theme_font_size_override = 36
+
+[node name="WaveInfoLabel" type="Label" parent="HUD"]
+anchors_preset = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 400.0
+offset_bottom = 34.0
+text = "First wave in: 30s"
+
+[node name="WaveAnnounceLabel" type="Label" parent="HUD"]
+anchors_preset = 5
+anchor_left = 0.5
+anchor_top = 0.0
+anchor_right = 0.5
+anchor_bottom = 0.0
+offset_left = -160.0
+offset_top = 80.0
+offset_right = 160.0
+offset_bottom = 130.0
+text = "— WAVE 1 —"
+visible = false
+horizontal_alignment = 1
+add_theme_font_size_override = 42
+
+[node name="Crosshair" type="Control" parent="HUD"]
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Top" type="ColorRect" parent="HUD/Crosshair"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -1.0
+offset_top = -14.0
+offset_right = 1.0
+offset_bottom = -4.0
+color = Color(1, 1, 1, 0.85)
+mouse_filter = 2
+
+[node name="Bottom" type="ColorRect" parent="HUD/Crosshair"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -1.0
+offset_top = 4.0
+offset_right = 1.0
+offset_bottom = 14.0
+color = Color(1, 1, 1, 0.85)
+mouse_filter = 2
+
+[node name="Left" type="ColorRect" parent="HUD/Crosshair"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -14.0
+offset_top = -1.0
+offset_right = -4.0
+offset_bottom = 1.0
+color = Color(1, 1, 1, 0.85)
+mouse_filter = 2
+
+[node name="Right" type="ColorRect" parent="HUD/Crosshair"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = 4.0
+offset_top = -1.0
+offset_right = 14.0
+offset_bottom = 1.0
+color = Color(1, 1, 1, 0.85)
+mouse_filter = 2
+
+[node name="ReloadBar" type="ProgressBar" parent="HUD/Crosshair"]
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -40.0
+offset_top = 18.0
+offset_right = 40.0
+offset_bottom = 28.0
+min_value = 0.0
+max_value = 100.0
+value = 0.0
+visible = false
+show_percentage = false
+
+[node name="HealthBar" type="ProgressBar" parent="HUD"]
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 0.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = -30.0
+offset_right = 210.0
+offset_bottom = -10.0
+min_value = 0.0
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="RespawnLabel" type="Label" parent="HUD"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -120.0
+offset_top = 40.0
+offset_right = 120.0
+offset_bottom = 70.0
+text = ""
+horizontal_alignment = 1
+visible = false
