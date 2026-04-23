@@ -1,8 +1,13 @@
 extends CharacterBody3D
 
-const SPEED             := 8.0
-const SPRINT_SPEED      := 14.0
-const CROUCH_SPEED      := 4.0
+const SPEED             := 6.4
+const SPRINT_SPEED      := 9.0
+const CROUCH_SPEED      := 3.2
+
+const MAX_STAMINA            := 10.0
+const STAMINA_DRAIN_RATE    := 1.0   # units/sec while sprinting
+const STAMINA_REGEN_RATE    := 1.0   # units/sec while resting
+const STAMINA_EXHAUST_CD    := 5.0   # seconds before regen starts after empty
 const JUMP_VELOCITY     := 6.0
 const MOUSE_SENSITIVITY := 0.003
 const GRAVITY           := 20.0
@@ -36,6 +41,9 @@ var _reload_tween: Tween = null
 var _kick_tween: Tween = null
 var _bob_time: float = 0.0
 var _kicking: bool = false
+var _stamina: float = MAX_STAMINA
+var _stamina_exhausted: bool = false
+var _exhaust_timer: float = 0.0
 
 # Reload animation transforms — WEAPON_REST_* matches WeaponModel scene offset
 const WEAPON_REST_POS   := Vector3(0.25, -0.2, -0.4)
@@ -64,6 +72,7 @@ var health_bar: ProgressBar  = null
 var weapon_label: Label      = null
 var ammo_label: Label        = null
 var reload_prompt: Label     = null
+var stamina_bar: ProgressBar = null
 
 signal died
 signal weapon_changed(slot: int, weapon: WeaponData)
@@ -299,11 +308,29 @@ func _physics_process(delta: float) -> void:
 		if not _reloading:
 			weapon_model.position = weapon_model.position.lerp(WEAPON_REST_POS, BOB_LERP * delta)
 
+	# Stamina
+	var want_sprint: bool = Input.is_action_pressed("sprint")
+	if want_sprint and _stamina > 0.0:
+		_stamina = max(0.0, _stamina - STAMINA_DRAIN_RATE * delta)
+		_stamina_exhausted = false
+		_exhaust_timer = 0.0
+	elif not want_sprint and _stamina < MAX_STAMINA:
+		if _stamina_exhausted:
+			_exhaust_timer -= delta
+			if _exhaust_timer <= 0.0:
+				_stamina_exhausted = false
+		else:
+			_stamina = min(MAX_STAMINA, _stamina + STAMINA_REGEN_RATE * delta)
+	elif _stamina <= 0.0 and not _stamina_exhausted:
+		_stamina_exhausted = true
+		_exhaust_timer = STAMINA_EXHAUST_CD
+	_update_stamina_bar()
+
 	# Movement
 	var cur_speed: float = SPEED
 	if _crouching:
 		cur_speed = CROUCH_SPEED
-	elif Input.is_action_pressed("sprint"):
+	elif want_sprint and _stamina > 0.0 and not _stamina_exhausted:
 		cur_speed = SPRINT_SPEED
 
 	var dir := Vector3.ZERO
@@ -450,3 +477,8 @@ func _update_reload_bar() -> void:
 		return
 	reload_bar.visible = true
 	reload_bar.value   = (1.0 - _reload_timer / w.reload_time) * 100.0
+
+func _update_stamina_bar() -> void:
+	if stamina_bar == null:
+		return
+	stamina_bar.value = (_stamina / MAX_STAMINA) * 100.0

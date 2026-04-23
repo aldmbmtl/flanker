@@ -61,6 +61,7 @@ func _ready() -> void:
 	fps_player.weapon_label  = weapon_label
 	fps_player.ammo_label    = ammo_label
 	fps_player.reload_prompt = reload_prompt
+	fps_player.stamina_bar  = $HUD/StaminaBar
 	fps_player.connect("died", _on_player_died)
 	# Spawn weapon pickups after terrain has settled (deferred so LaneData is ready)
 	call_deferred("_spawn_weapon_pickups")
@@ -98,6 +99,7 @@ func _set_mode(is_fps: bool) -> void:
 	crosshair.visible   = is_fps
 	minimap.visible     = is_fps
 	ammo_label.visible  = is_fps
+	$HUD/StaminaBar.visible = is_fps
 	if not is_fps and reload_prompt:
 		reload_prompt.visible = false
 	if is_fps:
