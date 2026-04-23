@@ -1,5 +1,5 @@
 GODOT   := godot
-PROJECT := /home/aldmbmtl/devel/flanker
+PROJECT := $(shell pwd)
 LOG     := /tmp/flankers.log
 
 .PHONY: run stop restart logs clean-symlink
