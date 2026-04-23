@@ -1,0 +1,96 @@
+[gd_scene load_steps=8 format=3 uid="uid://start_menu"]
+
+[ext_resource type="Script" path="res://scripts/MenuCamera.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/StartMenu.gd" id="2"]
+[ext_resource type="Environment" path="res://assets/menu_environment.tres" id="3"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_title"]
+albedo_color = Color(1.0, 0.3, 0.1, 1)
+emission_enabled = true
+emission = Color(1.0, 0.3, 0.1, 1)
+emission_energy_multiplier = 1.5
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn"]
+albedo_color = Color(0.15, 0.15, 0.15, 0.85)
+
+[sub_resource type="StandardMaterial3D" id="Mat_btn_hover"]
+albedo_color = Color(0.3, 0.3, 0.3, 0.95)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_normal"]
+bg_color = Color(0.12, 0.12, 0.12, 0.9)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hover"]
+bg_color = Color(0.25, 0.25, 0.25, 0.95)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground"]
+size = Vector3(200, 1, 200)
+
+[sub_resource type="StandardMaterial3D" id="Mat_ground"]
+albedo_color = Color(0.05, 0.08, 0.05, 1)
+
+[node name="StartMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2")
+
+[node name="MenuCamera" type="Camera3D" parent="."]
+current = true
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866, 0, -0.866, 0.5, 0, 60, 100)
+fov = 90.0
+script = ExtResource("1")
+environment = ExtResource("3")
+
+[node name="World3D" type="Node3D" parent="MenuCamera"]
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -180.0
+offset_top = -120.0
+offset_right = 180.0
+offset_bottom = 180.0
+grow_horizontal = 2
+grow_vertical = 2
+alignment = 1
+
+[node name="Title" type="Label" parent="VBox"]
+layout_mode = 2
+text = "FLANKERS"
+horizontal_alignment = 1
+add_theme_color_override("font_color", Color(1.0, 0.35, 0.1, 1))
+add_theme_font_size_override("font_size", 100)
+
+[node name="Spacer1" type="Control" parent="VBox"]
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+
+[node name="StartButton" type="Button" parent="VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 60)
+text = "Start War"
+
+[node name="QuitButton" type="Button" parent="VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "Quit"
+
+[node name="Spacer2" type="Control" parent="VBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+
+[node name="Subtitle" type="Label" parent="VBox"]
+layout_mode = 2
+text = "Esc to pause"
+horizontal_alignment = 1
+add_theme_font_size_override = 18
+
+[connection signal="pressed" from="VBox/StartButton" to="." method="_on_start_pressed"]
+[connection signal="pressed" from="VBox/QuitButton" to="." method="_on_quit_pressed"]

@@ -4,6 +4,10 @@ const RESPAWN_DELAY := 5.0
 const BLUE_SPAWN    := Vector3(0.0, 10.0, 84.0)
 const RED_SPAWN     := Vector3(0.0, 10.0, -84.0)
 
+enum GameState { MENU, PLAYING, PAUSED }
+var game_state: GameState = GameState.MENU
+var _is_singleplayer := true
+
 # Weapon pickup spawns: 3 lane midpoints + 6 mountain positions
 const MOUNTAIN_PICKUP_POSITIONS: Array = [
 	Vector3(-60.0, 6.0, 20.0),
@@ -51,36 +55,25 @@ func _enter_tree() -> void:
 
 const WeaponPickupScene := preload("res://scenes/WeaponPickup.tscn")
 const PickupSoundPath   := "res://assets/kenney_ui-audio/Audio/switch1.ogg"
+const StartMenuScene  := preload("res://scenes/StartMenu.tscn")
+const PauseMenuScene  := preload("res://scenes/PauseMenu.tscn")
+
+var _start_menu: Control
+var _pause_menu: Control
 
 func _ready() -> void:
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	_setup_bases()
-	_set_mode(true)
-	get_tree().set_auto_accept_quit(true)
-	wave_announce_label.visible = false
-	wave_info_label.text = "Wave: 0 | First wave in: 30s"
-	# Wire audio streams
-	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
-	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
-	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
-	# Wire HUD refs into FPS controller
-	fps_player.reload_bar    = $HUD/Crosshair/ReloadBar
-	fps_player.health_bar    = $HUD/HealthBar
-	fps_player.weapon_label  = weapon_label
-	fps_player.ammo_label    = ammo_label
-	fps_player.reload_prompt = reload_prompt
-	fps_player.stamina_bar  = $HUD/StaminaBar
-	fps_player.points_label = points_label
-	fps_player.connect("died", _on_player_died)
-	# Set player spawn position based on team (z=+84 blue, z=-84 red)
-	var spawn_z: float = 84.0 if fps_player.player_team == 0 else -84.0
-	fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
-	# Spawn weapon pickups after terrain has settled (deferred so LaneData is ready)
-	call_deferred("_spawn_weapon_pickups")
-	# Pass secret paths to LaneData after terrain generates
-	call_deferred("_setup_lane_data")
-	# Spawn preset towers near lane starts (both teams)
-	call_deferred("_spawn_preset_towers")
+	# Instantiate start menu
+	_start_menu = StartMenuScene.instantiate()
+	add_child(_start_menu)
+	_start_menu.connect("start_game", _on_start_game)
+	_start_menu.connect("quit_game", _on_quit_from_menu)
+
+	# Instantiate pause menu (hidden initially)
+	_pause_menu = PauseMenuScene.instantiate()
+	add_child(_pause_menu)
+
+	# Game starts in menu state - hide HUD
+	_HUD_set_visible(false)
 
 func _setup_lane_data() -> void:
 	var terrain: Node = $World/Terrain
@@ -160,12 +153,88 @@ func _setup_bases() -> void:
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_ESCAPE or event.physical_keycode == KEY_ESCAPE:
-			get_tree().quit()
+			match game_state:
+				GameState.MENU:
+					_on_quit_from_menu()
+				GameState.PLAYING:
+					if _is_singleplayer:
+						toggle_pause(true)
+				GameState.PAUSED:
+					if _is_singleplayer:
+						toggle_pause(false)
 			return
 		if event.keycode == KEY_TAB or event.physical_keycode == KEY_TAB:
-			if not game_over and not _respawning:
+			if game_state == GameState.PLAYING and not game_over and not _respawning:
 				_set_mode(!fps_mode)
 				audio_mode_switch.play()
+
+func _on_start_game() -> void:
+	game_state = GameState.PLAYING
+	_start_menu.visible = false
+	# Hide the menu's 3D world to prevent any rendering issues
+	var menu_cam: Node = _start_menu.get_node_or_null("MenuCamera")
+	if menu_cam:
+		menu_cam.visible = false
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	_HUD_set_visible(true)
+	_setup_bases()
+	_set_mode(true)
+	get_tree().set_auto_accept_quit(true)
+	wave_announce_label.visible = false
+	wave_info_label.text = "Wave: 0 | First wave in: 30s"
+	# Wire audio streams
+	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
+	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
+	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
+	# Wire HUD refs into FPS controller
+	fps_player.reload_bar    = $HUD/Crosshair/ReloadBar
+	fps_player.health_bar    = $HUD/HealthBar
+	fps_player.weapon_label  = weapon_label
+	fps_player.ammo_label    = ammo_label
+	fps_player.reload_prompt = reload_prompt
+	fps_player.stamina_bar  = $HUD/StaminaBar
+	fps_player.points_label = points_label
+	fps_player.connect("died", _on_player_died)
+	# Set player spawn position based on team (z=+84 blue, z=-84 red)
+	var spawn_z: float = 84.0 if fps_player.player_team == 0 else -84.0
+	fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
+	# Spawn weapon pickups after terrain has settled
+	call_deferred("_spawn_weapon_pickups")
+	call_deferred("_setup_lane_data")
+	call_deferred("_spawn_preset_towers")
+
+func _on_resume_game() -> void:
+	toggle_pause(false)
+
+func _on_quit_from_menu() -> void:
+	get_tree().quit()
+
+func toggle_pause(paused: bool) -> void:
+	if paused:
+		game_state = GameState.PAUSED
+		_pause_menu.visible = true
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	else:
+		game_state = GameState.PLAYING
+		_pause_menu.visible = false
+		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+		fps_player.set_active(true)
+		rts_camera.current = false
+		fps_mode = true
+		mode_label.text = "Mode: FPS  [Tab] to switch"
+
+func _HUD_set_visible(visible: bool) -> void:
+	mode_label.visible = visible
+	game_over_label.visible = visible and game_over
+	wave_info_label.visible = visible
+	crosshair.visible = visible and fps_mode
+	minimap.visible = visible and fps_mode
+	ammo_label.visible = visible and fps_mode
+	$HUD/StaminaBar.visible = visible and fps_mode
+	reload_prompt.visible = visible and fps_mode
+	weapon_label.visible = visible
+	points_label.visible = visible
+	respawn_label.visible = visible and _respawning
 
 func _set_mode(is_fps: bool) -> void:
 	fps_mode = is_fps

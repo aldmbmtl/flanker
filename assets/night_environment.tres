@@ -1,12 +1,12 @@
 [gd_resource type="Environment" format=3]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
-sky_top_color = Color(0.10, 0.12, 0.28, 1)
-sky_horizon_color = Color(0.72, 0.32, 0.12, 1)
+sky_top_color = Color(0.10, 0.12, 0.18, 1)
+sky_horizon_color = Color(0.12, 0.14, 0.22, 1)
 sky_curve = 0.15
 sky_energy_multiplier = 1.0
 ground_bottom_color = Color(0.06, 0.05, 0.08, 1)
-ground_horizon_color = Color(0.38, 0.18, 0.10, 1)
+ground_horizon_color = Color(0.10, 0.12, 0.18, 1)
 ground_curve = 0.2
 sun_angle_max = 2.0
 sun_curve = 0.12
@@ -23,9 +23,9 @@ ambient_light_color = Color(0.6, 0.45, 0.5, 1)
 ambient_light_sky_contribution = 1.0
 ambient_light_energy = 0.65
 fog_enabled = true
-fog_light_color = Color(0.38, 0.18, 0.10, 1)
-fog_light_energy = 1.2
-fog_density = 0.003
+fog_light_color = Color(0.15, 0.12, 0.1, 1)
+fog_light_energy = 0.8
+fog_density = 0.002
 fog_aerial_perspective = 0.5
 glow_enabled = true
 glow_levels/1 = true

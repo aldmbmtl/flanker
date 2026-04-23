@@ -1,0 +1,16 @@
+[gd_resource type="Environment" format=3]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMenu"]
+sky_top_color = Color(0.05, 0.05, 0.1, 1)
+sky_horizon_color = Color(0.1, 0.08, 0.15, 1)
+sky_curve = 0.15
+
+[sub_resource type="Sky" id="SkyMenu"]
+sky_material = SubResource("ProceduralSkyMenu")
+
+[resource]
+background_mode = 2
+sky = SubResource("SkyMenu")
+ambient_light_source = 3
+ambient_light_color = Color(0.4, 0.35, 0.5, 1)
+ambient_light_energy = 0.5
