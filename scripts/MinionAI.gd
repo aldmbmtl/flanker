@@ -3,15 +3,18 @@ extends CharacterBody3D
 const GRAVITY          := 20.0
 const MAX_HEALTH       := 60.0
 const DETECT_RANGE     := 12.0
-const SHOOT_RANGE      := 10.0   # stop and fire within this distance
+const SHOOT_RANGE      := 10.0
 const SEPARATION_DIST  := 2.2
 const SEPARATION_FORCE := 6.0
 const BULLET_SPEED     := 120.0
 
-var team := 0
-var health := MAX_HEALTH
-var speed := 4.0
-var attack_range    := 2.5    # used only for base closing-in logic
+const MINION_SHOOT_SOUND := "res://assets/kenney_sci-fi-sounds/Audio/laserSmall_002.ogg"
+const MINION_DEATH_SOUND := "res://assets/kenney_sci-fi-sounds/Audio/impactMetal_000.ogg"
+
+var team    := 0
+var health  := MAX_HEALTH
+var speed   := 4.0
+var attack_range    := 2.5
 var attack_damage   := 8.0
 var attack_cooldown := 1.5
 var _attack_timer   := 0.0
@@ -24,12 +27,16 @@ var _strafe_phase   := 0.0
 var waypoints: Array[Vector3] = []
 var current_waypoint := 0
 
-@onready var mesh: MeshInstance3D      = $MeshInstance3D
-@onready var hp_bar_bg: MeshInstance3D = $HPBar/Background
-@onready var hp_bar_fg: MeshInstance3D = $HPBar/Foreground
+@onready var char_blue:  Node3D               = $CharacterBlue
+@onready var char_red:   Node3D               = $CharacterRed
+@onready var hp_bar_bg:  MeshInstance3D       = $HPBar/Background
+@onready var hp_bar_fg:  MeshInstance3D       = $HPBar/Foreground
+@onready var shoot_audio: AudioStreamPlayer3D = $ShootAudio
+@onready var death_audio: AudioStreamPlayer3D = $DeathAudio
 
-var _team_color: Color
 var _team_mat: StandardMaterial3D
+var _active_char: Node3D = null
+var _anim: AnimationPlayer = null
 
 const BulletScene := preload("res://scenes/Bullet.tscn")
 
@@ -38,16 +45,49 @@ func _ready() -> void:
 	call_deferred("_init_visuals")
 
 func _init_visuals() -> void:
-	_team_color = Color(0.2, 0.4, 1.0) if team == 0 else Color(1.0, 0.2, 0.2)
-	_team_mat = StandardMaterial3D.new()
-	_team_mat.albedo_color = _team_color
-	mesh.material_override = _team_mat
+	# Show the correct character body for this team
+	char_blue.visible = (team == 0)
+	char_red.visible  = (team == 1)
+	_active_char = char_blue if team == 0 else char_red
+
+	# Find the AnimationPlayer embedded in the GLB subtree
+	_anim = _find_anim_player(_active_char)
+
+	# Load audio streams
+	var shoot_stream: AudioStream = load(MINION_SHOOT_SOUND)
+	if shoot_stream:
+		shoot_audio.stream = shoot_stream
+	var death_stream: AudioStream = load(MINION_DEATH_SOUND)
+	if death_stream:
+		death_audio.stream = death_stream
+
+	_play_anim("idle")
 	_update_hp_bar()
 
+func _find_anim_player(root: Node) -> AnimationPlayer:
+	for child in root.get_children():
+		if child is AnimationPlayer:
+			return child
+		var found: AnimationPlayer = _find_anim_player(child)
+		if found:
+			return found
+	return null
+
+func _play_anim(anim_name: String) -> void:
+	if _anim == null:
+		return
+	if _anim.has_animation(anim_name):
+		if _anim.current_animation != anim_name:
+			_anim.play(anim_name)
+	elif _anim.has_animation("idle") and anim_name != "idle":
+		# Fallback to idle if requested anim doesn't exist
+		if _anim.current_animation != "idle":
+			_anim.play("idle")
+
 func setup(p_team: int, p_waypoints: Array[Vector3], p_lane: int) -> void:
-	team = p_team
-	waypoints = p_waypoints
-	_lane_index = p_lane
+	team          = p_team
+	waypoints     = p_waypoints
+	_lane_index   = p_lane
 	current_waypoint = 0
 	_strafe_phase = randf() * TAU
 
@@ -63,12 +103,13 @@ func _physics_process(delta: float) -> void:
 	_attack_timer -= delta
 	_target = _find_target()
 
+	var moving := false
+
 	if _target != null:
 		var dist: float = global_position.distance_to(_target.global_position)
 		var is_base: bool = _target.is_in_group("bases")
 
 		if dist <= attack_range and is_base:
-			# Close melee range for bases
 			_face(_target.global_position)
 			velocity.x = 0.0
 			velocity.z = 0.0
@@ -76,7 +117,6 @@ func _physics_process(delta: float) -> void:
 				_fire_at(_target)
 				_attack_timer = attack_cooldown
 		elif dist <= SHOOT_RANGE:
-			# Ranged shot — hold position and fire
 			_face(_target.global_position)
 			velocity.x = 0.0
 			velocity.z = 0.0
@@ -84,10 +124,17 @@ func _physics_process(delta: float) -> void:
 				_fire_at(_target)
 				_attack_timer = attack_cooldown
 		else:
-			# Approach with strafe
 			_approach_with_strafe(_target, delta)
+			moving = true
 	else:
 		_march(delta)
+		moving = velocity.length() > 0.5
+
+	# Drive walk/idle animation
+	if moving:
+		_play_anim("walk")
+	else:
+		_play_anim("idle")
 
 	_apply_separation()
 	move_and_slide()
@@ -159,10 +206,11 @@ func _find_target() -> Node3D:
 	return best
 
 func _fire_at(target: Node3D) -> void:
+	if not is_inside_tree() or not is_instance_valid(target) or not target.is_inside_tree():
+		return
 	var spawn_pos: Vector3 = global_position + Vector3(0.0, 0.8, 0.0)
 	var aim_pos: Vector3   = target.global_position + Vector3(0.0, 0.5, 0.0)
 	var dir: Vector3       = (aim_pos - spawn_pos).normalized()
-	# Slight upward arc to compensate gravity at mid-range
 	dir.y += 0.04
 	dir = dir.normalized()
 
@@ -173,15 +221,8 @@ func _fire_at(target: Node3D) -> void:
 	bullet.velocity      = dir * BULLET_SPEED
 	bullet.global_position = spawn_pos
 	get_tree().root.get_child(0).add_child(bullet)
-	_flash()
 
-func _flash() -> void:
-	var flash_mat := StandardMaterial3D.new()
-	flash_mat.albedo_color = Color(1, 1, 1)
-	mesh.material_override = flash_mat
-	await get_tree().create_timer(0.08).timeout
-	if not _dead:
-		mesh.material_override = _team_mat
+	shoot_audio.play()
 
 func take_damage(amount: float, _source: String) -> void:
 	if _dead:
@@ -207,6 +248,9 @@ func _die() -> void:
 		return
 	_dead = true
 	remove_from_group("minions")
+	_play_anim("death")
+	death_audio.play()
 	var tween := create_tween()
+	tween.tween_interval(0.3)
 	tween.tween_property(self, "scale", Vector3.ZERO, 0.25)
 	tween.tween_callback(queue_free)
