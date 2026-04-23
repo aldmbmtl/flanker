@@ -85,6 +85,14 @@ Main (Node, Main.gd)
 - Peaks reach height 22 (snow line 13) — physically impassable, jump velocity is 6
 - Plateaus max height ~7 — reachable, used as sniper nests
 
+## Game Features
+- **Dual Mode**: Switch between FPS shooting and RTS mode for tower placement
+- **Wave System**: Minion waves spawn every 30 seconds with escalating numbers (max 6 per lane)
+- **Procedural Generation**: Each game has unique map layout with peaks, plateaus, secret paths
+- **Physics-based Bullets**: Realistic gravity with different speeds for player (280 m/s) vs minions (120 m/s)
+- **Team Resource System**: Currency based on team points for tower placement
+- **Minion AI**: Pathfinding, strafing, separation steering, and ranged combat
+
 ## Adding new input actions
 Register in `project.godot` `[input]` section using the existing Object serialization format. Physical keycodes for common keys:
 - Shift = `4194325`, Ctrl = `4194326`, Tab = `4194320`, Space = `32`

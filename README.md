@@ -4,6 +4,17 @@ A single-player hybrid **FPS / RTS** prototype built in Godot 4. You fight on th
 
 ---
 
+## About This Project
+
+This is a prototype for a hybrid FPS/RTS game that combines ground-based combat with top-down base management. The game features:
+
+- Dual-mode gameplay: Switch between first-person combat and RTS tower placement
+- Procedurally generated terrain with diverse features
+- Wave-based minion spawning with escalating difficulty
+- Physics-based bullet system with realistic gravity
+- Tower defense mechanics with auto-attack AI
+- Team-based currency and resource management
+
 ## System Requirements
 
 | Component | Minimum | Recommended |
@@ -181,6 +192,14 @@ flanker/
     ├── WeaponPickup.gd      # weapon pickup interaction
     └── Minimap.gd           # RTS minimap rendering
 ```
+
+## Development Notes
+
+- All scene and resource edits are done **by hand in `.tscn` / `.tres` files** — there is no editor GUI workflow
+- Geometry is generated at runtime in `_ready()` — no pre-baked meshes in the repo
+- `LaneData` autoload is the **single source of truth** for all lane positions — never hardcode lane coordinates elsewhere
+- The project was developed against Godot **4.6.2** (system install). No `.NET` / Mono required
+- No external dependencies beyond Godot 4.6.2 engine
 
 ---
 

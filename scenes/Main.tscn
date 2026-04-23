@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3 uid="uid://main"]
+[gd_scene load_steps=14 format=3 uid="uid://main"]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/FPSPlayer.tscn" id="2"]
@@ -12,6 +12,8 @@
 [ext_resource type="Script" path="res://scripts/TreePlacer.gd" id="11"]
 [ext_resource type="Environment" path="res://assets/night_environment.tres" id="10"]
 [ext_resource type="Script" path="res://scripts/Minimap.gd" id="12"]
+[ext_resource type="Script" path="res://scripts/EntityHUD.gd" id="13"]
+[ext_resource type="Script" path="res://scripts/WallPlacer.gd" id="14"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1")
@@ -30,6 +32,9 @@ script = ExtResource("9")
 
 [node name="TreePlacer" type="Node3D" parent="World"]
 script = ExtResource("11")
+
+[node name="WallPlacer" type="Node3D" parent="World"]
+script = ExtResource("14")
 
 ; ---- Lighting ----
 [node name="SunLight" type="DirectionalLight3D" parent="World"]
@@ -85,6 +90,11 @@ script = ExtResource("6")
 
 ; ---- HUD ----
 [node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="HUDOverlay" type="Node" parent="HUD"]
+
+[node name="EntityHUD" type="Node" parent="HUD/HUDOverlay"]
+script = ExtResource("13")
 
 [node name="ModeLabel" type="Label" parent="HUD"]
 anchors_preset = 3

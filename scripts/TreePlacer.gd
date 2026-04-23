@@ -103,29 +103,39 @@ func _place_trees() -> void:
 func _place_tree(pos: Vector3, tree_scenes: Array[PackedScene]) -> void:
 	var terrain_y: float = _get_terrain_height(pos)
 	pos.y = terrain_y
-	
+
 	var scn: PackedScene = tree_scenes[randi() % tree_scenes.size()]
 	var tree: Node = scn.instantiate()
 	add_child(tree)
 	tree.position = pos
-	
+
 	var angle: float = randf() * TAU
 	tree.rotate_y(angle)
-	
+
 	var scale: float = randf_range(TREE_SCALE_MIN, TREE_SCALE_MAX)
 	tree.scale = Vector3(scale, scale, scale)
-	
-	_add_tree_collision(tree, scale)
 
-func _add_tree_collision(tree: Node, scale: float) -> void:
-	var col_shape: BoxShape3D = BoxShape3D.new()
-	var y_scale: float = scale / 3.0
-	col_shape.size = Vector3(1.5, 2.0 * y_scale, 1.5)
+	_add_tree_collision(pos, scale)
+
+func _add_tree_collision(world_pos: Vector3, scale: float) -> void:
+	var trunk_radius: float = 0.4 * scale
+	var trunk_height: float = 3.0 * scale
+
+	var col_shape: CylinderShape3D = CylinderShape3D.new()
+	col_shape.radius = trunk_radius * 0.4
+	col_shape.height = trunk_height
 
 	var col_node: CollisionShape3D = CollisionShape3D.new()
 	col_node.shape = col_shape
+	col_node.position = Vector3(0.0, trunk_height / 2.0, 0.0)
 
-	tree.add_child(col_node)
+	var collision: StaticBody3D = StaticBody3D.new()
+	collision.add_child(col_node)
+	collision.position = world_pos
+	collision.collision_layer = 2
+	collision.collision_mask = 1
+
+	add_child(collision)
 
 func _get_terrain_height(pos: Vector3) -> float:
 	if terrain_body == null:

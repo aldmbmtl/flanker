@@ -33,11 +33,14 @@ var player_start_team: int = 0
 
 @onready var fps_player:         CharacterBody3D = $FPSPlayer
 @onready var rts_camera:         Camera3D        = $RTSCamera
+@onready var entity_hud:         Node            = $HUD/HUDOverlay/EntityHUD
 
 func _enter_tree() -> void:
 	# Randomize player team on enter tree (before _ready)
 	player_start_team = randi() % 2
-	fps_player.player_team = player_start_team
+	var player := get_node_or_null("FPSPlayer")
+	if player:
+		player.set("player_team", player_start_team)
 @onready var mode_label:         Label           = $HUD/ModeLabel
 @onready var game_over_label:    Label           = $HUD/GameOverLabel
 @onready var wave_info_label:    Label           = $HUD/WaveInfoLabel
@@ -62,6 +65,9 @@ var _start_menu: Control
 var _pause_menu: Control
 
 func _ready() -> void:
+	# Wire EntityHUD root container
+	entity_hud.setup($HUD/HUDOverlay)
+
 	# Instantiate start menu
 	_start_menu = StartMenuScene.instantiate()
 	add_child(_start_menu)
@@ -88,11 +94,17 @@ func _process(delta: float) -> void:
 			_do_respawn()
 		else:
 			respawn_label.text = "Respawning in %d..." % (int(_respawn_timer) + 1)
-	# Always show team points (both modes)
-	var player_team_name: String = "BLUE" if fps_player.player_team == 0 else "RED"
-	var player_pts: int = TeamData.get_points(fps_player.player_team)
-	var enemy_pts: int = TeamData.get_points(1 - fps_player.player_team)
-	points_label.text = "%s: %d" % [player_team_name, player_pts]
+
+	# Update entity health bars
+	if entity_hud and entity_hud.has_method("process_entity_hud"):
+		var cam: Camera3D = fps_player.get_node_or_null("Camera3D") if fps_mode else rts_camera
+		entity_hud.call("process_entity_hud", delta, cam)
+
+		# Always show team points (both modes)
+		var player_team_name := "BLUE" if fps_player.player_team == 0 else "RED"
+		var player_pts := TeamData.get_points(fps_player.player_team)
+		var enemy_pts := TeamData.get_points(1 - fps_player.player_team)
+		points_label.text = "%s: %d" % [player_team_name, player_pts]
 
 func _spawn_preset_towers() -> void:
 	const TOWER_SCENE := preload("res://scenes/Tower.tscn")
@@ -188,7 +200,6 @@ func _on_start_game() -> void:
 	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
 	# Wire HUD refs into FPS controller
 	fps_player.reload_bar    = $HUD/Crosshair/ReloadBar
-	fps_player.health_bar    = $HUD/HealthBar
 	fps_player.weapon_label  = weapon_label
 	fps_player.ammo_label    = ammo_label
 	fps_player.reload_prompt = reload_prompt

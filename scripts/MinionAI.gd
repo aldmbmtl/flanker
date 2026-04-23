@@ -24,14 +24,13 @@ var _dead           := false
 var _time           := 0.0
 var _strafe_phase   := 0.0
 var points_label: Label = null
+var hud_ui: Control = null
 
 var waypoints: Array[Vector3] = []
 var current_waypoint := 0
 
 @onready var char_blue:  Node3D               = $CharacterBlue
 @onready var char_red:   Node3D               = $CharacterRed
-@onready var hp_bar_bg:  MeshInstance3D       = $HPBar/Background
-@onready var hp_bar_fg:  MeshInstance3D       = $HPBar/Foreground
 @onready var shoot_audio: AudioStreamPlayer3D = $ShootAudio
 @onready var death_audio: AudioStreamPlayer3D = $DeathAudio
 
@@ -46,7 +45,9 @@ const RED_MODEL_PATH  := "res://assets/kenney_blocky-characters/Models/GLB forma
 
 func _ready() -> void:
 	add_to_group("minions")
+	add_to_group("minion_units")
 	call_deferred("_init_visuals")
+	call_deferred("_create_hud_element")
 
 func _init_visuals() -> void:
 	# Get character nodes from scene tree
@@ -85,7 +86,6 @@ func _init_visuals() -> void:
 		death_audio.stream = death_stream
 
 	_play_anim("idle")
-	_update_hp_bar()
 
 func _find_anim_player(root: Node) -> AnimationPlayer:
 	for child in root.get_children():
@@ -271,7 +271,6 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void
 	if _dead:
 		return
 	health -= amount
-	_update_hp_bar()
 	if health <= 0.0:
 		_die()
 		var awarding_team: int = _killer_team if _killer_team >= 0 else 0
@@ -279,16 +278,13 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void
 		TeamData.add_points(awarding_team, pts)
 		_update_points_label()
 
-func _update_hp_bar() -> void:
-	if hp_bar_fg == null:
-		return
-	var pct: float = clamp(health / MAX_HEALTH, 0.0, 1.0)
-	hp_bar_fg.scale.x = pct
-	hp_bar_fg.position.x = (pct - 1.0) * 0.5
-	var fg_mat := StandardMaterial3D.new()
-	fg_mat.albedo_color = Color(1.0 - pct, pct * 0.8, 0.05)
-	fg_mat.flags_unshaded = true
-	hp_bar_fg.material_override = fg_mat
+func _create_hud_element() -> void:
+	var entity_hud := get_node_or_null("/root/Main/HUD/HUDOverlay/EntityHUD")
+	if entity_hud and entity_hud.has_method("register_entity"):
+		var id: int = entity_hud.call("register_entity", self, MAX_HEALTH, team)
+		var entry: Dictionary = entity_hud.call("get_entity_by_id", id)
+		if not entry.is_empty():
+			hud_ui = entry.ui_node
 
 func _update_points_label() -> void:
 	if points_label == null:

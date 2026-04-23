@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://c4m698m1509e"]
+
+[ext_resource type="PackedScene" path="res://scenes/Main.tscn" id="1"]
+[ext_resource type="Script" path="res://scripts/WallPlacer.gd" id="2"]
+
+[node name="WallPlacer" type="Node3D"]
+	script = ExtResource("2")

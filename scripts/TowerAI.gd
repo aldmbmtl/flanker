@@ -11,6 +11,7 @@ var _team_mat: StandardMaterial3D = null
 
 @onready var mesh: MeshInstance3D = $MeshInstance3D
 @onready var area: Area3D = $Area3D
+@onready var debug_collision: StaticBody3D = $DebugCollision
 
 const TOWER_MODEL_PATH := "res://assets/kenney_pirate-kit/Models/GLB format/tower-complete-small.glb"
 
@@ -18,8 +19,10 @@ func setup(p_team: int) -> void:
 	team = p_team
 	# Load and instance the model in code
 	_load_team_model()
+	# Enable debug collision visual
+	debug_collision.visible = true
 	# Resize collision sphere
-	var shape := SphereShape3D.new()
+	var shape: SphereShape3D = SphereShape3D.new()
 	shape.radius = attack_range
 	$Area3D/CollisionShape3D.shape = shape
 

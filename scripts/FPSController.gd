@@ -31,6 +31,8 @@ var active    := true
 var hp: float  = MAX_HP
 var _dead      := false
 var _crouching := false
+var hud_ui: Control = null
+var hud_id: int = 0
 
 # Fire cooldown (inter-shot delay)
 var _fire_timer: float = 0.0
@@ -89,6 +91,7 @@ signal weapon_changed(slot: int, weapon: WeaponData)
 const BulletScene := preload("res://scenes/Bullet.tscn")
 
 func _ready() -> void:
+	add_to_group("players")
 	# Load default pistol into slot 0
 	var default_weapon: WeaponData = load(DEFAULT_WEAPON_PATH)
 	if default_weapon:
@@ -97,6 +100,7 @@ func _ready() -> void:
 	_refresh_viewmodel()
 	_update_weapon_label()
 	_update_ammo_hud()
+	_create_hud_element(hud_id, MAX_HP, player_team)
 
 func set_active(is_active: bool) -> void:
 	active = is_active
@@ -108,11 +112,25 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void
 		return
 	hp = max(0.0, hp - amount)
 	_update_health_bar()
+	_update_hud_health()
 	if hp <= 0.0:
 		_on_death()
 		var awarding_team: int = _killer_team if _killer_team >= 0 else 1
 		TeamData.add_points(awarding_team, 50)
 		_update_points_label()
+
+func _create_hud_element(_unused_id: int, max_health: float, team: int) -> void:
+	var entity_hud := get_node_or_null("/root/Main/HUD/HUDOverlay/EntityHUD")
+	if entity_hud and entity_hud.has_method("register_entity"):
+		hud_id = entity_hud.call("register_entity", self, max_health, team)
+		var entry: Dictionary = entity_hud.call("get_entity_by_id", hud_id)
+		if not entry.is_empty():
+			hud_ui = entry.ui_node
+
+func _update_hud_health() -> void:
+	var entity_hud := get_node_or_null("/root/Main/HUD/HUDOverlay/EntityHUD")
+	if entity_hud and hud_ui and hud_id > 0:
+		entity_hud.call("update_entity_health", hud_id, hp)
 
 func respawn(spawn_pos: Vector3) -> void:
 	_dead        = false

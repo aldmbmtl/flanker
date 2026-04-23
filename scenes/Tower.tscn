@@ -15,8 +15,9 @@ radius = 10.0
 [sub_resource type="BoxMesh" id="BoxMesh_2"]
 size = Vector3(1.5, 2.0, 1.5)
 
-[sub_resource type="StandardMaterial3D" id="Material_3"]
+[sub_resource type="StandardMaterial3D" id="Wire_1"]
 wireframe = true
+albedo_color = Color(0, 1, 1, 1)
 
 [node name="Tower" type="StaticBody3D"]
 script = ExtResource("1")
@@ -41,7 +42,11 @@ shape = SubResource("BoxShape3D_1")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Area3D"]
 shape = SubResource("SphereShape3D_1")
 
-[node name="DebugShape" type="MeshInstance3D" parent="."]
-visible = false
+[node name="DebugCollision" type="StaticBody3D" parent="."]
+collision_layer = 1
+collision_mask = 1
+
+[node name="DebugMesh" type="MeshInstance3D" parent="DebugCollision"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
 mesh = SubResource("BoxMesh_2")
-material_override = SubResource("Material_3")
+material_override = SubResource("Wire_1")
