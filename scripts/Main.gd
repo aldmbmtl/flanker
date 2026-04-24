@@ -258,6 +258,8 @@ func toggle_pause(paused: bool) -> void:
 		game_state = GameState.PAUSED
 		_pause_menu.visible = true
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+		fps_player.set_active(false)
+		rts_camera.current = false
 	else:
 		game_state = GameState.PLAYING
 		_pause_menu.visible = false
