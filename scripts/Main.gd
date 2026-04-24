@@ -1,6 +1,7 @@
 extends Node
 
 const RESPAWN_DELAY := 5.0
+const CHARACTER_LETTERS := ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r"]
 const BLUE_SPAWN    := Vector3(0.0, 10.0, 84.0)
 const RED_SPAWN     := Vector3(0.0, 10.0, -84.0)
 
@@ -31,8 +32,11 @@ var _respawning  := false
 var _respawn_timer: float = 0.0
 var player_start_team: int = 0
 var time_seed: int = 1  # 0=sunrise 1=noon 2=sunset 3=night
+var _blue_minion_char: String = ""
+var _red_minion_char: String = ""
 
 const FPSPlayerScene := preload("res://scenes/FPSPlayer.tscn")
+const MinionAI := preload("res://scripts/MinionAI.gd")
 
 @onready var rts_camera:         Camera3D        = $RTSCamera
 @onready var entity_hud:         Node            = $HUD/HUDOverlay/EntityHUD
@@ -97,6 +101,7 @@ func _setup_multiplayer_game() -> void:
 	_spawn_remote_player_manager()
 	_start_multiplayer_game()
 	_randomize_time_of_day()
+	_pick_minion_characters()
 
 func _spawn_remote_player_manager() -> void:
 	if not multiplayer.has_multiplayer_peer():
@@ -175,6 +180,13 @@ func _randomize_time_of_day() -> void:
 			sun.light_energy = 0.25
 			sun.rotation_degrees = Vector3(-70, 180, 0)
 			world_env.environment = load("res://assets/night_environment.tres")
+
+func _pick_minion_characters() -> void:
+	var shuffled := CHARACTER_LETTERS.duplicate()
+	shuffled.shuffle()
+	_blue_minion_char = shuffled[0]
+	_red_minion_char  = shuffled[1]
+	MinionAI.set_model_characters(_blue_minion_char, _red_minion_char)
 
 func _setup_lane_data() -> void:
 	var terrain: Node = $World/Terrain
@@ -306,6 +318,7 @@ func _on_start_game() -> void:
 	_setup_hud_for_player()
 	var spawn_z: float = 84.0 if player_start_team == 0 else -84.0
 	fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
+	_pick_minion_characters()
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
 	call_deferred("_spawn_preset_towers")
