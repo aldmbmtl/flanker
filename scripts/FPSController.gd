@@ -209,6 +209,10 @@ func respawn(spawn_pos: Vector3) -> void:
 	_kicking = false
 	weapon_model.position = WEAPON_REST_POS
 	weapon_model.rotation = WEAPON_REST_ROT
+	_slot_ammo = [
+		[weapons[0].magazine_size, weapons[0].reserve_ammo],
+		[0, 0],
+	]
 	_update_health_bar()
 	_update_ammo_hud()
 	if reload_bar:

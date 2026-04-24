@@ -42,12 +42,23 @@ var _anim: AnimationPlayer = null
 
 const BulletScene := preload("res://scenes/Bullet.tscn")
 
-const BLUE_MODEL_PATH := "res://assets/kenney_blocky-characters/Models/GLB format/character-e.glb"
-const RED_MODEL_PATH  := "res://assets/kenney_blocky-characters/Models/GLB format/character-b.glb"
+static var _blue_model_char := "e"
+static var _red_model_char  := "b"
 
-# Static scene cache — loaded once, shared across all instances
 static var _blue_scene_cache: PackedScene = null
-static var _red_scene_cache: PackedScene  = null
+static var _red_scene_cache:  PackedScene = null
+
+static func set_model_characters(blue_char: String, red_char: String) -> void:
+	_blue_model_char = blue_char
+	_red_model_char  = red_char
+	_blue_scene_cache = null
+	_red_scene_cache  = null
+
+static func get_blue_model_path() -> String:
+	return "res://assets/kenney_blocky-characters/Models/GLB format/character-%s.glb" % _blue_model_char
+
+static func get_red_model_path() -> String:
+	return "res://assets/kenney_blocky-characters/Models/GLB format/character-%s.glb" % _red_model_char
 
 # Throttle counters
 const TARGET_INTERVAL    := 10  # frames between target rescans
@@ -74,9 +85,9 @@ func _init_visuals() -> void:
 	
 	# Load and add models — use static cache so load() only runs once ever
 	if _blue_scene_cache == null:
-		_blue_scene_cache = load(BLUE_MODEL_PATH)
+		_blue_scene_cache = load(get_blue_model_path())
 	if _red_scene_cache == null:
-		_red_scene_cache = load(RED_MODEL_PATH)
+		_red_scene_cache = load(get_red_model_path())
 
 	if _blue_scene_cache:
 		var blue_model: Node = _blue_scene_cache.instantiate()
