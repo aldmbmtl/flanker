@@ -64,15 +64,6 @@ var _pause_menu: Control
 func _ready() -> void:
 	entity_hud.setup($HUD/HUDOverlay)
 	
-	print("[Main] _ready: has_multiplayer_peer = ", multiplayer.has_multiplayer_peer())
-	
-	if multiplayer.has_multiplayer_peer():
-		_is_singleplayer = false
-	else:
-		_is_singleplayer = true
-	
-	print("[Main] _ready: _is_singleplayer set to ", _is_singleplayer)
-	
 	if multiplayer.has_multiplayer_peer():
 		_is_singleplayer = false
 		_setup_multiplayer_game()
@@ -84,7 +75,6 @@ func _ready() -> void:
 func _setup_singleplayer_game() -> void:
 	_start_menu = StartMenuScene.instantiate()
 	add_child(_start_menu)
-	print("[Main] Connecting start_game signal")
 	_start_menu.connect("start_game", _on_start_game)
 	_start_menu.connect("quit_game", _on_quit_from_menu)
 	_pause_menu = PauseMenuScene.instantiate()
@@ -131,7 +121,7 @@ func _start_multiplayer_game() -> void:
 	_setup_bases()
 	_set_mode(true)
 	wave_announce_label.visible = false
-	wave_info_label.text = "Wave: 0 | First wave in: 30s"
+	wave_info_label.text = "Wave: 0 | First wave in: 10s"
 	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
 	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
 	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
@@ -254,32 +244,14 @@ func _setup_bases() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
-		print("[Main] _input: keycode=", event.keycode, " game_state=", game_state, " _is_singleplayer=", _is_singleplayer)
 		if event.keycode == KEY_ESCAPE or event.physical_keycode == KEY_ESCAPE:
 			match game_state:
 				GameState.MENU:
-					print("[Main] ESCAPE - MENU case")
 					_on_quit_from_menu()
 				GameState.PLAYING:
-					print("[Main] ESCAPE - PLAYING case, _is_singleplayer=", _is_singleplayer)
-					if _is_singleplayer:
-						toggle_pause(true)
-					else:
-						print("[Main] ESCAPE - NOT singleplayer, skipping toggle_pause")
+					toggle_pause(true)
 				GameState.PAUSED:
-					print("[Main] ESCAPE - PAUSED case, _is_singleplayer=", _is_singleplayer)
-					if _is_singleplayer:
-						toggle_pause(false)
-			return
-			match game_state:
-				GameState.MENU:
-					_on_quit_from_menu()
-				GameState.PLAYING:
-					if _is_singleplayer:
-						toggle_pause(true)
-				GameState.PAUSED:
-					if _is_singleplayer:
-						toggle_pause(false)
+					toggle_pause(false)
 			return
 		if event.keycode == KEY_TAB or event.physical_keycode == KEY_TAB:
 			if game_state == GameState.PLAYING and not game_over and not _respawning:
@@ -287,7 +259,6 @@ func _input(event: InputEvent) -> void:
 				audio_mode_switch.play()
 
 func _on_start_game() -> void:
-	print("[Main] _on_start_game: game_state=", game_state, " _is_singleplayer=", _is_singleplayer)
 	player_start_team = randi() % 2
 	fps_player = FPSPlayerScene.instantiate()
 	fps_player.set("player_team", player_start_team)
@@ -304,7 +275,7 @@ func _on_start_game() -> void:
 	_set_mode(true)
 	get_tree().set_auto_accept_quit(true)
 	wave_announce_label.visible = false
-	wave_info_label.text = "Wave: 0 | First wave in: 30s"
+	wave_info_label.text = "Wave: 0 | First wave in: 10s"
 	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
 	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
 	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")

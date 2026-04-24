@@ -59,7 +59,10 @@ func _process(delta: float) -> void:
 
 	# Orient capsule along velocity direction
 	if velocity.length() > 0.1:
-		look_at(global_position + velocity.normalized(), Vector3.UP)
+		var target_pos: Vector3 = global_position + velocity.normalized()
+		var diff: Vector3 = target_pos - global_position
+		if diff.normalized().length() > 0.0:
+			look_at(target_pos, Vector3.UP)
 
 func _should_damage(hit: Object) -> bool:
 	if not hit.has_method("take_damage"):

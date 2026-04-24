@@ -250,6 +250,19 @@ func _update_health_bar() -> void:
 	if health_bar == null:
 		return
 	health_bar.value = (hp / MAX_HP) * 100.0
+	
+	var fill_style: StyleBoxFlat = health_bar.get_theme_stylebox("fill")
+	if fill_style == null:
+		fill_style = StyleBoxFlat.new()
+		health_bar.add_theme_stylebox_override("fill", fill_style)
+	
+	var health_pct: float = hp / MAX_HP
+	if health_pct > 0.6:
+		fill_style.bg_color = Color(0.2, 0.9, 0.2, 1)
+	elif health_pct > 0.3:
+		fill_style.bg_color = Color(1, 0.9, 0.2, 1)
+	else:
+		fill_style.bg_color = Color(0.9, 0.2, 0.2, 1)
 
 func _update_weapon_label() -> void:
 	if weapon_label == null:
@@ -301,8 +314,6 @@ func _current_weapon() -> WeaponData:
 	return weapons[active_slot]
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed:
-		print("[FPSController] _unhandled_input: keycode=", event.keycode)
 	if not active:
 		return
 	if event is InputEventMouseMotion:
