@@ -5,14 +5,31 @@ const SPRINT_SPEED      := 9.0
 const CROUCH_SPEED      := 3.2
 
 const MAX_STAMINA            := 10.0
-const STAMINA_DRAIN_RATE    := 1.0   # units/sec while sprinting
-const STAMINA_REGEN_RATE    := 1.0   # units/sec while resting
-const STAMINA_EXHAUST_CD    := 5.0   # seconds before regen starts after empty
+const STAMINA_DRAIN_RATE    := 1.0
+const STAMINA_REGEN_RATE    := 1.0
+const STAMINA_EXHAUST_CD    := 5.0
 const JUMP_VELOCITY     := 6.0
 const MOUSE_SENSITIVITY := 0.003
 const GRAVITY           := 20.0
 
+const ROLE_STATS := {
+	"Tank":    {"hp": 150, "speed_mult": 0.8, "damage_mult": 0.7},
+	"DPS":     {"hp": 100, "speed_mult": 1.0, "damage_mult": 1.2},
+	"Support": {"hp": 80,  "speed_mult": 1.0, "damage_mult": 0.8},
+	"Sniper":  {"hp": 70,  "speed_mult": 1.0, "damage_mult": 1.5},
+	"Flanker": {"hp": 90,  "speed_mult": 1.3, "damage_mult": 1.0},
+}
+const DEFAULT_HP := 100.0
+
 var player_team: int = 0
+var player_role: String = ""
+
+var player_health_mult: float = 1.0
+var player_speed_mult: float = 1.0
+var player_damage_mult: float = 1.0
+
+var _peer_id: int = 1
+var _is_local: bool = true
 
 const FOV_NORMAL  := 75.0
 const FOV_ZOOM    := 30.0
@@ -99,11 +116,18 @@ const BulletScene := preload("res://scenes/Bullet.tscn")
 func _ready() -> void:
 	add_to_group("players")
 	_base_cam_y = camera.position.y
-	# Load default pistol into slot 0
-	var default_weapon: WeaponData = load(DEFAULT_WEAPON_PATH)
-	if default_weapon:
-		weapons[0] = default_weapon
-		_slot_ammo[0] = [default_weapon.magazine_size, default_weapon.reserve_ammo]
+	_peer_id = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	_is_local = not multiplayer.has_multiplayer_peer() or multiplayer.get_unique_id() == _peer_id
+	
+	if multiplayer.has_multiplayer_peer():
+		var my_id := multiplayer.get_unique_id()
+		_is_local = (name == "FPSPlayer_%d" % my_id)
+		var info: Dictionary = LobbyManager.players.get(my_id, {})
+		if info.has("role"):
+			player_role = info.role
+			_apply_role_stats()
+	
+	_load_default_weapon()
 	_refresh_viewmodel()
 	_update_weapon_label()
 	_update_ammo_hud()
@@ -140,9 +164,26 @@ func _update_hud_health() -> void:
 	if entity_hud and hud_ui and hud_id > 0:
 		entity_hud.call("update_entity_health", hud_id, hp)
 
+func _load_default_weapon() -> void:
+	var default_weapon: WeaponData = load(DEFAULT_WEAPON_PATH)
+	if default_weapon:
+		weapons[0] = default_weapon
+		_slot_ammo[0] = [default_weapon.magazine_size, default_weapon.reserve_ammo]
+
+func _apply_role_stats() -> void:
+	if player_role.is_empty():
+		return
+	var stats: Dictionary = ROLE_STATS.get(player_role, {})
+	if stats.is_empty():
+		return
+	player_health_mult = float(stats.get("hp", 100)) / 100.0
+	player_speed_mult = float(stats.get("speed_mult", 1.0))
+	player_damage_mult = float(stats.get("damage_mult", 1.0))
+
 func respawn(spawn_pos: Vector3) -> void:
 	_dead        = false
-	hp           = MAX_HP
+	var max_hp: float = DEFAULT_HP * player_health_mult
+	hp           = max_hp
 	global_position = spawn_pos
 	velocity     = Vector3.ZERO
 	_reloading    = false
@@ -291,6 +332,9 @@ func _select_slot(slot: int) -> void:
 	_update_ammo_hud()
 
 func _physics_process(delta: float) -> void:
+	if not _is_local:
+		return
+	
 	# Camera shake
 	if camera_shake_time > 0.0:
 		camera_shake_time -= delta
@@ -368,7 +412,7 @@ func _physics_process(delta: float) -> void:
 	_update_stamina_bar()
 
 	# Movement
-	var cur_speed: float = SPEED
+	var cur_speed: float = SPEED * player_speed_mult
 	if _crouching:
 		cur_speed = CROUCH_SPEED
 	elif want_sprint and _stamina > 0.0 and not _stamina_exhausted:

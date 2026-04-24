@@ -10,12 +10,6 @@ emission_enabled = true
 emission = Color(1.0, 0.3, 0.1, 1)
 emission_energy_multiplier = 1.5
 
-[sub_resource type="StandardMaterial3D" id="Mat_btn"]
-albedo_color = Color(0.15, 0.15, 0.15, 0.85)
-
-[sub_resource type="StandardMaterial3D" id="Mat_btn_hover"]
-albedo_color = Color(0.3, 0.3, 0.3, 0.95)
-
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_normal"]
 bg_color = Color(0.12, 0.12, 0.12, 0.9)
 
@@ -72,25 +66,118 @@ add_theme_font_size_override("font_size", 100)
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 
-[node name="StartButton" type="Button" parent="VBox"]
+[node name="HostButton" type="Button" parent="VBox"]
 layout_mode = 2
-custom_minimum_size = Vector2(200, 60)
-text = "Start War"
+custom_minimum_size = Vector2(200, 50)
+text = "Host Game"
+
+[node name="JoinButton" type="Button" parent="VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(200, 50)
+text = "Join Game"
+
+[node name="Spacer2" type="Control" parent="VBox"]
+custom_minimum_size = Vector2(0, 15)
+layout_mode = 2
 
 [node name="QuitButton" type="Button" parent="VBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(200, 50)
 text = "Quit"
 
-[node name="Spacer2" type="Control" parent="VBox"]
+[node name="Spacer3" type="Control" parent="VBox"]
 custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
 
 [node name="Subtitle" type="Label" parent="VBox"]
 layout_mode = 2
-text = "Esc to pause"
+text = "Esc to quit"
 horizontal_alignment = 1
 add_theme_font_size_override = 18
 
-[connection signal="pressed" from="VBox/StartButton" to="." method="_on_start_pressed"]
+[node name="JoinDialog" type="AcceptDialog" parent="."]
+title = "Join Game"
+size = Vector2i(400, 180)
+unresizable = true
+ok_button_text = "Join"
+dialog_hide_on_ok = true
+visible = false
+
+[node name="VBoxContainer" type="VBoxContainer" parent="JoinDialog"]
+
+[node name="AddressLabel" type="Label" parent="JoinDialog/VBoxContainer"]
+layout_mode = 2
+text = "Host IP Address:"
+horizontal_alignment = 1
+
+[node name="AddressEdit" type="LineEdit" parent="JoinDialog/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "192.168.1.100"
+
+[node name="PortLabel" type="Label" parent="JoinDialog/VBoxContainer"]
+layout_mode = 2
+text = "Port:"
+horizontal_alignment = 1
+
+[node name="PortEdit" type="LineEdit" parent="JoinDialog/VBoxContainer"]
+layout_mode = 2
+text = "8910"
+
+[node name="NameLabel" type="Label" parent="JoinDialog/VBoxContainer"]
+layout_mode = 2
+text = "Your Name:"
+horizontal_alignment = 1
+
+[node name="NameEdit" type="LineEdit" parent="JoinDialog/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "Player"
+
+[node name="HostDialog" type="AcceptDialog" parent="."]
+title = "Host Game"
+size = Vector2i(400, 180)
+unresizable = true
+ok_button_text = "Host"
+dialog_hide_on_ok = true
+visible = false
+
+[node name="VBoxContainer" type="VBoxContainer" parent="HostDialog"]
+
+[node name="PortLabel" type="Label" parent="HostDialog/VBoxContainer"]
+layout_mode = 2
+text = "Port:"
+horizontal_alignment = 1
+
+[node name="PortEdit" type="LineEdit" parent="HostDialog/VBoxContainer"]
+layout_mode = 2
+text = "8910"
+
+[node name="NameLabel" type="Label" parent="HostDialog/VBoxContainer"]
+layout_mode = 2
+text = "Your Name:"
+horizontal_alignment = 1
+
+[node name="NameEdit" type="LineEdit" parent="HostDialog/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "Host"
+
+[node name="ConnectionStatus" type="Label" parent="."]
+visible = false
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -200.0
+offset_top = -60.0
+offset_right = 200.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 0
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[connection signal="pressed" from="VBox/HostButton" to="." method="_on_host_pressed"]
+[connection signal="pressed" from="VBox/JoinButton" to="." method="_on_join_pressed"]
 [connection signal="pressed" from="VBox/QuitButton" to="." method="_on_quit_pressed"]
+[connection signal="confirmed" from="JoinDialog" to="." method="_on_join_confirmed"]
+[connection signal="confirmed" from="HostDialog" to="." method="_on_host_confirmed"]

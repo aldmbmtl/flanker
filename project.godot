@@ -15,7 +15,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Flankers"
-run/main_scene="res://scenes/Main.tscn"
+run/main_scene="res://scenes/StartMenu.tscn"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
@@ -23,6 +23,8 @@ config/icon="res://icon.svg"
 
 LaneData="*res://scripts/LaneData.gd"
 TeamData="*res://scripts/TeamData.gd"
+NetworkManager="*res://scripts/NetworkManager.gd"
+LobbyManager="*res://scripts/LobbyManager.gd"
 
 [display]
 

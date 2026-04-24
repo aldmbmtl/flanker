@@ -69,10 +69,6 @@ light_energy = 3.5
 omni_range = 22.0
 shadow_enabled = false
 
-; ---- FPS Player ----
-[node name="FPSPlayer" parent="." instance=ExtResource("2")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 70)
-
 ; ---- RTS Camera ----
 [node name="RTSCamera" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 100, 0)
