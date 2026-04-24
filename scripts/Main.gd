@@ -41,6 +41,7 @@ func _enter_tree() -> void:
 	var player := get_node_or_null("FPSPlayer")
 	if player:
 		player.set("player_team", player_start_team)
+		player.add_to_group("player")
 @onready var mode_label:         Label           = $HUD/ModeLabel
 @onready var game_over_label:    Label           = $HUD/GameOverLabel
 @onready var wave_info_label:    Label           = $HUD/WaveInfoLabel
@@ -80,6 +81,36 @@ func _ready() -> void:
 
 	# Game starts in menu state - hide HUD
 	_HUD_set_visible(false)
+	
+	# Randomize time of day
+	_randomize_time_of_day()
+
+func _randomize_time_of_day() -> void:
+	var time_seed := randi() % 4
+	var sun := $World/SunLight
+	var world_env := $World/WorldEnvironment
+	
+	match time_seed:
+		0: # Sunrise
+			sun.light_color = Color(1.0, 0.45, 0.18)
+			sun.light_energy = 0.8
+			sun.rotation_degrees = Vector3(-10, 30, 0)
+			world_env.environment = load("res://assets/dusk_environment.tres")
+		1: # Noon
+			sun.light_color = Color(1.0, 0.95, 0.85)
+			sun.light_energy = 1.0
+			sun.rotation_degrees = Vector3(-50, 0, 0)
+			world_env.environment = load("res://assets/day_environment.tres")
+		2: # Sunset
+			sun.light_color = Color(1.0, 0.35, 0.15)
+			sun.light_energy = 0.6
+			sun.rotation_degrees = Vector3(-10, 210, 0)
+			world_env.environment = load("res://assets/dusk_environment.tres")
+		3: # Night
+			sun.light_color = Color(0.2, 0.35, 1.0)
+			sun.light_energy = 0.25
+			sun.rotation_degrees = Vector3(-70, 180, 0)
+			world_env.environment = load("res://assets/night_environment.tres")
 
 func _setup_lane_data() -> void:
 	var terrain: Node = $World/Terrain
@@ -98,7 +129,8 @@ func _process(delta: float) -> void:
 	# Update entity health bars
 	if entity_hud and entity_hud.has_method("process_entity_hud"):
 		var cam: Camera3D = fps_player.get_node_or_null("Camera3D") if fps_mode else rts_camera
-		entity_hud.call("process_entity_hud", delta, cam)
+		var crosshair_pos: Vector2 = get_viewport().get_visible_rect().size * 0.5 if fps_mode else Vector2(-1, -1)
+		entity_hud.call("process_entity_hud", delta, cam, crosshair_pos)
 
 		# Always show team points (both modes)
 		var player_team_name := "BLUE" if fps_player.player_team == 0 else "RED"
@@ -200,6 +232,7 @@ func _on_start_game() -> void:
 	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
 	# Wire HUD refs into FPS controller
 	fps_player.reload_bar    = $HUD/Crosshair/ReloadBar
+	fps_player.health_bar  = $HUD/HealthBar
 	fps_player.weapon_label  = weapon_label
 	fps_player.ammo_label    = ammo_label
 	fps_player.reload_prompt = reload_prompt
@@ -257,6 +290,10 @@ func _set_mode(is_fps: bool) -> void:
 	$HUD/StaminaBar.visible = is_fps
 	if not is_fps and reload_prompt:
 		reload_prompt.visible = false
+	# Toggle fog off in RTS mode
+	var world_env := $World/WorldEnvironment
+	if world_env and world_env.environment:
+		world_env.environment.fog_enabled = is_fps
 	if is_fps:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		mode_label.text = "Mode: FPS  [Tab] to switch"

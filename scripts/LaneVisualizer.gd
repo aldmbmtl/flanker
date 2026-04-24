@@ -8,7 +8,8 @@ const LANE_COLOR := Color(0.38, 0.30, 0.16)  # dirt brown
 func _ready() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = LANE_COLOR
-	mat.roughness = 1.0
+	mat.roughness = 0.85
+	mat.metallic = 0.0
 
 	for lane_i in range(3):
 		var pts: Array = LaneData.get_lane_points(lane_i)

@@ -47,8 +47,11 @@ func _process(delta: float) -> void:
 
 	if result.size() > 0:
 		var hit: Object = result.collider
+		var hit_pos: Vector3 = result.position
+		var hit_normal: Vector3 = result.get("normal", Vector3.UP)
 		if _should_damage(hit):
 			hit.take_damage(damage, source, shooter_team)
+		_spawn_sparks(hit_pos, hit_normal, hit)
 		queue_free()
 		return
 
@@ -69,3 +72,51 @@ func _should_damage(hit: Object) -> bool:
 	if shooter_team == -1 and hit_team == -1:
 		return false
 	return true
+
+func _spawn_sparks(pos: Vector3, normal: Vector3, hit: Object) -> void:
+	var spark_type := "ground"
+	if hit.has_method("take_damage"):
+		if hit is StaticBody3D:
+			spark_type = "building"
+		else:
+			var hit_team: int = hit.get("team") if hit.get("team") != null else -999
+			if hit_team >= 0:
+				spark_type = "unit"
+
+	var particles := GPUParticles3D.new()
+	var pmat := ParticleProcessMaterial.new()
+	pmat.direction = normal
+	pmat.spread = 45.0
+	pmat.initial_velocity_min = 3.0
+	pmat.initial_velocity_max = 6.0
+	pmat.gravity = Vector3(0, -15, 0)
+
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(0.15, 0.15)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.no_depth_test = true
+
+	if spark_type == "ground":
+		mat.albedo_color = Color(0.55, 0.35, 0.2, 1.0)
+	elif spark_type == "unit":
+		mat.albedo_color = Color(1.0, 0.2, 0.1, 1.0)
+	else:
+		mat.albedo_color = Color(1.0, 1.0, 0.3, 1.0)
+		mat.emission_enabled = true
+		mat.emission = Color(1.0, 1.0, 0.3)
+		mat.emission_energy_multiplier = 4.0
+
+	mesh.material = mat
+	particles.process_material = pmat
+	particles.draw_pass_1 = mesh
+	particles.amount = 20
+
+	get_tree().root.add_child(particles)
+	particles.global_position = pos
+	particles.rotation = Vector3(-normal.x, 0, -normal.z).signed_angle_to(Vector3.FORWARD, Vector3.UP) * Vector3(0, 1, 0)
+
+	particles.emitting = true
+	particles.restart()
+	particles.call_deferred("free")

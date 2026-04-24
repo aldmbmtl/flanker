@@ -88,10 +88,17 @@ signal weapon_changed(slot: int, weapon: WeaponData)
 @onready var col_shape:   CollisionShape3D   = $CollisionShape3D
 @onready var shoot_audio: AudioStreamPlayer3D = $ShootAudio
 
+const CAMERA_SHAKE_SPEED := 20.0
+const CAMERA_SHAKE_AMP := 0.15
+
+var camera_shake_time := 0.0
+var _base_cam_y := 0.0
+
 const BulletScene := preload("res://scenes/Bullet.tscn")
 
 func _ready() -> void:
 	add_to_group("players")
+	_base_cam_y = camera.position.y
 	# Load default pistol into slot 0
 	var default_weapon: WeaponData = load(DEFAULT_WEAPON_PATH)
 	if default_weapon:
@@ -111,6 +118,7 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void
 	if _dead:
 		return
 	hp = max(0.0, hp - amount)
+	camera_shake_time = 0.15
 	_update_health_bar()
 	_update_hud_health()
 	if hp <= 0.0:
@@ -283,6 +291,15 @@ func _select_slot(slot: int) -> void:
 	_update_ammo_hud()
 
 func _physics_process(delta: float) -> void:
+	# Camera shake
+	if camera_shake_time > 0.0:
+		camera_shake_time -= delta
+		var shake := sin(camera_shake_time * CAMERA_SHAKE_SPEED) * CAMERA_SHAKE_AMP
+		var offset := Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5) * shake
+		camera.position = Vector3(0, _base_cam_y, 0) + offset
+	elif camera.position.y != _base_cam_y:
+		camera.position.y = _base_cam_y
+
 	if not active:
 		return
 

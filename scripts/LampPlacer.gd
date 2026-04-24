@@ -10,6 +10,7 @@ const LIGHT_RANGE   := 22.0
 const LIGHT_ENERGY  := 5.0
 const LIGHT_COLOR   := Color(1.0, 0.72, 0.35)
 const POLE_COLOR    := Color(0.22, 0.22, 0.26)
+const BASE_CLEARANCE := 10.0
 
 func _ready() -> void:
 	var pole_mat := StandardMaterial3D.new()
@@ -20,6 +21,11 @@ func _ready() -> void:
 	for lane_i in range(3):
 		var pts: Array = LaneData.get_lane_points(lane_i)
 		for i in range(0, pts.size(), LAMP_SPACING):
+			# Skip near base zones
+			var center: Vector2 = pts[i]
+			if absf(center.y - 84.0) < BASE_CLEARANCE or absf(center.y + 84.0) < BASE_CLEARANCE:
+				continue
+
 			# Lane direction via neighbours
 			var prev: Vector2 = pts[max(i - 1, 0)]
 			var next: Vector2 = pts[min(i + 1, pts.size() - 1)]
@@ -32,7 +38,6 @@ func _ready() -> void:
 			# Arm points inward (toward road center), opposite of offset
 			var arm_dir: Vector2 = -offset.normalized()
 
-			var center: Vector2 = pts[i]
 			var base_xz := Vector2(center.x + offset.x, center.y + offset.y)
 			_place_lamp(base_xz, arm_dir, pole_mat)
 

@@ -6,7 +6,7 @@ const DETECT_RANGE     := 12.0
 const SHOOT_RANGE      := 10.0
 const SEPARATION_DIST  := 2.2
 const SEPARATION_FORCE := 6.0
-const BULLET_SPEED     := 120.0
+const BULLET_SPEED     := 84.0
 
 const MINION_SHOOT_SOUND := "res://assets/kenney_sci-fi-sounds/Audio/laserSmall_002.ogg"
 const MINION_DEATH_SOUND := "res://assets/kenney_sci-fi-sounds/Audio/impactMetal_000.ogg"
@@ -239,6 +239,21 @@ func _find_target() -> Node3D:
 		if d < best_dist:
 			best_dist = d
 			best = m
+	var player := get_tree().get_first_node_in_group("player")
+	if player and player.has_method("get"):
+		var p_team: int = player.get("player_team") if player.get("player_team") != null else -1
+		if p_team != team and p_team >= 0:
+			var d: float = global_position.distance_to(player.global_position)
+			if d < best_dist:
+				best_dist = d
+				best = player
+	for t in get_tree().get_nodes_in_group("towers"):
+		if t.team == team:
+			continue
+		var d: float = global_position.distance_to(t.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = t
 	for b in get_tree().get_nodes_in_group("bases"):
 		if b.team == team:
 			continue

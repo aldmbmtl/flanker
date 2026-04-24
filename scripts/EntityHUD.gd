@@ -54,7 +54,7 @@ func get_entity_by_id(entity_id: int) -> Dictionary:
 			return e
 	return {}
 
-func process_entity_hud(_delta: float, active_camera: Camera3D) -> void:
+func process_entity_hud(_delta: float, active_camera: Camera3D, crosshair_pos: Vector2 = Vector2.ZERO) -> void:
 	if not active_camera or not _hud_root:
 		return
 
@@ -67,7 +67,7 @@ func process_entity_hud(_delta: float, active_camera: Camera3D) -> void:
 			continue
 
 		entity.camera_dist = active_camera.global_position.distance_to(entity.entity.global_position)
-		if entity.camera_dist > 10.0:
+		if entity.camera_dist > 25.0:
 			entity.ui_node.visible = false
 			continue
 
@@ -85,6 +85,13 @@ func process_entity_hud(_delta: float, active_camera: Camera3D) -> void:
 		# Check if outside viewport bounds
 		if _screen_width > 0 and _screen_height > 0:
 			if screen_pos.x < 0 or screen_pos.x > _screen_width or screen_pos.y < 0 or screen_pos.y > _screen_height:
+				entity.ui_node.visible = false
+				continue
+
+		# Check crosshair proximity (Vector2(-1,-1) means show all)
+		if crosshair_pos != Vector2.ZERO and crosshair_pos != Vector2(-1, -1):
+			var to_crosshair: Vector2 = screen_pos - crosshair_pos
+			if to_crosshair.length() > 80.0:
 				entity.ui_node.visible = false
 				continue
 

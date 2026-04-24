@@ -1,34 +1,38 @@
 extends Node3D
 
 var health := 500.0
-var team := 0  # 0=blue, 1=red
+var team := 0
 var _dead := false
 
-@onready var mesh: MeshInstance3D = $MeshInstance3D
-@onready var health_label: Label3D = $Label3D
+const FOUNTAIN_PATH := "res://assets/kenney_fantasy-town-kit/Models/GLB format/fountain-square.glb"
 
 func _ready() -> void:
 	add_to_group("bases")
-	_update_label()
+	call_deferred("_spawn_fountain")
+
+func _spawn_fountain() -> void:
+	var glb := load(FOUNTAIN_PATH)
+	if glb:
+		var scene: PackedScene = glb
+		var fountain_root := Node3D.new()
+		fountain_root.name = "FountainRoot"
+		add_child(fountain_root)
+		var instance := scene.instantiate()
+		fountain_root.add_child(instance)
+		fountain_root.scale = Vector3(2.0, 2.0, 2.0)
+		fountain_root.position = Vector3(0, 0, 5.0 if team == 0 else 15.0)
+	else:
+		print("Failed to load fountain")
 
 func setup(p_team: int) -> void:
 	team = p_team
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.0, 0.3, 1.0) if team == 0 else Color(1.0, 0.1, 0.1)
-	mesh.material_override = mat
 
 func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void:
 	if _dead:
 		return
 	health -= amount
-	_update_label()
 	if health <= 0:
 		_die()
-
-func _update_label() -> void:
-	if health_label:
-		var team_name := "BLUE BASE" if team == 0 else "RED BASE"
-		health_label.text = "%s\nHP: %d" % [team_name, max(0, int(health))]
 
 func _die() -> void:
 	if _dead:
@@ -39,6 +43,3 @@ func _die() -> void:
 	var main := get_node_or_null("/root/Main")
 	if main and main.has_method("game_over_signal"):
 		main.game_over_signal(winner)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.3, 0.3, 0.3)
-	mesh.material_override = mat
