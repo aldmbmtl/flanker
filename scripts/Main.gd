@@ -30,6 +30,7 @@ var fps_mode     := true
 var _respawning  := false
 var _respawn_timer: float = 0.0
 var player_start_team: int = 0
+var time_seed: int = 1  # 0=sunrise 1=noon 2=sunset 3=night
 
 const FPSPlayerScene := preload("res://scenes/FPSPlayer.tscn")
 
@@ -64,20 +65,16 @@ var _pause_menu: Control
 func _ready() -> void:
 	entity_hud.setup($HUD/HUDOverlay)
 	
-	print("[Main] _ready: has_multiplayer_peer = ", multiplayer.has_multiplayer_peer())
+	var _has_network_peer: bool = NetworkManager._peer != null
+	print("[Main] _ready: has_network_peer = ", _has_network_peer)
 	
-	if multiplayer.has_multiplayer_peer():
+	if _has_network_peer:
 		_is_singleplayer = false
-	else:
-		_is_singleplayer = true
-	
-	print("[Main] _ready: _is_singleplayer set to ", _is_singleplayer)
-	
-	if multiplayer.has_multiplayer_peer():
-		_is_singleplayer = false
+		print("[Main] _ready: _is_singleplayer set to false")
 		_setup_multiplayer_game()
 	else:
 		_is_singleplayer = true
+		print("[Main] _ready: _is_singleplayer set to true")
 		_setup_singleplayer_game()
 		_on_start_game()
 
@@ -88,14 +85,14 @@ func _setup_singleplayer_game() -> void:
 	_start_menu.connect("start_game", _on_start_game)
 	_start_menu.connect("quit_game", _on_quit_from_menu)
 	_pause_menu = PauseMenuScene.instantiate()
-	add_child(_pause_menu)
+	$HUD.add_child(_pause_menu)
 	print("[Main] _setup_singleplayer_game: _pause_menu=", _pause_menu, " visible=", _pause_menu.visible)
 	_HUD_set_visible(false)
 	_randomize_time_of_day()
 
 func _setup_multiplayer_game() -> void:
 	_pause_menu = PauseMenuScene.instantiate()
-	add_child(_pause_menu)
+	$HUD.add_child(_pause_menu)
 	_spawn_local_player()
 	_spawn_remote_player_manager()
 	_start_multiplayer_game()
@@ -153,7 +150,7 @@ func _setup_hud_for_player() -> void:
 	fps_player.connect("died", _on_player_died)
 
 func _randomize_time_of_day() -> void:
-	var time_seed := randi() % 4
+	time_seed = randi() % 4
 	var sun := $World/SunLight
 	var world_env := $World/WorldEnvironment
 	

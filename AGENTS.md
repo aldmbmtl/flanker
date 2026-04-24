@@ -22,7 +22,8 @@ Game binary: `/usr/bin/godot` (system install, 4.6.2). No `./godot` or `bin/godo
 Most geometry is built at runtime in `_ready()` — no pre-baked meshes:
 - `TerrainGenerator.gd` — procedural 200×200 mesh + `HeightMapShape3D` collision, new seed each launch
 - `LaneVisualizer.gd` — dirt ribbon meshes along lane curves
-- `LampPlacer.gd` — street lamp nodes placed along lane sample points
+- `LampPlacer.gd` — street lamp nodes placed along lane sample points. Each lamp is a `StaticBody3D` with a `SphereShape3D` hitbox on the bulb only. Exposes `lamp_scripts: Array` for darkness queries
+- `ShootableLamp.gd` — script node attached to each lamp. Holds refs to `OmniLight3D`, bulb `MeshInstance3D`, bulb `StandardMaterial3D`. `shoot_out()` triggers flicker-then-dark; auto-restores after 15s via `_process`
 - `TreePlacer.gd` — procedural trees along lane edges (11275 trees per run)
 - `Tower.gd` — towers have no prebaked meshes, setup() generates at runtime
 
@@ -92,6 +93,10 @@ Main (Node, Main.gd)
 - **Physics-based Bullets**: Realistic gravity with different speeds for player (280 m/s) vs minions (120 m/s)
 - **Team Resource System**: Currency based on team points for tower placement
 - **Minion AI**: Pathfinding, strafing, separation steering, and ranged combat
+- **Time-of-Day**: `Main.time_seed` (0=sunrise, 1=noon, 2=sunset, 3=night) set once at game start. Lamps off at noon, on otherwise
+- **Shootable Street Lamps**: Bulb-only `SphereShape3D` hitbox. `Bullet.gd` checks `is_lamp` meta on hit `StaticBody3D` → calls `ShootableLamp.shoot_out()`. Flicker on shoot-out and on restore (15s timer)
+- **Darkness Mechanics**: `MinionAI._is_in_darkness(pos)` walks `LampPlacer.lamp_scripts` — if no lit lamp within 22 units, pos is dark. Dark targets: detect range 12→5, shot miss chance 60%
+- **Entity Health Bars**: Visible only when zoomed (`camera.fov < 55`), within 75 units, and with clear line-of-sight (occlusion raycast in `EntityHUD.process_entity_hud`)
 
 ## Adding new input actions
 Register in `project.godot` `[input]` section using the existing Object serialization format. Physical keycodes for common keys:

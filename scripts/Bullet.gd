@@ -49,6 +49,14 @@ func _process(delta: float) -> void:
 		var hit: Object = result.collider
 		var hit_pos: Vector3 = result.position
 		var hit_normal: Vector3 = result.get("normal", Vector3.UP)
+		# Check if bullet hit a street lamp
+		if hit is StaticBody3D and hit.has_meta("is_lamp"):
+			var lamp_node: Node = hit.get_meta("lamp_script", null)
+			if lamp_node and lamp_node.has_method("shoot_out"):
+				lamp_node.shoot_out()
+			_spawn_sparks(hit_pos, hit_normal, hit)
+			queue_free()
+			return
 		if _should_damage(hit):
 			hit.take_damage(damage, source, shooter_team)
 		_spawn_sparks(hit_pos, hit_normal, hit)

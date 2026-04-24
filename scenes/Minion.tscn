@@ -20,9 +20,6 @@ visible = false
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("CapsuleShape3D_1")
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-shape = SubResource("CapsuleShape3D_1")
-
 [node name="ShootAudio" type="AudioStreamPlayer3D" parent="."]
 stream = null
 volume_db = -6.0

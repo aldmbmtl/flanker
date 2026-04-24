@@ -1,16 +1,21 @@
 extends Node3D
 
-const LAMP_SPACING  := 6
-const ROAD_OFFSET   := 3.2    # distance from lane center to pole base
-const POLE_HEIGHT   := 4.0
-const ARM_LENGTH    := 1.4    # how far arm extends inward over road
-const HANGER_DROP   := 0.85   # wire drop from arm tip
-const LIGHT_Y_OFF   := 0.1    # bulb below lamp head center
-const LIGHT_RANGE   := 22.0
-const LIGHT_ENERGY  := 5.0
-const LIGHT_COLOR   := Color(1.0, 0.72, 0.35)
-const POLE_COLOR    := Color(0.22, 0.22, 0.26)
+const LAMP_SPACING   := 6
+const ROAD_OFFSET    := 3.2
+const POLE_HEIGHT    := 4.0
+const ARM_LENGTH     := 1.4
+const HANGER_DROP    := 0.85
+const LIGHT_Y_OFF    := 0.1
+const LIGHT_RANGE    := 22.0
+const LIGHT_ENERGY   := 5.0
+const LIGHT_COLOR    := Color(1.0, 0.72, 0.35)
+const POLE_COLOR     := Color(0.22, 0.22, 0.26)
 const BASE_CLEARANCE := 10.0
+
+const ShootableLampScript := preload("res://scripts/ShootableLamp.gd")
+
+# All lamp scripts — queried by MinionAI for darkness checks
+var lamp_scripts: Array = []
 
 func _ready() -> void:
 	var pole_mat := StandardMaterial3D.new()
@@ -21,29 +26,39 @@ func _ready() -> void:
 	for lane_i in range(3):
 		var pts: Array = LaneData.get_lane_points(lane_i)
 		for i in range(0, pts.size(), LAMP_SPACING):
-			# Skip near base zones
 			var center: Vector2 = pts[i]
 			if absf(center.y - 84.0) < BASE_CLEARANCE or absf(center.y + 84.0) < BASE_CLEARANCE:
 				continue
 
-			# Lane direction via neighbours
 			var prev: Vector2 = pts[max(i - 1, 0)]
 			var next: Vector2 = pts[min(i + 1, pts.size() - 1)]
 			var dir: Vector2 = (next - prev).normalized()
-			# Perpendicular: rotate 90° CCW
 			var perp := Vector2(-dir.y, dir.x)
-			# Alternate sides per lamp index
 			var side_index := i / LAMP_SPACING
 			var offset: Vector2 = perp * ROAD_OFFSET if (side_index % 2 == 0) else -perp * ROAD_OFFSET
-			# Arm points inward (toward road center), opposite of offset
 			var arm_dir: Vector2 = -offset.normalized()
 
 			var base_xz := Vector2(center.x + offset.x, center.y + offset.y)
 			_place_lamp(base_xz, arm_dir, pole_mat)
 
+	# Noon (time_seed == 1): lamps off, all other times (dusk/sunrise/night): on
+	var main: Node = get_node_or_null("/root/Main")
+	var is_noon: bool = false
+	if main and main.get("time_seed") != null:
+		is_noon = (main.time_seed == 1)
+
+	if is_noon:
+		for lamp in lamp_scripts:
+			lamp._light.visible = false
+			lamp._bulb_mat.emission_energy_multiplier = 0.0
+			lamp._bulb_mat.albedo_color = Color(0.15, 0.12, 0.08)
+			lamp.is_dark = true  # treat as permanently dark (no respawn at noon)
+
 func _place_lamp(base_xz: Vector2, arm_dir: Vector2, pole_mat: StandardMaterial3D) -> void:
-	var root := Node3D.new()
+	# Root is a StaticBody3D so bullets can raycast-hit it
+	var root := StaticBody3D.new()
 	root.position = Vector3(base_xz.x, 0.0, base_xz.y)
+	root.set_meta("is_lamp", true)
 	add_child(root)
 
 	# ── Pole ──────────────────────────────────────────────
@@ -56,11 +71,9 @@ func _place_lamp(base_xz: Vector2, arm_dir: Vector2, pole_mat: StandardMaterial3
 	root.add_child(pole_mi)
 
 	# ── Horizontal arm ────────────────────────────────────
-	# Arm runs from pole top toward road; centre of arm box is at half ARM_LENGTH
 	var arm_cx := arm_dir.x * (ARM_LENGTH * 0.5)
 	var arm_cz := arm_dir.y * (ARM_LENGTH * 0.5)
-	# Rotate arm mesh to face arm_dir
-	var arm_angle := atan2(arm_dir.x, arm_dir.y)  # around Y axis
+	var arm_angle := atan2(arm_dir.x, arm_dir.y)
 	var arm_mesh := BoxMesh.new()
 	arm_mesh.size = Vector3(0.1, 0.1, ARM_LENGTH)
 	var arm_mi := MeshInstance3D.new()
@@ -111,6 +124,23 @@ func _place_lamp(base_xz: Vector2, arm_dir: Vector2, pole_mat: StandardMaterial3
 	light.light_color = LIGHT_COLOR
 	light.light_energy = LIGHT_ENERGY
 	light.omni_range = LIGHT_RANGE
-	light.shadow_enabled = false
+	light.shadow_enabled = true
 	light.position = Vector3(tip_x, head_y - LIGHT_Y_OFF, tip_z)
 	root.add_child(light)
+
+	# ── Lamp head + bulb collision only (pole is not shootable) ──
+	var head_col := CollisionShape3D.new()
+	var head_sphere := SphereShape3D.new()
+	head_sphere.radius = 0.45
+	head_col.shape = head_sphere
+	head_col.position = Vector3(tip_x, head_y - LIGHT_Y_OFF, tip_z)
+	root.add_child(head_col)
+
+	# ── ShootableLamp script node ──────────────────────────
+	var lamp := Node.new()
+	lamp.set_script(ShootableLampScript)
+	root.add_child(lamp)
+	lamp.setup(light, bulb_mi, bulb_mat)
+	root.set_meta("lamp_script", lamp)
+
+	lamp_scripts.append(lamp)

@@ -3,6 +3,8 @@ extends CharacterBody3D
 const GRAVITY          := 20.0
 const MAX_HEALTH       := 60.0
 const DETECT_RANGE     := 12.0
+const DARK_DETECT_RANGE := 5.0
+const DARK_MISS_CHANCE  := 0.60
 const SHOOT_RANGE      := 10.0
 const SEPARATION_DIST  := 2.2
 const SEPARATION_FORCE := 6.0
@@ -43,31 +45,52 @@ const BulletScene := preload("res://scenes/Bullet.tscn")
 const BLUE_MODEL_PATH := "res://assets/kenney_blocky-characters/Models/GLB format/character-e.glb"
 const RED_MODEL_PATH  := "res://assets/kenney_blocky-characters/Models/GLB format/character-b.glb"
 
+# Static scene cache — loaded once, shared across all instances
+static var _blue_scene_cache: PackedScene = null
+static var _red_scene_cache: PackedScene  = null
+
+# Throttle counters
+const TARGET_INTERVAL    := 10  # frames between target rescans
+const SEPARATION_INTERVAL := 3  # frames between separation passes
+var _target_frame   := 0
+var _sep_frame      := 0
+
+# Cached node references
+var _cached_towers: Array = []
+var _cached_bases:  Array = []
+var _enemy_base: Node3D = null
+
 func _ready() -> void:
 	add_to_group("minions")
 	add_to_group("minion_units")
 	call_deferred("_init_visuals")
 	call_deferred("_create_hud_element")
+	call_deferred("_cache_static_refs")
 
 func _init_visuals() -> void:
 	# Get character nodes from scene tree
 	char_blue = $CharacterBlue
 	char_red  = $CharacterRed
 	
-	# Load and add models at runtime
-	var blue_scene: PackedScene = load(BLUE_MODEL_PATH)
-	if blue_scene:
-		var blue_model: Node = blue_scene.instantiate()
+	# Load and add models — use static cache so load() only runs once ever
+	if _blue_scene_cache == null:
+		_blue_scene_cache = load(BLUE_MODEL_PATH)
+	if _red_scene_cache == null:
+		_red_scene_cache = load(RED_MODEL_PATH)
+
+	if _blue_scene_cache:
+		var blue_model: Node = _blue_scene_cache.instantiate()
 		char_blue.add_child(blue_model)
 		blue_model.scale = Vector3(0.667, 0.667, 0.667)
 		blue_model.rotate_y(PI)
-			
-	var red_scene: PackedScene = load(RED_MODEL_PATH)
-	if red_scene:
-		var red_model: Node = red_scene.instantiate()
+		_disable_shadows(blue_model)
+
+	if _red_scene_cache:
+		var red_model: Node = _red_scene_cache.instantiate()
 		char_red.add_child(red_model)
 		red_model.scale = Vector3(0.667, 0.667, 0.667)
 		red_model.rotate_y(PI)
+		_disable_shadows(red_model)
 	
 	# Show the correct character body for this team
 	char_blue.visible = (team == 0)
@@ -86,6 +109,31 @@ func _init_visuals() -> void:
 		death_audio.stream = death_stream
 
 	_play_anim("idle")
+	_add_shadow_proxy()
+
+func _add_shadow_proxy() -> void:
+	var proxy := MeshInstance3D.new()
+	var mesh := CapsuleMesh.new()
+	mesh.radius = 0.35
+	mesh.height = 1.8
+	proxy.mesh = mesh
+	proxy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+	add_child(proxy)
+
+func _disable_shadows(node: Node) -> void:
+	if node is MeshInstance3D:
+		(node as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for child in node.get_children():
+		_disable_shadows(child)
+
+func _cache_static_refs() -> void:
+	_cached_towers = get_tree().get_nodes_in_group("towers")
+	_cached_bases  = get_tree().get_nodes_in_group("bases")
+	var enemy_team: int = 1 if team == 0 else 0
+	for b in _cached_bases:
+		if b.team == enemy_team:
+			_enemy_base = b
+			break
 
 func _find_anim_player(root: Node) -> AnimationPlayer:
 	for child in root.get_children():
@@ -124,7 +172,12 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= GRAVITY * delta
 
 	_attack_timer -= delta
-	_target = _find_target()
+
+	# Throttle: rescan for target every TARGET_INTERVAL frames
+	_target_frame += 1
+	if _target_frame >= TARGET_INTERVAL:
+		_target_frame = 0
+		_target = _find_target()
 
 	var moving := false
 
@@ -159,7 +212,12 @@ func _physics_process(delta: float) -> void:
 	else:
 		_play_anim("idle")
 
-	_apply_separation()
+	# Throttle: apply separation every SEPARATION_INTERVAL frames
+	_sep_frame += 1
+	if _sep_frame >= SEPARATION_INTERVAL:
+		_sep_frame = 0
+		_apply_separation()
+
 	move_and_slide()
 
 func _approach_with_strafe(target: Node3D, _delta: float) -> void:
@@ -201,11 +259,9 @@ func _march(_delta: float) -> void:
 		velocity.z = horiz.z * speed
 		_face(dest)
 	elif _target == null:
-		# Waypoints exhausted, continue to enemy base
-		var target_team: int = 1 if team == 0 else 0
-		var base: Node3D = get_tree().get_first_node_in_group("bases") as Node3D
-		if base and base.team == target_team:
-			var to_base: Vector3 = base.global_position - global_position
+		# Waypoints exhausted, continue to enemy base using cached ref
+		if _enemy_base and is_instance_valid(_enemy_base):
+			var to_base: Vector3 = _enemy_base.global_position - global_position
 			to_base.y = 0.0
 			if to_base.length() > 2.0:
 				var dir: Vector3 = to_base.normalized()
@@ -236,7 +292,8 @@ func _find_target() -> Node3D:
 		if m == self or m.team == team or m._dead:
 			continue
 		var d: float = global_position.distance_to(m.global_position)
-		if d < best_dist:
+		var effective_range: float = DARK_DETECT_RANGE if _is_in_darkness(m.global_position) else DETECT_RANGE
+		if d < effective_range and d < best_dist:
 			best_dist = d
 			best = m
 	var player := get_tree().get_first_node_in_group("player")
@@ -244,18 +301,19 @@ func _find_target() -> Node3D:
 		var p_team: int = player.get("player_team") if player.get("player_team") != null else -1
 		if p_team != team and p_team >= 0:
 			var d: float = global_position.distance_to(player.global_position)
-			if d < best_dist:
+			var effective_range: float = DARK_DETECT_RANGE if _is_in_darkness(player.global_position) else DETECT_RANGE
+			if d < effective_range and d < best_dist:
 				best_dist = d
 				best = player
-	for t in get_tree().get_nodes_in_group("towers"):
-		if t.team == team:
+	for t in _cached_towers:
+		if not is_instance_valid(t) or t.team == team:
 			continue
 		var d: float = global_position.distance_to(t.global_position)
 		if d < best_dist:
 			best_dist = d
 			best = t
-	for b in get_tree().get_nodes_in_group("bases"):
-		if b.team == team:
+	for b in _cached_bases:
+		if not is_instance_valid(b) or b.team == team:
 			continue
 		var d: float = global_position.distance_to(b.global_position)
 		if d < best_dist:
@@ -263,8 +321,25 @@ func _find_target() -> Node3D:
 			best = b
 	return best
 
+func _is_in_darkness(pos: Vector3) -> bool:
+	var lamp_placer: Node = get_node_or_null("/root/Main/World/LampPlacer")
+	if lamp_placer == null:
+		return false
+	var scripts: Array = lamp_placer.get("lamp_scripts") if lamp_placer.get("lamp_scripts") != null else []
+	for lamp in scripts:
+		if lamp.is_dark:
+			continue
+		# lamp position is its parent StaticBody3D world position
+		var lamp_pos: Vector3 = lamp.get_parent().global_position
+		if lamp_pos.distance_to(pos) <= 22.0:
+			return false
+	return true
+
 func _fire_at(target: Node3D) -> void:
 	if not is_inside_tree() or not is_instance_valid(target) or not target.is_inside_tree():
+		return
+	# Miss chance when target is in darkness
+	if _is_in_darkness(target.global_position) and randf() < DARK_MISS_CHANCE:
 		return
 	var spawn_pos: Vector3 = global_position + Vector3(0.0, 0.8, 0.0)
 	var aim_pos: Vector3   = target.global_position + Vector3(0.0, 0.5, 0.0)

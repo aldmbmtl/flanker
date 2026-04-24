@@ -10,19 +10,20 @@ var wave_timer := 0.0
 var _minion_counter: int = 0
 
 var _minion_scene: PackedScene = null
+var _main: Node = null
 
 func _ready() -> void:
 	_minion_scene = load(MINION_SCENE)
+	_main = get_node_or_null("/root/Main")
 
 func _process(delta: float) -> void:
 	if not multiplayer.is_server():
 		return
 	wave_timer += delta
 	# Update countdown label
-	var main := get_node_or_null("/root/Main")
-	if main and main.has_method("update_wave_info"):
+	if _main and _main.has_method("update_wave_info"):
 		var next_in := int(WAVE_INTERVAL - wave_timer) + 1
-		main.update_wave_info(wave_number, next_in)
+		_main.update_wave_info(wave_number, next_in)
 
 	if wave_timer >= WAVE_INTERVAL:
 		wave_timer = 0.0
@@ -30,9 +31,8 @@ func _process(delta: float) -> void:
 		_launch_wave()
 
 func _launch_wave() -> void:
-	var main := get_node_or_null("/root/Main")
-	if main and main.has_method("show_wave_announcement"):
-		main.show_wave_announcement(wave_number)
+	if _main and _main.has_method("show_wave_announcement"):
+		_main.show_wave_announcement(wave_number)
 
 	var count: int = min(wave_number, 5)
 	for lane_i in range(3):

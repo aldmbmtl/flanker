@@ -118,10 +118,11 @@ const PLAYER_SYNC_INTERVAL := 5
 func _ready() -> void:
 	add_to_group("players")
 	_base_cam_y = camera.position.y
-	_peer_id = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
-	_is_local = not multiplayer.has_multiplayer_peer() or multiplayer.get_unique_id() == _peer_id
+	var _has_network_peer: bool = NetworkManager._peer != null
+	_peer_id = multiplayer.get_unique_id() if _has_network_peer else 1
+	_is_local = not _has_network_peer or multiplayer.get_unique_id() == _peer_id
 	
-	if multiplayer.has_multiplayer_peer():
+	if _has_network_peer:
 		var my_id := multiplayer.get_unique_id()
 		_is_local = (name == "FPSPlayer_%d" % my_id)
 		var info: Dictionary = LobbyManager.players.get(my_id, {})

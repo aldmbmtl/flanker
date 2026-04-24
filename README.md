@@ -14,6 +14,8 @@ This is a prototype for a hybrid FPS/RTS game that combines ground-based combat 
 - Physics-based bullet system with realistic gravity
 - Tower defense mechanics with auto-attack AI
 - Team-based currency and resource management
+- Dynamic lighting with shootable street lamps
+- Time-of-day system affecting lamp behavior and visibility
 
 ## System Requirements
 
@@ -150,6 +152,24 @@ Each run is **procedurally seeded** — the map is different every game:
 - Minions detect enemies at **12 units**, begin strafing approach
 - Stop and fire at **10 units**; each has a unique strafe phase so crowds naturally spread out
 - Separation steering prevents minions from stacking
+- In darkness (no nearby lit lamp), detect range drops to **5 units** and shots have a **60% miss chance**
+- Shoot out a lamp while being chased — minions lose track and bullets go wide
+
+### Street Lamps and Darkness
+
+Lanes are lined with hanging street lamps procedurally placed along each curve.
+
+- **Time-of-day aware** — lamps are on at sunrise, dusk, and night. At noon they stay off (daylight is sufficient)
+- **Shootable** — aim at the bulb and shoot to destroy the light. Only the bulb has a hitbox; shooting the pole does nothing
+- **Flicker on shoot-out** — the bulb flickers rapidly before going dark, simulating the filament dying
+- **Auto-respawn** — shot-out lamps flicker back on after **15 seconds**
+- **Tactical darkness** — dark zones reduce minion detection range and accuracy. Use them to break pursuit or set up an ambush
+
+### Enemy Health Bars
+
+- Health bars appear above enemies when **zoomed in** (`RMB` hold)
+- Only visible within **75 units**
+- Occluded by terrain and geometry — no health bars through hills or walls
 
 ---
 
@@ -200,12 +220,3 @@ flanker/
 - `LaneData` autoload is the **single source of truth** for all lane positions — never hardcode lane coordinates elsewhere
 - The project was developed against Godot **4.6.2** (system install). No `.NET` / Mono required
 - No external dependencies beyond Godot 4.6.2 engine
-
----
-
-## Development Notes
-
-- All scene and resource edits are done **by hand in `.tscn` / `.tres` files** — there is no editor GUI workflow
-- Geometry is generated at runtime in `_ready()` — no pre-baked meshes in the repo
-- `LaneData` autoload is the **single source of truth** for all lane positions — never hardcode lane coordinates elsewhere
-- The project was developed against Godot **4.6.2** (system install). No `.NET` / Mono required

@@ -58,6 +58,14 @@ func process_entity_hud(_delta: float, active_camera: Camera3D, crosshair_pos: V
 	if not active_camera or not _hud_root:
 		return
 
+	# Only show health bars when zoomed in (FOV below midpoint between normal 75 and zoom 30)
+	var is_zoomed: bool = active_camera.fov < 55.0
+	if not is_zoomed:
+		for entity in active_entities:
+			if is_instance_valid(entity.get("entity")) and is_instance_valid(entity.get("ui_node")):
+				entity.ui_node.visible = false
+		return
+
 	var to_remove: Array = []
 	var visible_entries: Array = []
 
@@ -67,7 +75,7 @@ func process_entity_hud(_delta: float, active_camera: Camera3D, crosshair_pos: V
 			continue
 
 		entity.camera_dist = active_camera.global_position.distance_to(entity.entity.global_position)
-		if entity.camera_dist > 25.0:
+		if entity.camera_dist > 75.0:
 			entity.ui_node.visible = false
 			continue
 
@@ -93,6 +101,17 @@ func process_entity_hud(_delta: float, active_camera: Camera3D, crosshair_pos: V
 		if crosshair_pos != Vector2.ZERO and crosshair_pos != Vector2(-1, -1):
 			var to_crosshair: Vector2 = screen_pos - crosshair_pos
 			if to_crosshair.length() > 80.0:
+				entity.ui_node.visible = false
+				continue
+
+		# Occlusion check — cast ray from camera to entity head; skip if blocked
+		var space: PhysicsDirectSpaceState3D = active_camera.get_world_3d().direct_space_state
+		if space:
+			var ray := PhysicsRayQueryParameters3D.create(active_camera.global_position, head_pos)
+			ray.collide_with_bodies = true
+			ray.exclude = [entity.entity]  # don't block on the entity itself
+			var hit: Dictionary = space.intersect_ray(ray)
+			if not hit.is_empty():
 				entity.ui_node.visible = false
 				continue
 
