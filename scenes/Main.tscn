@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3 uid="uid://main"]
+[gd_scene load_steps=18 format=3 uid="uid://main"]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/FPSPlayer.tscn" id="2"]
@@ -14,6 +14,12 @@
 [ext_resource type="Script" path="res://scripts/Minimap.gd" id="12"]
 [ext_resource type="Script" path="res://scripts/EntityHUD.gd" id="13"]
 [ext_resource type="Script" path="res://scripts/WallPlacer.gd" id="14"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_health_fill"]
+bg_color = Color(0.2, 0.9, 0.2, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_stamina_fill"]
+bg_color = Color(1, 0.9, 0.2, 1)
 
 [node name="Main" type="Node"]
 script = ExtResource("1")
@@ -231,6 +237,7 @@ min_value = 0.0
 max_value = 100.0
 value = 100.0
 show_percentage = false
+theme_override_styles/fill = SubResource("StyleBoxFlat_health_fill")
 
 [node name="StaminaBar" type="ProgressBar" parent="HUD"]
 anchor_left = 0.0
@@ -245,6 +252,7 @@ min_value = 0.0
 max_value = 100.0
 value = 100.0
 show_percentage = false
+theme_override_styles/fill = SubResource("StyleBoxFlat_stamina_fill")
 
 [node name="RespawnLabel" type="Label" parent="HUD"]
 anchors_preset = 8

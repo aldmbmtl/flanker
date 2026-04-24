@@ -61,7 +61,7 @@ func _init_visuals() -> void:
 		char_blue.add_child(blue_model)
 		blue_model.scale = Vector3(0.667, 0.667, 0.667)
 		blue_model.rotate_y(PI)
-	
+			
 	var red_scene: PackedScene = load(RED_MODEL_PATH)
 	if red_scene:
 		var red_model: Node = red_scene.instantiate()
@@ -287,7 +287,7 @@ func _fire_at(target: Node3D) -> void:
 
 func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void:
 	if _dead:
-		return
+					return
 	health -= amount
 	if health <= 0.0:
 		_die()

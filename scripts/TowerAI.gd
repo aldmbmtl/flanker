@@ -49,7 +49,19 @@ func _load_team_model() -> void:
 		print("TowerAI: generate_scene failed")
 		return
 	add_child(root)
+	_add_hit_overlay()
 	print("TowerAI: loaded model")
+
+func _add_hit_overlay() -> void:
+	for child in get_children():
+		if child is MeshInstance3D:
+			var overlay_mat := StandardMaterial3D.new()
+			overlay_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			overlay_mat.albedo_color = Color(1, 0.2, 0.2, 0.0)
+			overlay_mat.emission_enabled = true
+			overlay_mat.emission = Color(1, 0.2, 0.2, 1)
+			overlay_mat.emission_energy_multiplier = 3.0
+			child.set("material_override", overlay_mat)
 
 func _process(delta: float) -> void:
 	if _dead:
@@ -117,12 +129,29 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void
 	if _dead:
 		return
 	health -= amount
+	_hit_flash()
 	if hud_id > 0:
 		var entity_hud := get_node_or_null("/root/Main/HUD/HUDOverlay/EntityHUD")
 		if entity_hud and entity_hud.has_method("update_entity_health"):
 			entity_hud.call("update_entity_health", hud_id, health)
 	if health <= 0:
 		_die()
+
+var _hit_flash_tween: Tween
+
+func _hit_flash() -> void:
+	if mesh == null:
+		return
+	
+	if _hit_flash_tween and _hit_flash_tween.is_valid():
+		_hit_flash_tween.kill()
+	
+	var mat: StandardMaterial3D = mesh.get("material_override")
+	if mat != null and mat is StandardMaterial3D:
+		mat.albedo_color = Color(1, 0.2, 0.2, 0.8)
+		
+		_hit_flash_tween = create_tween()
+		_hit_flash_tween.tween_property(mat, "albedo_color", Color(1, 0.2, 0.2, 0.0), 0.3)
 
 func _die() -> void:
 	_dead = true

@@ -29,6 +29,12 @@ const COL_RED_TOWER  := Color(1.0, 0.4, 0.1, 1.0)
 func _ready() -> void:
 	custom_minimum_size = Vector2(MINIMAP_SIZE, MINIMAP_SIZE)
 	mouse_filter = MOUSE_FILTER_IGNORE
+	
+	var main_root = get_tree().root.get_node("Main")
+	if main_root:
+		var players = main_root.get_tree().get_nodes_in_group("player")
+		if players.size() > 0:
+			_fps_player = players[0]
 
 	# Pre-bake lane polylines
 	for i in range(3):
@@ -81,11 +87,13 @@ func _draw() -> void:
 		if _in_bounds(px):
 			draw_circle(px, 4.0, COL_PLAYER)
 
-	# Tower dots
+# Tower dots
 	var main = get_tree().root.get_node("Main")
-	if main and main.has_node("FPSPlayer"):
-		var towers = get_tree().root.get_node("Main").get_children()
-		for node in towers:
+	var towers = []
+	if main:
+		towers = main.get_children()
+	
+	for node in towers:
 			if not is_instance_valid(node):
 				continue
 			var tower = node as Node3D

@@ -131,7 +131,7 @@ func _start_multiplayer_game() -> void:
 	_setup_bases()
 	_set_mode(true)
 	wave_announce_label.visible = false
-	wave_info_label.text = "Wave: 0 | First wave in: 30s"
+	wave_info_label.text = "Wave: 0 | First wave in: 10s"
 	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
 	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
 	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
@@ -275,11 +275,9 @@ func _input(event: InputEvent) -> void:
 				GameState.MENU:
 					_on_quit_from_menu()
 				GameState.PLAYING:
-					if _is_singleplayer:
-						toggle_pause(true)
+					toggle_pause(true)
 				GameState.PAUSED:
-					if _is_singleplayer:
-						toggle_pause(false)
+					toggle_pause(false)
 			return
 		if event.keycode == KEY_TAB or event.physical_keycode == KEY_TAB:
 			if game_state == GameState.PLAYING and not game_over and not _respawning:
@@ -304,7 +302,7 @@ func _on_start_game() -> void:
 	_set_mode(true)
 	get_tree().set_auto_accept_quit(true)
 	wave_announce_label.visible = false
-	wave_info_label.text = "Wave: 0 | First wave in: 30s"
+	wave_info_label.text = "Wave: 0 | First wave in: 10s"
 	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
 	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
 	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
