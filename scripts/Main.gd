@@ -31,17 +31,13 @@ var _respawning  := false
 var _respawn_timer: float = 0.0
 var player_start_team: int = 0
 
-@onready var fps_player:         CharacterBody3D = $FPSPlayer
+const FPSPlayerScene := preload("res://scenes/FPSPlayer.tscn")
+
 @onready var rts_camera:         Camera3D        = $RTSCamera
 @onready var entity_hud:         Node            = $HUD/HUDOverlay/EntityHUD
 
-func _enter_tree() -> void:
-	# Randomize player team on enter tree (before _ready)
-	player_start_team = randi() % 2
-	var player := get_node_or_null("FPSPlayer")
-	if player:
-		player.set("player_team", player_start_team)
-		player.add_to_group("player")
+var fps_player: CharacterBody3D = null
+
 @onready var mode_label:         Label           = $HUD/ModeLabel
 @onready var game_over_label:    Label           = $HUD/GameOverLabel
 @onready var wave_info_label:    Label           = $HUD/WaveInfoLabel
@@ -66,24 +62,72 @@ var _start_menu: Control
 var _pause_menu: Control
 
 func _ready() -> void:
-	# Wire EntityHUD root container
 	entity_hud.setup($HUD/HUDOverlay)
+	
+	if multiplayer.has_multiplayer_peer():
+		_is_singleplayer = false
+		_setup_multiplayer_game()
+	else:
+		_setup_singleplayer_game()
 
-	# Instantiate start menu
+func _setup_singleplayer_game() -> void:
 	_start_menu = StartMenuScene.instantiate()
 	add_child(_start_menu)
 	_start_menu.connect("start_game", _on_start_game)
 	_start_menu.connect("quit_game", _on_quit_from_menu)
-
-	# Instantiate pause menu (hidden initially)
 	_pause_menu = PauseMenuScene.instantiate()
 	add_child(_pause_menu)
-
-	# Game starts in menu state - hide HUD
 	_HUD_set_visible(false)
-	
-	# Randomize time of day
 	_randomize_time_of_day()
+
+func _setup_multiplayer_game() -> void:
+	_pause_menu = PauseMenuScene.instantiate()
+	add_child(_pause_menu)
+	_spawn_local_player()
+	_start_multiplayer_game()
+	_randomize_time_of_day()
+
+func _spawn_local_player() -> void:
+	var my_id := multiplayer.get_unique_id()
+	var info: Dictionary = LobbyManager.players.get(my_id, {})
+	player_start_team = info.team if info.has("team") else 0
+	
+	fps_player = FPSPlayerScene.instantiate()
+	fps_player.set("player_team", player_start_team)
+	fps_player.name = "FPSPlayer_%d" % my_id
+	add_child(fps_player)
+	fps_player.add_to_group("player")
+	
+	var spawn_z: float = 84.0 if player_start_team == 0 else -84.0
+	fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
+
+func _start_multiplayer_game() -> void:
+	game_state = GameState.PLAYING
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	_HUD_set_visible(true)
+	_setup_bases()
+	_set_mode(true)
+	wave_announce_label.visible = false
+	wave_info_label.text = "Wave: 0 | First wave in: 30s"
+	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
+	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
+	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
+	_setup_hud_for_player()
+	call_deferred("_spawn_weapon_pickups")
+	call_deferred("_setup_lane_data")
+	call_deferred("_spawn_preset_towers")
+
+func _setup_hud_for_player() -> void:
+	if not fps_player:
+		return
+	fps_player.reload_bar    = $HUD/Crosshair/ReloadBar
+	fps_player.health_bar    = $HUD/HealthBar
+	fps_player.weapon_label  = weapon_label
+	fps_player.ammo_label    = ammo_label
+	fps_player.reload_prompt = reload_prompt
+	fps_player.stamina_bar  = $HUD/StaminaBar
+	fps_player.points_label = points_label
+	fps_player.connect("died", _on_player_died)
 
 func _randomize_time_of_day() -> void:
 	var time_seed := randi() % 4
@@ -125,51 +169,42 @@ func _process(delta: float) -> void:
 			_do_respawn()
 		else:
 			respawn_label.text = "Respawning in %d..." % (int(_respawn_timer) + 1)
-
-	# Update entity health bars
 	if entity_hud and entity_hud.has_method("process_entity_hud"):
-		var cam: Camera3D = fps_player.get_node_or_null("Camera3D") if fps_mode else rts_camera
-		var crosshair_pos: Vector2 = get_viewport().get_visible_rect().size * 0.5 if fps_mode else Vector2(-1, -1)
+		var cam: Camera3D
+		var crosshair_pos: Vector2
+		if fps_player and fps_player.has_node("Camera3D"):
+			cam = fps_player.get_node("Camera3D") if fps_mode else rts_camera
+			crosshair_pos = get_viewport().get_visible_rect().size * 0.5 if fps_mode else Vector2(-1, -1)
 		entity_hud.call("process_entity_hud", delta, cam, crosshair_pos)
-
-		# Always show team points (both modes)
-		var player_team_name := "BLUE" if fps_player.player_team == 0 else "RED"
-		var player_pts := TeamData.get_points(fps_player.player_team)
-		var enemy_pts := TeamData.get_points(1 - fps_player.player_team)
-		points_label.text = "%s: %d" % [player_team_name, player_pts]
+		if fps_player:
+			var player_team_name := "BLUE" if fps_player.player_team == 0 else "RED"
+			var player_pts := TeamData.get_points(fps_player.player_team)
+			points_label.text = "%s: %d" % [player_team_name, player_pts]
 
 func _spawn_preset_towers() -> void:
 	const TOWER_SCENE := preload("res://scenes/Tower.tscn")
-	# Blue lane positions near blue base (z=70-75)
 	var blue_lane_positions: Array = [
-		Vector3(-28.0, 0.0, 70.0),   # Left lane (closer to path)
-		Vector3(-3.0, 0.0, 70.0),   # Mid lane (on edge of path)
-		Vector3(28.0, 0.0, 70.0),    # Right lane (closer to path)
+		Vector3(-28.0, 0.0, 70.0),
+		Vector3(-3.0, 0.0, 70.0),
+		Vector3(28.0, 0.0, 70.0),
 	]
-	# Red lane positions near red base (z=-70-75)
 	var red_lane_positions: Array = [
-		Vector3(28.0, 0.0, -70.0),   # Left lane (closer to path)
-		Vector3(3.0, 0.0, -70.0),    # Mid lane (on edge of path)
-		Vector3(-28.0, 0.0, -70.0),  # Right lane (closer to path)
+		Vector3(28.0, 0.0, -70.0),
+		Vector3(3.0, 0.0, -70.0),
+		Vector3(-28.0, 0.0, -70.0),
 	]
-
 	for pos in blue_lane_positions:
 		var tower = TOWER_SCENE.instantiate()
-		var terrain_y: float = _get_terrain_height(pos)
 		pos.y = 0
 		$World.add_child(tower)
 		tower.global_position = pos
-		tower.setup(0)  # Blue team
-		print("Preset blue tower spawned at ", pos)
-
+		tower.setup(0)
 	for pos in red_lane_positions:
 		var tower = TOWER_SCENE.instantiate()
-		var terrain_y: float = _get_terrain_height(pos)
 		pos.y = 0
 		$World.add_child(tower)
 		tower.global_position = pos
-		tower.setup(1)  # Red team
-		print("Preset red tower spawned at ", pos)
+		tower.setup(1)
 
 func _get_terrain_height(pos: Vector3) -> float:
 	var world_3d: World3D = get_tree().root.get_world_3d()
@@ -213,9 +248,13 @@ func _input(event: InputEvent) -> void:
 				audio_mode_switch.play()
 
 func _on_start_game() -> void:
+	player_start_team = randi() % 2
+	fps_player = FPSPlayerScene.instantiate()
+	fps_player.set("player_team", player_start_team)
+	add_child(fps_player)
+	fps_player.add_to_group("player")
 	game_state = GameState.PLAYING
 	_start_menu.visible = false
-	# Hide the menu's 3D world to prevent any rendering issues
 	var menu_cam: Node = _start_menu.get_node_or_null("MenuCamera")
 	if menu_cam:
 		menu_cam.visible = false
@@ -226,23 +265,12 @@ func _on_start_game() -> void:
 	get_tree().set_auto_accept_quit(true)
 	wave_announce_label.visible = false
 	wave_info_label.text = "Wave: 0 | First wave in: 30s"
-	# Wire audio streams
 	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
 	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
 	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
-	# Wire HUD refs into FPS controller
-	fps_player.reload_bar    = $HUD/Crosshair/ReloadBar
-	fps_player.health_bar  = $HUD/HealthBar
-	fps_player.weapon_label  = weapon_label
-	fps_player.ammo_label    = ammo_label
-	fps_player.reload_prompt = reload_prompt
-	fps_player.stamina_bar  = $HUD/StaminaBar
-	fps_player.points_label = points_label
-	fps_player.connect("died", _on_player_died)
-	# Set player spawn position based on team (z=+84 blue, z=-84 red)
-	var spawn_z: float = 84.0 if fps_player.player_team == 0 else -84.0
+	_setup_hud_for_player()
+	var spawn_z: float = 84.0 if player_start_team == 0 else -84.0
 	fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
-	# Spawn weapon pickups after terrain has settled
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
 	call_deferred("_spawn_preset_towers")
@@ -262,7 +290,8 @@ func toggle_pause(paused: bool) -> void:
 		game_state = GameState.PLAYING
 		_pause_menu.visible = false
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-		fps_player.set_active(true)
+		if fps_player:
+			fps_player.set_active(true)
 		rts_camera.current = false
 		fps_mode = true
 		mode_label.text = "Mode: FPS  [Tab] to switch"
@@ -282,7 +311,8 @@ func _HUD_set_visible(visible: bool) -> void:
 
 func _set_mode(is_fps: bool) -> void:
 	fps_mode = is_fps
-	fps_player.set_active(is_fps)
+	if fps_player:
+		fps_player.set_active(is_fps)
 	rts_camera.current  = !is_fps
 	crosshair.visible   = is_fps
 	minimap.visible     = is_fps
@@ -290,7 +320,6 @@ func _set_mode(is_fps: bool) -> void:
 	$HUD/StaminaBar.visible = is_fps
 	if not is_fps and reload_prompt:
 		reload_prompt.visible = false
-	# Toggle fog off in RTS mode
 	var world_env := $World/WorldEnvironment
 	if world_env and world_env.environment:
 		world_env.environment.fog_enabled = is_fps
@@ -340,32 +369,28 @@ func _on_player_died() -> void:
 func _do_respawn() -> void:
 	_respawning = false
 	respawn_label.visible = false
-	var spawn_pos: Vector3 = BLUE_SPAWN if fps_player.player_team == 0 else RED_SPAWN
-	fps_player.respawn(spawn_pos)
+	if fps_player:
+		var spawn_pos: Vector3 = BLUE_SPAWN if fps_player.player_team == 0 else RED_SPAWN
+		fps_player.respawn(spawn_pos)
 	audio_respawn.play()
 	_set_mode(true)
 
 func _spawn_weapon_pickups() -> void:
 	var pickup_sound: AudioStream = load(PickupSoundPath)
-	# Lane midpoint pickups (waypoint 20 of 40), perpendicular offset
 	for lane_i in range(3):
 		var pts: Array = LaneData.get_lane_points(lane_i)
 		if pts.size() < 21:
 			continue
 		var mid: Vector2 = pts[20]
-		# Perpendicular direction to lane tangent, offset 3 units
 		var prev: Vector2 = pts[19]
 		var tang: Vector2 = (mid - prev).normalized()
 		var perp := Vector2(-tang.y, tang.x)
 		var offset_pos := mid + perp * 3.0
 		_place_pickup(Vector3(offset_pos.x, 3.0, offset_pos.y), pickup_sound)
-
-	# Mountain / secret-path region pickups
 	for pos in MOUNTAIN_PICKUP_POSITIONS:
 		_place_pickup(pos, pickup_sound)
 
 func _place_pickup(pos: Vector3, pickup_sound: AudioStream) -> void:
-	# Raycast down to find actual ground height at this XZ
 	var space: PhysicsDirectSpaceState3D = get_node("World/Terrain").get_world_3d().direct_space_state
 	var ray := PhysicsRayQueryParameters3D.create(
 		Vector3(pos.x, 200.0, pos.z),
@@ -377,7 +402,6 @@ func _place_pickup(pos: Vector3, pickup_sound: AudioStream) -> void:
 	if hit:
 		ground_y = hit.position.y
 	var pickup: Node3D = WeaponPickupScene.instantiate()
-	# Pick a random weapon type (excluding pistol which is the default)
 	var preset_index: int = randi() % WEAPON_PRESETS.size()
 	var w: WeaponData = load(WEAPON_PRESETS[preset_index])
 	pickup.weapon_data = w
