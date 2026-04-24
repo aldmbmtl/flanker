@@ -73,14 +73,15 @@ func process_entity_hud(_delta: float, active_camera: Camera3D, crosshair_pos: V
 
 		# Project world pos to screen — lower offset
 		var head_pos: Vector3 = entity.entity.global_position + Vector3(0, 1.2, 0)
-		var screen_pos: Vector2 = active_camera.unproject_position(head_pos)
 
-		# Check if behind camera using dot product
+		# Check if behind camera before unprojecting (avoids p.d == 0 error)
 		var to_entity: Vector3 = head_pos - active_camera.global_position
 		var cam_fwd: Vector3 = -active_camera.global_transform.basis.z
 		if to_entity.dot(cam_fwd) <= 0.0:
 			entity.ui_node.visible = false
 			continue
+
+		var screen_pos: Vector2 = active_camera.unproject_position(head_pos)
 
 		# Check if outside viewport bounds
 		if _screen_width > 0 and _screen_height > 0:
