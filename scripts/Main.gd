@@ -41,6 +41,7 @@ var _role_slots: Dictionary = { Role.FIGHTER: false, Role.SUPPORTER: false }
 var time_seed: int = 1  # 0=sunrise 1=noon 2=sunset 3=night
 var _blue_minion_char: String = ""
 var _red_minion_char: String = ""
+var _player_avatar_char: String = "a"
 
 var _active_pickup_positions: Array[Vector3] = []
 var _pickup_sound: AudioStream = null
@@ -134,6 +135,7 @@ func _spawn_local_player() -> void:
 	var my_id := multiplayer.get_unique_id()
 	fps_player = FPSPlayerScene.instantiate()
 	fps_player.set("player_team", player_start_team)
+	fps_player.set("avatar_char", _player_avatar_char)
 	fps_player.name = "FPSPlayer_%d" % my_id
 	add_child(fps_player)
 	fps_player.add_to_group("player")
@@ -264,7 +266,17 @@ func _pick_minion_characters() -> void:
 	shuffled.shuffle()
 	_blue_minion_char = shuffled[0]
 	_red_minion_char  = shuffled[1]
+	_player_avatar_char = shuffled[2]
 	MinionAI.set_model_characters(_blue_minion_char, _red_minion_char)
+	# Send avatar char to server so all peers can look it up via LobbyManager.players
+	if not _is_singleplayer and multiplayer.has_multiplayer_peer():
+		if multiplayer.is_server():
+			var my_id: int = multiplayer.get_unique_id()
+			if LobbyManager.players.has(my_id):
+				LobbyManager.players[my_id]["avatar_char"] = _player_avatar_char
+				LobbyManager.sync_lobby_state.rpc(LobbyManager.players)
+		else:
+			LobbyManager.report_avatar_char.rpc_id(1, _player_avatar_char)
 
 func _setup_lane_data() -> void:
 	var terrain: Node = $World/Terrain
@@ -332,21 +344,6 @@ func _input(event: InputEvent) -> void:
 		if event.keycode == KEY_ESCAPE or event.physical_keycode == KEY_ESCAPE:
 			match game_state:
 				GameState.MENU:
-					print("[Main] ESCAPE - MENU case")
-					_on_quit_from_menu()
-				GameState.PLAYING:
-					print("[Main] ESCAPE - PLAYING case, _is_singleplayer=", _is_singleplayer)
-					if _is_singleplayer:
-						toggle_pause(true)
-					else:
-						print("[Main] ESCAPE - NOT singleplayer, skipping toggle_pause")
-				GameState.PAUSED:
-					print("[Main] ESCAPE - PAUSED case, _is_singleplayer=", _is_singleplayer)
-					if _is_singleplayer:
-						toggle_pause(false)
-			return
-			match game_state:
-				GameState.MENU:
 					_on_quit_from_menu()
 				GameState.PLAYING:
 					toggle_pause(true)
@@ -411,6 +408,8 @@ func _on_start_game() -> void:
 
 	# Assign random team
 	player_start_team = randi() % 2
+	# Pick character models before spawning player so avatar_char is ready
+	_pick_minion_characters()
 
 	loading_screen.set_status("Spawning player...")
 	loading_screen.set_progress(65.0)
@@ -419,6 +418,7 @@ func _on_start_game() -> void:
 	if player_role == Role.FIGHTER:
 		fps_player = FPSPlayerScene.instantiate()
 		fps_player.set("player_team", player_start_team)
+		fps_player.set("avatar_char", _player_avatar_char)
 		add_child(fps_player)
 		fps_player.add_to_group("player")
 
@@ -474,7 +474,6 @@ func _on_start_game() -> void:
 	await get_tree().process_frame
 
 	loading_screen.finish()
-	_pick_minion_characters()
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
 
@@ -483,6 +482,11 @@ func _on_resume_game() -> void:
 
 func _on_quit_from_menu() -> void:
 	get_tree().quit()
+
+func leave_game() -> void:
+	if not _is_singleplayer and multiplayer.has_multiplayer_peer():
+		multiplayer.multiplayer_peer = null
+	get_tree().change_scene_to_file("res://scenes/StartMenu.tscn")
 
 func toggle_pause(paused: bool) -> void:
 	print("[Main] toggle_pause: paused=", paused, " _is_singleplayer=", _is_singleplayer, " _pause_menu=", _pause_menu)

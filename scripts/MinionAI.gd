@@ -342,15 +342,31 @@ func _find_target() -> Node3D:
 		if d < effective_range and d < best_dist:
 			best_dist = d
 			best = m
-	var player := get_tree().get_first_node_in_group("player")
-	if player and player.has_method("get"):
+	# Check all local FPSPlayer nodes (singleplayer + host's own player in MP)
+	for player in get_tree().get_nodes_in_group("player"):
+		if not player.has_method("get"):
+			continue
 		var p_team: int = player.get("player_team") if player.get("player_team") != null else -1
-		if p_team != team and p_team >= 0:
-			var d: float = global_position.distance_to(player.global_position)
-			var effective_range: float = DARK_DETECT_RANGE if _is_in_darkness(player.global_position) else DETECT_RANGE
-			if d < effective_range and d < best_dist:
-				best_dist = d
-				best = player
+		if p_team == team or p_team < 0:
+			continue
+		var d: float = global_position.distance_to(player.global_position)
+		var effective_range: float = DARK_DETECT_RANGE if _is_in_darkness(player.global_position) else DETECT_RANGE
+		if d < effective_range and d < best_dist:
+			best_dist = d
+			best = player
+	# Also check RemotePlayer ghosts (client players visible on server/other clients)
+	for ghost in get_tree().get_nodes_in_group("remote_players"):
+		var ghost_peer: int = ghost.get("peer_id") if ghost.get("peer_id") != null else -1
+		if ghost_peer < 0:
+			continue
+		var g_team: int = GameSync.get_player_team(ghost_peer)
+		if g_team == team:
+			continue
+		var d: float = global_position.distance_to(ghost.global_position)
+		var effective_range: float = DARK_DETECT_RANGE if _is_in_darkness(ghost.global_position) else DETECT_RANGE
+		if d < effective_range and d < best_dist:
+			best_dist = d
+			best = ghost
 	for t in _cached_towers:
 		if not is_instance_valid(t) or t.team == team:
 			continue

@@ -42,7 +42,8 @@ func register_player_local(peer_id: int, new_player_name: String) -> void:
 		"name": new_player_name,
 		"team": assigned_team,
 		"role": "",
-		"ready": false
+		"ready": false,
+		"avatar_char": ""
 	}
 	players[peer_id] = player_info
 	print("Player registered: ", new_player_name, " (ID: ", peer_id, ") team: ", assigned_team)
@@ -247,13 +248,24 @@ func kill_minion_visuals(minion_path: NodePath) -> void:
 		minion.force_die()
 
 @rpc("any_peer", "reliable")
+func report_avatar_char(char: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var sender: int = _sender_id()
+	if not players.has(sender):
+		return
+	players[sender]["avatar_char"] = char
+	# Broadcast updated state so all clients get the new avatar_char
+	sync_lobby_state.rpc(players)
+
+@rpc("any_peer", "reliable")
 func report_player_transform(pos: Vector3, rot: Vector3, team: int) -> void:
 	var sender: int = _sender_id()
 	GameSync.set_player_team(sender, team)
 	if multiplayer.is_server():
 		broadcast_player_transform.rpc(sender, pos, rot, team)
 
-@rpc("authority", "reliable")
+@rpc("authority", "call_local", "reliable")
 func broadcast_player_transform(peer_id: int, pos: Vector3, rot: Vector3, team: int) -> void:
 	GameSync.remote_player_updated.emit(peer_id, pos, rot, team)
 
@@ -317,6 +329,14 @@ func _raycast_players(origin: Vector3, direction: Vector3) -> Dictionary:
 	var node: Node = collider if collider is Node else null
 	if node == null:
 		return {}
+	# Check if this is a remote player ghost hitbox (StaticBody3D with peer_id meta)
+	var check_ghost: Node = node
+	while check_ghost != null and check_ghost != get_tree().root:
+		if check_ghost.has_meta("ghost_peer_id"):
+			var ghost_peer: int = check_ghost.get_meta("ghost_peer_id") as int
+			if ghost_peer > 0:
+				return {"peer_id": ghost_peer}
+		check_ghost = check_ghost.get_parent()
 	# Check if this is (or belongs to) a player CharacterBody3D
 	var check: Node = node
 	while check != null:

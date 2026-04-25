@@ -15,3 +15,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.9, 0)
 
 [node name="CharacterMesh" type="Node3D" parent="PlayerBody"]
 instance = ExtResource("2")
+
+[node name="HitBody" type="StaticBody3D" parent="."]
+collision_layer = 1
+collision_mask = 0
+
+[node name="HitShape" type="CollisionShape3D" parent="HitBody"]
+shape = SubResource("CapsuleShape3D_1")

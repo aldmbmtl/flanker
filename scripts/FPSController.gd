@@ -23,6 +23,7 @@ const DEFAULT_HP := 100.0
 
 var player_team: int = 0
 var player_role: String = ""
+var avatar_char: String = "a"
 
 var player_health_mult: float = 1.0
 var player_speed_mult: float = 1.0
@@ -31,6 +32,7 @@ var player_damage_mult: float = 1.0
 var _peer_id: int = 1
 var _is_local: bool = true
 var _sync_frame: int = 0
+var _avatar_anim: AnimationPlayer = null
 
 const FOV_NORMAL  := 75.0
 const FOV_ZOOM    := 30.0
@@ -142,6 +144,60 @@ func _ready() -> void:
 	_update_weapon_label()
 	_update_ammo_hud()
 	_create_hud_element(hud_id, MAX_HP, player_team)
+	call_deferred("_init_avatar")
+
+func _init_avatar() -> void:
+	# Load the character GLB for this player's avatar.
+	# Placed on visual layer 2 so the local first-person camera (cull_mask excludes
+	# layer 2) never sees it, but all other cameras/clients see it fine.
+	var glb_path: String = "res://assets/kenney_blocky-characters/Models/GLB format/character-%s.glb" % avatar_char
+	var packed: PackedScene = load(glb_path)
+	if packed == null:
+		push_warning("[FPSController] _init_avatar: could not load %s" % glb_path)
+		return
+
+	# Clear existing CharacterMesh children and replace with correct model
+	var char_mesh_node: Node3D = $PlayerBody/CharacterMesh
+	for c in char_mesh_node.get_children():
+		c.queue_free()
+
+	var model: Node3D = packed.instantiate()
+	model.scale = Vector3(0.667, 0.667, 0.667)
+	model.rotate_y(PI)
+	# Put avatar on layer 2 only — invisible to local FPS camera
+	_set_layers_recursive(model, 2)
+	char_mesh_node.add_child(model)
+	char_mesh_node.visible = true
+
+	# Find AnimationPlayer in the GLB subtree
+	_avatar_anim = _find_anim_player(model)
+	if _avatar_anim != null:
+		_avatar_anim.play("idle")
+
+	# Shadow-only capsule proxy so avatar casts a shadow even on layer 2
+	var shadow_mesh: MeshInstance3D = MeshInstance3D.new()
+	var cap: CapsuleMesh = CapsuleMesh.new()
+	cap.height = 1.8
+	cap.radius = 0.35
+	shadow_mesh.mesh = cap
+	shadow_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+	shadow_mesh.layers = 1
+	$PlayerBody.add_child(shadow_mesh)
+
+func _set_layers_recursive(node: Node, layer: int) -> void:
+	if node is VisualInstance3D:
+		(node as VisualInstance3D).layers = layer
+	for child in node.get_children():
+		_set_layers_recursive(child, layer)
+
+func _find_anim_player(node: Node) -> AnimationPlayer:
+	if node is AnimationPlayer:
+		return node as AnimationPlayer
+	for child in node.get_children():
+		var found: AnimationPlayer = _find_anim_player(child)
+		if found != null:
+			return found
+	return null
 
 func set_active(is_active: bool) -> void:
 	active = is_active
@@ -463,13 +519,24 @@ func _physics_process(delta: float) -> void:
 	velocity.z = dir.z * cur_speed
 	move_and_slide()
 
+	# Drive avatar walk/idle animation from actual velocity
+	if _avatar_anim != null and _avatar_anim.is_inside_tree():
+		var horiz_speed: float = Vector2(velocity.x, velocity.z).length()
+		var want_anim: String = "walk" if horiz_speed > 0.5 else "idle"
+		if _avatar_anim.current_animation != want_anim:
+			_avatar_anim.play(want_anim)
+
 	# Broadcast transform to host every N frames (local player only)
-	if multiplayer.has_multiplayer_peer() and _is_local and _peer_id != multiplayer.get_unique_id():
+	if multiplayer.has_multiplayer_peer() and _is_local and _peer_id == multiplayer.get_unique_id():
 		_sync_frame += 1
 		if _sync_frame >= PLAYER_SYNC_INTERVAL:
 			_sync_frame = 0
 			var cam_rot: Vector3 = camera.global_rotation
-			LobbyManager.report_player_transform.rpc_id(1, global_position, cam_rot, player_team)
+			if multiplayer.is_server():
+				# Host broadcasts directly (can't rpc_id to self)
+				LobbyManager.report_player_transform(global_position, cam_rot, player_team)
+			else:
+				LobbyManager.report_player_transform.rpc_id(1, global_position, cam_rot, player_team)
 
 func _set_crouch(crouch: bool) -> void:
 	_crouching = crouch
@@ -552,6 +619,11 @@ func _local_raycast_hit(origin: Vector3, dir: Vector3) -> Dictionary:
 		# Skip self
 		if check == self:
 			return {}
+		# Remote player ghost hitbox — has ghost_peer_id meta on StaticBody3D
+		if check.has_meta("ghost_peer_id"):
+			var ghost_peer: int = check.get_meta("ghost_peer_id") as int
+			if ghost_peer > 0 and ghost_peer != _peer_id:
+				return {"peer_id": ghost_peer}
 		# Minion puppet — identified by _minion_id
 		if check.get("_minion_id") != null and check.get("is_puppet") == true:
 			var mid: int = check.get("_minion_id") as int

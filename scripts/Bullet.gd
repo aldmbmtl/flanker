@@ -49,6 +49,17 @@ func _process(delta: float) -> void:
 		var hit: Object = result.collider
 		var hit_pos: Vector3 = result.position
 		var hit_normal: Vector3 = result.get("normal", Vector3.UP)
+		# Ghost hitbox — route damage via GameSync RPC
+		if hit is StaticBody3D and hit.has_meta("ghost_peer_id"):
+			var target_peer: int = hit.get_meta("ghost_peer_id")
+			var ghost_team: int = GameSync.get_player_team(target_peer)
+			var friendly: bool = (shooter_team >= 0 and ghost_team == shooter_team)
+			if not friendly and multiplayer.is_server():
+				var new_hp: float = GameSync.damage_player(target_peer, damage, shooter_team)
+				LobbyManager.apply_player_damage.rpc(target_peer, new_hp)
+			_spawn_sparks(hit_pos, hit_normal, hit)
+			queue_free()
+			return
 		if _should_damage(hit):
 			hit.take_damage(damage, source, shooter_team)
 		_spawn_sparks(hit_pos, hit_normal, hit)
@@ -83,7 +94,9 @@ func _should_damage(hit: Object) -> bool:
 
 func _spawn_sparks(pos: Vector3, normal: Vector3, hit: Object) -> void:
 	var spark_type := "ground"
-	if hit.has_method("take_damage"):
+	if hit is StaticBody3D and hit.has_meta("ghost_peer_id"):
+		spark_type = "unit"
+	elif hit.has_method("take_damage"):
 		if hit is StaticBody3D:
 			spark_type = "building"
 		else:

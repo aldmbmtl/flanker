@@ -10,4 +10,8 @@ func _on_resume_pressed() -> void:
 		main.toggle_pause(false)
 
 func _on_quit_pressed() -> void:
-	get_tree().quit()
+	var main: Node = get_tree().root.get_node("Main")
+	if main:
+		main.leave_game()
+	else:
+		get_tree().quit()
