@@ -13,3 +13,4 @@ magazine_size = 20
 reserve_ammo = 80
 mesh_path = "res://assets/kenney_blaster-kit/Models/GLB format/blaster-f.glb"
 fire_sound_path = "res://assets/kenney_sci-fi-sounds/Audio/laserLarge_000.ogg"
+glow_color = Color(0.0, 1.0, 0.4, 1.0)

@@ -10,3 +10,4 @@ extends Resource
 @export var reserve_ammo: int = 60
 @export var mesh_path: String = ""
 @export var fire_sound_path: String = ""
+@export var glow_color: Color = Color.WHITE

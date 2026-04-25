@@ -35,6 +35,10 @@ var time_seed: int = 1  # 0=sunrise 1=noon 2=sunset 3=night
 var _blue_minion_char: String = ""
 var _red_minion_char: String = ""
 
+var _active_pickup_positions: Array[Vector3] = []
+var _pickup_sound: AudioStream = null
+var _pending_respawns: Dictionary = {}
+
 const FPSPlayerScene := preload("res://scenes/FPSPlayer.tscn")
 const MinionAI := preload("res://scripts/MinionAI.gd")
 
@@ -210,10 +214,18 @@ func _process(delta: float) -> void:
 			cam = fps_player.get_node("Camera3D") if fps_mode else rts_camera
 			crosshair_pos = get_viewport().get_visible_rect().size * 0.5 if fps_mode else Vector2(-1, -1)
 		entity_hud.call("process_entity_hud", delta, cam, crosshair_pos)
-		if fps_player:
-			var player_team_name := "BLUE" if fps_player.player_team == 0 else "RED"
-			var player_pts := TeamData.get_points(fps_player.player_team)
-			points_label.text = "%s: %d" % [player_team_name, player_pts]
+	if fps_player:
+		var player_team_name := "BLUE" if fps_player.player_team == 0 else "RED"
+		var player_pts := TeamData.get_points(fps_player.player_team)
+		points_label.text = "%s: %d" % [player_team_name, player_pts]
+	var completed_respawns: Array = []
+	for pos in _pending_respawns.keys():
+		_pending_respawns[pos] -= delta
+		if _pending_respawns[pos] <= 0.0:
+			_respawn_pickup(pos)
+			completed_respawns.append(pos)
+	for pos in completed_respawns:
+		_pending_respawns.erase(pos)
 
 func _spawn_preset_towers() -> void:
 	const TOWER_SCENE := preload("res://scenes/Tower.tscn")
@@ -484,7 +496,11 @@ func _do_respawn() -> void:
 	_set_mode(true)
 
 func _spawn_weapon_pickups() -> void:
-	var pickup_sound: AudioStream = load(PickupSoundPath)
+	_pickup_sound = load(PickupSoundPath)
+	_active_pickup_positions.clear()
+	_pending_respawns.clear()
+	for existing in get_tree().get_nodes_in_group("weapon_pickups"):
+		existing.queue_free()
 	for lane_i in range(3):
 		var pts: Array = LaneData.get_lane_points(lane_i)
 		if pts.size() < 21:
@@ -494,9 +510,54 @@ func _spawn_weapon_pickups() -> void:
 		var tang: Vector2 = (mid - prev).normalized()
 		var perp := Vector2(-tang.y, tang.x)
 		var offset_pos := mid + perp * 3.0
-		_place_pickup(Vector3(offset_pos.x, 3.0, offset_pos.y), pickup_sound)
-	for pos in MOUNTAIN_PICKUP_POSITIONS:
-		_place_pickup(pos, pickup_sound)
+		var pos := Vector3(offset_pos.x, 0.0, offset_pos.y)
+		if _is_far_enough(pos, _active_pickup_positions, 20.0):
+			_place_pickup(Vector3(pos.x, 3.0, pos.z), _pickup_sound)
+			_active_pickup_positions.append(pos)
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	for i in range(17):
+		var attempts: int = 0
+		var pos_candidate: Vector3 = Vector3.ZERO
+		var found: bool = false
+		while attempts < 30 and not found:
+			var x: float = rng.randf_range(-75.0, -15.0) if rng.randi() % 2 == 0 else rng.randf_range(15.0, 75.0)
+			var z: float = rng.randf_range(-65.0, 65.0)
+			pos_candidate = Vector3(x, 0.0, z)
+			if _is_far_enough(pos_candidate, _active_pickup_positions, 20.0):
+				found = true
+			attempts += 1
+		if found:
+			_place_pickup(Vector3(pos_candidate.x, pos_candidate.y + 3.0, pos_candidate.z), _pickup_sound)
+			_active_pickup_positions.append(pos_candidate)
+
+func _is_far_enough(pos: Vector3, placed: Array[Vector3], min_dist: float) -> bool:
+	for p in placed:
+		if p.distance_to(pos) < min_dist:
+			return false
+	return true
+
+func _find_alternate_position() -> Vector3:
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	for attempt in range(30):
+		var x: float = rng.randf_range(-75.0, -15.0) if rng.randi() % 2 == 0 else rng.randf_range(15.0, 75.0)
+		var z: float = rng.randf_range(-65.0, 65.0)
+		var pos := Vector3(x, 0.0, z)
+		if _is_far_enough(pos, _active_pickup_positions, 20.0):
+			return pos
+	return Vector3.INF
+
+func _respawn_pickup(original_pos: Vector3) -> void:
+	var pos: Vector3 = original_pos
+	if not _is_far_enough(pos, _active_pickup_positions, 20.0):
+		pos = _find_alternate_position()
+	if pos == Vector3.INF:
+		return
+	_place_pickup(Vector3(pos.x, pos.y + 3.0, pos.z), _pickup_sound)
+	_active_pickup_positions.append(pos)
+
+func _on_weapon_pickup(pos: Vector3) -> void:
+	_active_pickup_positions.erase(pos)
+	_pending_respawns[pos] = 90.0
 
 func _place_pickup(pos: Vector3, pickup_sound: AudioStream) -> void:
 	var space: PhysicsDirectSpaceState3D = get_node("World/Terrain").get_world_3d().direct_space_state
@@ -513,7 +574,9 @@ func _place_pickup(pos: Vector3, pickup_sound: AudioStream) -> void:
 	var preset_index: int = randi() % WEAPON_PRESETS.size()
 	var w: WeaponData = load(WEAPON_PRESETS[preset_index])
 	pickup.weapon_data = w
-	pickup.position = Vector3(pos.x, ground_y + 0.8, pos.z)
+	pickup.position = Vector3(pos.x, ground_y + 0.15, pos.z)
 	if pickup.has_node("AudioStreamPlayer3D") and pickup_sound:
 		pickup.get_node("AudioStreamPlayer3D").stream = pickup_sound
 	add_child(pickup)
+	pickup.add_to_group("weapon_pickups")
+	(pickup as Node).connect("weapon_picked_up", _on_weapon_pickup)
