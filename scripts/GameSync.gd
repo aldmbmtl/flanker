@@ -30,13 +30,20 @@ func set_player_health(peer_id: int, hp: float) -> void:
 	player_health_changed.emit(peer_id, hp)
 
 func get_player_team(peer_id: int) -> int:
-	return player_teams.get(peer_id, 0)
+	var t: int = player_teams.get(peer_id, -1)
+	print("[DBG GAMESYNC] get_player_team peer=%d -> team=%d | all_teams=%s" % [peer_id, t, player_teams])
+	return t
 
 func set_player_team(peer_id: int, team: int) -> void:
+	print("[DBG GAMESYNC] set_player_team peer=%d team=%d" % [peer_id, team])
 	player_teams[peer_id] = team
 
 func damage_player(peer_id: int, amount: float, source_team: int) -> float:
-	var hp: float = get_player_health(peer_id) - amount
+	if player_dead.get(peer_id, false):
+		return player_healths.get(peer_id, 0.0)
+	var before: float = get_player_health(peer_id)
+	var hp: float = before - amount
+	print("[DBG GAMESYNC] damage_player peer=%d | source_team=%d | hp_before=%f hp_after=%f" % [peer_id, source_team, before, hp])
 	player_healths[peer_id] = hp
 	player_health_changed.emit(peer_id, hp)
 	

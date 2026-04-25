@@ -127,10 +127,8 @@ func _ready() -> void:
 	if _has_network_peer:
 		var my_id := multiplayer.get_unique_id()
 		_is_local = (name == "FPSPlayer_%d" % my_id)
-		var info: Dictionary = LobbyManager.players.get(my_id, {})
-		if info.has("role"):
-			player_role = info.role
-			_apply_role_stats()
+		# Note: info.role is Fighter/Supporter int (0/1) — not a combat class string.
+		# FPSController.player_role is a ROLE_STATS key (e.g. "DPS"). Don't assign from lobby.
 	
 	# Register with GameSync so host can track us
 	if _is_local:
@@ -138,6 +136,7 @@ func _ready() -> void:
 		GameSync.set_player_health(_peer_id, hp)
 		GameSync.player_died.connect(_on_game_sync_died)
 		GameSync.player_respawned.connect(_on_game_sync_respawned)
+		GameSync.player_health_changed.connect(_on_game_sync_health_changed)
 	
 	_load_default_weapon()
 	_refresh_viewmodel()
@@ -585,9 +584,11 @@ func _shoot() -> void:
 	# Send to host for authoritative validation + broadcast to other clients
 	if multiplayer.has_multiplayer_peer():
 		if multiplayer.is_server():
+			print("[DBG SHOOT] HOST fired | team=%d | pos=%s | dir=%s" % [player_team, shoot_from.global_position, dir])
 			LobbyManager.spawn_bullet_visuals.rpc(shoot_from.global_position, dir, w.damage, player_team)
 		else:
 			var hit_info: Dictionary = _local_raycast_hit(shoot_from.global_position, dir)
+			print("[DBG SHOOT] CLIENT peer=%d team=%d fired | hit_info=%s" % [_peer_id, player_team, hit_info])
 			LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult, player_team, _peer_id, hit_info)
 
 	_update_ammo_hud()
@@ -603,25 +604,31 @@ func _shoot() -> void:
 func _local_raycast_hit(origin: Vector3, dir: Vector3) -> Dictionary:
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	if space == null:
+		print("[DBG RAYCAST] peer=%d no space state" % _peer_id)
 		return {}
 	var query := PhysicsRayQueryParameters3D.create(origin, origin + dir * 500.0)
 	# Exclude self so we don't register hits on the shooter's own capsule
 	query.exclude = [self]
 	var result: Dictionary = space.intersect_ray(query)
 	if result.is_empty():
+		print("[DBG RAYCAST] peer=%d NO HIT" % _peer_id)
 		return {}
 	var node: Node = result.collider if result.collider is Node else null
+	print("[DBG RAYCAST] peer=%d raw collider=%s pos=%s" % [_peer_id, result.collider, result.position])
 	if node == null:
 		return {}
 	# Walk up to find a damageable node
 	var check: Node = node
 	while check != null and check != get_tree().root:
+		print("[DBG RAYCAST] peer=%d walking node=%s class=%s" % [_peer_id, check.name, check.get_class()])
 		# Skip self
 		if check == self:
+			print("[DBG RAYCAST] peer=%d hit self, returning empty" % _peer_id)
 			return {}
 		# Remote player ghost hitbox — has ghost_peer_id meta on StaticBody3D
 		if check.has_meta("ghost_peer_id"):
 			var ghost_peer: int = check.get_meta("ghost_peer_id") as int
+			print("[DBG RAYCAST] peer=%d found ghost_peer_id=%d" % [_peer_id, ghost_peer])
 			if ghost_peer > 0 and ghost_peer != _peer_id:
 				return {"peer_id": ghost_peer}
 		# Host player body — FPSPlayer_<id> CharacterBody3D has no ghost node on clients.
@@ -630,10 +637,14 @@ func _local_raycast_hit(origin: Vector3, dir: Vector3) -> Dictionary:
 			var id_str: String = check.name.substr(10)
 			if id_str.is_valid_int():
 				var host_peer: int = id_str.to_int()
+				var target_team: int = GameSync.get_player_team(host_peer)
+				var node_team: int = check.get("player_team") as int
+				print("[DBG RAYCAST] peer=%d hit FPSPlayer_ node=%s host_peer=%d | GameSync.team=%d node.player_team=%d | my_team=%d" % [_peer_id, check.name, host_peer, target_team, node_team, player_team])
 				if host_peer != _peer_id:
-					var target_team: int = check.get("player_team") as int
 					if target_team != player_team:
+						print("[DBG RAYCAST] peer=%d -> returning peer_id=%d (enemy)" % [_peer_id, host_peer])
 						return {"peer_id": host_peer}
+					print("[DBG RAYCAST] peer=%d -> BLOCKED: same team (GameSync team=%d == my team=%d)" % [_peer_id, target_team, player_team])
 					return {}
 		# Minion puppet — identified by _minion_id
 		if check.get("_minion_id") != null and check.get("is_puppet") == true:
@@ -644,6 +655,7 @@ func _local_raycast_hit(origin: Vector3, dir: Vector3) -> Dictionary:
 				return {}
 			return {"minion_id": mid}
 		check = check.get_parent()
+	print("[DBG RAYCAST] peer=%d walked to root, no damageable found" % _peer_id)
 	return {}
 
 func _start_reload() -> void:
@@ -742,10 +754,24 @@ func _update_points_label() -> void:
 func _on_game_sync_died(peer_id: int) -> void:
 	if peer_id != _peer_id:
 		return
-	# Local player death already handled by take_damage → _on_death.
-	# This fires when host authoritatively kills us (network damage path).
+	# Fallback — health_changed handler handles death now, but keep as safety net.
 	if not _dead:
 		_on_death()
+
+func _on_game_sync_health_changed(peer_id: int, new_hp: float) -> void:
+	if peer_id != _peer_id:
+		return
+	if _dead:
+		return
+	hp = new_hp
+	camera_shake_time = 0.15
+	_update_health_bar()
+	_update_hud_health()
+	if hp <= 0.0:
+		_on_death()
+		var awarding_team: int = 1 - player_team
+		TeamData.add_points(awarding_team, 50)
+		_update_points_label()
 
 func _on_game_sync_respawned(peer_id: int, spawn_pos: Vector3) -> void:
 	if peer_id != _peer_id:

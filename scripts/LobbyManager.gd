@@ -271,7 +271,8 @@ func report_avatar_char(char: String) -> void:
 @rpc("any_peer", "reliable")
 func report_player_transform(pos: Vector3, rot: Vector3, team: int) -> void:
 	var sender: int = _sender_id()
-	GameSync.set_player_team(sender, team)
+	# Do NOT set_player_team here — team is authoritative from spawn (FPSController._ready)
+	# and must not be overwritten by per-frame transform broadcasts which can carry stale values.
 	if multiplayer.is_server():
 		broadcast_player_transform.rpc(sender, pos, rot, team)
 
@@ -283,6 +284,8 @@ func broadcast_player_transform(peer_id: int, pos: Vector3, rot: Vector3, team: 
 func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_team: int, shooter_peer: int, hit_info: Dictionary = {}) -> void:
 	if not multiplayer.is_server():
 		return
+
+	print("[DBG VALIDATE] server recv shot from peer=%d team=%d | hit_info=%s" % [shooter_peer, shooter_team, hit_info])
 
 	# --- Client-reported hit path (avoids server raycast hitting FPSPlayer_1) ---
 	if not hit_info.is_empty():
@@ -298,13 +301,22 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 						minion.take_damage(damage, "player", shooter_team)
 		elif hit_info.has("peer_id"):
 			var target_peer: int = hit_info["peer_id"] as int
-			if target_peer != shooter_peer:
-				var new_hp: float = GameSync.damage_player(target_peer, damage, shooter_team)
-				apply_player_damage.rpc(target_peer, new_hp)
+			print("[DBG VALIDATE] hit_info peer_id=%d | shooter_peer=%d | same=%s" % [target_peer, shooter_peer, target_peer == shooter_peer])
+			if target_peer != shooter_peer and not GameSync.player_dead.get(target_peer, false):
+				var target_team: int = GameSync.get_player_team(target_peer)
+				print("[DBG VALIDATE] applying damage to peer=%d team=%d | shooter_team=%d | damage=%f" % [target_peer, target_team, shooter_team, damage])
+				# Friendly fire guard: skip if same team. -1 means team not yet registered — allow damage rather than silently drop.
+				if target_team == -1 or target_team != shooter_team:
+					var new_hp: float = GameSync.damage_player(target_peer, damage, shooter_team)
+					print("[DBG VALIDATE] new_hp for peer=%d = %f" % [target_peer, new_hp])
+					apply_player_damage.rpc(target_peer, new_hp)
+				else:
+					print("[DBG VALIDATE] friendly fire blocked peer=%d team=%d shooter_team=%d" % [target_peer, target_team, shooter_team])
 		spawn_bullet_visuals.rpc(origin, direction, damage, shooter_team)
 		return
 
 	# --- Server-side fallback (used when host fires, hit_info is empty) ---
+	print("[DBG VALIDATE] hit_info empty, using server-side fallback raycast")
 	var hit_result: Dictionary = _raycast_players(origin, direction)
 
 	if hit_result.has("peer_id"):
@@ -320,8 +332,9 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 
 	spawn_bullet_visuals.rpc(origin, direction, damage, shooter_team)
 
-@rpc("authority", "reliable")
+@rpc("authority", "call_local", "reliable")
 func apply_player_damage(peer_id: int, new_health: float) -> void:
+	print("[DBG DAMAGE] apply_player_damage recv on peer=%d | target_peer=%d new_hp=%f" % [multiplayer.get_unique_id(), peer_id, new_health])
 	GameSync.set_player_health(peer_id, new_health)
 
 func _raycast_players(origin: Vector3, direction: Vector3) -> Dictionary:
