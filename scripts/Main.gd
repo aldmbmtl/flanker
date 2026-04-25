@@ -111,11 +111,10 @@ func _setup_singleplayer_game() -> void:
 func _setup_multiplayer_game() -> void:
 	_pause_menu = PauseMenuScene.instantiate()
 	$HUD.add_child(_pause_menu)
-	_spawn_local_player()
 	_spawn_remote_player_manager()
-	_start_multiplayer_game()
 	_randomize_time_of_day()
 	_pick_minion_characters()
+	_start_multiplayer_game()
 
 func _spawn_remote_player_manager() -> void:
 	if not multiplayer.has_multiplayer_peer():
@@ -128,31 +127,91 @@ func _spawn_remote_player_manager() -> void:
 
 func _spawn_local_player() -> void:
 	var my_id := multiplayer.get_unique_id()
-	var info: Dictionary = LobbyManager.players.get(my_id, {})
-	player_start_team = info.team if info.has("team") else 0
-	
 	fps_player = FPSPlayerScene.instantiate()
 	fps_player.set("player_team", player_start_team)
 	fps_player.name = "FPSPlayer_%d" % my_id
 	add_child(fps_player)
 	fps_player.add_to_group("player")
-	
 	var spawn_z: float = 84.0 if player_start_team == 0 else -84.0
 	fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
-	rts_camera.setup(player_start_team)
 
 func _start_multiplayer_game() -> void:
-	game_state = GameState.PLAYING
-	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-	_HUD_set_visible(true)
+	# Resolve team from lobby
+	var my_id := multiplayer.get_unique_id()
+	var info: Dictionary = LobbyManager.players.get(my_id, {})
+	player_start_team = info.team if info.has("team") else 0
+
 	_setup_bases()
-	_set_mode(true)
+	_HUD_set_visible(true)
 	wave_announce_label.visible = false
 	wave_info_label.text = "Wave: 0 | First wave in: 10s"
 	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
 	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
 	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
-	_setup_hud_for_player()
+	rts_camera.setup(player_start_team)
+
+	# Show role dialog — live updates via LobbyManager.role_slots_updated
+	_role_dialog = RoleSelectDialogScene.instantiate()
+	$HUD.add_child(_role_dialog)
+	_role_dialog.set_slots_from_network(LobbyManager.supporter_claimed, player_start_team)
+	LobbyManager.role_slots_updated.connect(_role_dialog.on_slots_updated)
+	_role_dialog.visible = true
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+	var selected_role: int = await _role_dialog.role_selected
+
+	# Send claim to server — server validates and broadcasts
+	if multiplayer.is_server():
+		LobbyManager.set_role_ingame(selected_role)
+	else:
+		LobbyManager.set_role_ingame.rpc_id(1, selected_role)
+
+	# Wait for server to respond with sync (or rejection)
+	# If rejected, role_slots_updated fires and dialog re-enables — but we already
+	# awaited the first click. Check if supporter was actually granted.
+	await get_tree().process_frame
+
+	LobbyManager.role_slots_updated.disconnect(_role_dialog.on_slots_updated)
+	_role_dialog.visible = false
+
+	# Verify we actually got the role (supporter could have been rejected)
+	var granted_supporter: bool = LobbyManager.supporter_claimed.get(player_start_team, false)
+	if selected_role == Role.SUPPORTER and not granted_supporter:
+		# Rejected — re-show dialog with supporter grayed out, wait again
+		_role_dialog.set_slots_from_network(LobbyManager.supporter_claimed, player_start_team)
+		LobbyManager.role_slots_updated.connect(_role_dialog.on_slots_updated)
+		_role_dialog.visible = true
+		selected_role = await _role_dialog.role_selected
+		# Fighter is always available — send final claim
+		if multiplayer.is_server():
+			LobbyManager.set_role_ingame(selected_role)
+		else:
+			LobbyManager.set_role_ingame.rpc_id(1, selected_role)
+		await get_tree().process_frame
+		LobbyManager.role_slots_updated.disconnect(_role_dialog.on_slots_updated)
+		_role_dialog.visible = false
+
+	player_role = selected_role as Role
+	_death_count = 0
+	game_state = GameState.PLAYING
+
+	if player_role == Role.FIGHTER:
+		_spawn_local_player()
+		_setup_hud_for_player()
+		_set_mode(true)
+		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	else:
+		# Supporter: RTS-only
+		_HUD_set_visible(true)
+		_set_mode(false)
+		crosshair.visible = false
+		$HUD/StaminaBar.visible = false
+		ammo_label.visible = false
+		reload_prompt.visible = false
+		$HUD/HealthBar.visible = false
+		mode_label.text = "Mode: RTS  [LMB] place tower  [Scroll] zoom"
+		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
 
@@ -513,8 +572,13 @@ func _on_player_died() -> void:
 		return
 	if player_role != Role.FIGHTER:
 		return
-	_death_count += 1
-	var respawn_time: float = RESPAWN_BASE + (_death_count * RESPAWN_INCREMENT)
+	var respawn_time: float
+	if _is_singleplayer:
+		_death_count += 1
+		respawn_time = RESPAWN_BASE + (_death_count * RESPAWN_INCREMENT)
+	else:
+		var my_id := multiplayer.get_unique_id()
+		respawn_time = LobbyManager.get_respawn_time(my_id)
 	_respawning     = true
 	_respawn_timer  = respawn_time
 	respawn_label.visible = true

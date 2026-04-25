@@ -1,11 +1,14 @@
 extends Node
 
-const ROLES := ["Tank", "DPS", "Support", "Sniper", "Flanker"]
 const MAX_PLAYERS := 10
+const RESPAWN_BASE: float = 5.0
+const RESPAWN_INCREMENT: float = 5.0
 
 var players: Dictionary = {}
 var host_id: int = 1
 var game_started := false
+var supporter_claimed: Dictionary = { 0: false, 1: false }
+var player_death_counts: Dictionary = {}
 
 var _dirty := false
 
@@ -13,6 +16,7 @@ signal lobby_updated
 signal game_start_requested
 signal player_joined(id: int, info: Dictionary)
 signal player_left(id: int)
+signal role_slots_updated(claimed: Dictionary)
 
 func _ready() -> void:
 	NetworkManager.peer_connected.connect(_on_peer_connected)
@@ -70,16 +74,33 @@ func set_team(team_id: int) -> void:
 	lobby_updated.emit()
 
 @rpc("any_peer", "reliable")
-func set_role(role_name: String) -> void:
+func set_role_ingame(role: int) -> void:
+	# role: 0=FIGHTER, 1=SUPPORTER — called after game scene loads
+	if not multiplayer.is_server():
+		return
 	var id := _sender_id()
 	if not players.has(id):
 		return
-	if game_started:
-		return
-	if role_name == "" or ROLES.has(role_name):
-		players[id].role = role_name
-		_dirty = true
-		lobby_updated.emit()
+	var team: int = players[id].team
+	if role == 1:
+		if supporter_claimed.get(team, false):
+			# Slot taken — reject and re-broadcast current state
+			_notify_role_rejected.rpc_id(id, supporter_claimed)
+			return
+		supporter_claimed[team] = true
+	players[id].role = role
+	_dirty = true
+	_sync_role_slots.rpc(supporter_claimed)
+
+@rpc("authority", "call_local", "reliable")
+func _sync_role_slots(claimed: Dictionary) -> void:
+	supporter_claimed = claimed.duplicate()
+	role_slots_updated.emit(supporter_claimed)
+
+@rpc("authority", "reliable")
+func _notify_role_rejected(claimed: Dictionary) -> void:
+	supporter_claimed = claimed.duplicate()
+	role_slots_updated.emit(supporter_claimed)
 
 @rpc("any_peer", "reliable")
 func set_ready(ready_state: bool) -> void:
@@ -110,10 +131,20 @@ func notify_game_seed(new_seed: int) -> void:
 func start_game(path: String) -> void:
 	GameSync.game_seed = randi()
 	notify_game_seed.rpc(GameSync.game_seed)
+	supporter_claimed = { 0: false, 1: false }
+	player_death_counts.clear()
 	game_started = true
 	game_start_requested.emit()
 	load_game_scene.rpc(path)
 	get_tree().change_scene_to_file(path)
+
+func increment_death_count(peer_id: int) -> int:
+	player_death_counts[peer_id] = player_death_counts.get(peer_id, 0) + 1
+	return player_death_counts[peer_id]
+
+func get_respawn_time(peer_id: int) -> float:
+	var deaths: int = player_death_counts.get(peer_id, 0)
+	return RESPAWN_BASE + (deaths * RESPAWN_INCREMENT)
 
 @rpc("any_peer", "reliable")
 func request_start_game() -> void:
@@ -135,11 +166,10 @@ func _assign_team() -> int:
 func can_start_game() -> bool:
 	if players.is_empty():
 		return false
-	var ready_count := 0
 	for p in players.values():
-		if p.ready and p.role != "":
-			ready_count += 1
-	return ready_count >= 1
+		if not p.ready:
+			return false
+	return true
 
 func get_players_by_team(team: int) -> Array:
 	var result: Array = []

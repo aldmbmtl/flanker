@@ -11,7 +11,6 @@ var respawn_timer: float = 0.0
 var respawn_countdown: Dictionary = {}
 
 const PLAYER_MAX_HP: float = 100.0
-const RESPAWN_TIME: float = 5.0
 const PLAYER_SYNC_INTERVAL := 5
 
 signal player_health_changed(peer_id: int, health: float)
@@ -44,7 +43,8 @@ func damage_player(peer_id: int, amount: float, source_team: int) -> float:
 	if hp <= 0.0:
 		player_died.emit(peer_id)
 		player_dead[peer_id] = true
-		respawn_countdown[peer_id] = RESPAWN_TIME
+		var respawn_time: float = LobbyManager.increment_death_count(peer_id) * LobbyManager.RESPAWN_INCREMENT + LobbyManager.RESPAWN_BASE
+		respawn_countdown[peer_id] = respawn_time
 	
 	return hp
 

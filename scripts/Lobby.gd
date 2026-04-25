@@ -2,27 +2,21 @@ extends Control
 
 var _my_peer_id: int = 1
 var _my_team: int = 0
-var _my_role: String = ""
 var _my_ready: bool = false
 var _is_host: bool = false
-var _role_buttons: Array = []
 
 # Built in _ready — no scene tree deps
 var _blue_list: VBoxContainer
 var _red_list: VBoxContainer
 var _status_label: Label
-var _role_btn: Button
 var _ready_btn: Button
 var _start_btn: Button
-var _role_dialog: AcceptDialog
-var _role_list: VBoxContainer
 
 func _ready() -> void:
 	_my_peer_id = multiplayer.get_unique_id()
 	_is_host = NetworkManager.is_host()
 
 	_build_ui()
-	_build_role_dialog()
 
 	LobbyManager.lobby_updated.connect(_on_lobby_updated)
 	LobbyManager.game_start_requested.connect(_on_game_start_requested)
@@ -56,9 +50,9 @@ func _build_ui() -> void:
 	title.add_theme_font_size_override("font_size", 60)
 	vbox.add_child(title)
 
-	# Connection info
+	# Subtitle
 	var info := Label.new()
-	info.text = "Share your IP and port with friends"
+	info.text = "Team is auto-assigned. Select your role when the game starts."
 	info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	info.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 1))
 	vbox.add_child(info)
@@ -120,38 +114,16 @@ func _build_ui() -> void:
 	spacer_l.custom_minimum_size = Vector2(100, 0)
 	actions.add_child(spacer_l)
 
-	var switch_btn := Button.new()
-	switch_btn.text = "Switch Team"
-	switch_btn.custom_minimum_size = Vector2(140, 40)
-	switch_btn.theme = ui_theme
-	switch_btn.pressed.connect(_on_switch_team_pressed)
-	actions.add_child(switch_btn)
-
-	var spacer_r := Control.new()
-	spacer_r.custom_minimum_size = Vector2(20, 0)
-	actions.add_child(spacer_r)
-
-	_role_btn = Button.new()
-	_role_btn.text = "Select Role"
-	_role_btn.custom_minimum_size = Vector2(160, 40)
-	_role_btn.theme = ui_theme
-	_role_btn.pressed.connect(_on_role_pressed)
-	actions.add_child(_role_btn)
-
-	var spacer_r2 := Control.new()
-	spacer_r2.custom_minimum_size = Vector2(20, 0)
-	actions.add_child(spacer_r2)
-
 	_ready_btn = Button.new()
 	_ready_btn.text = "Ready"
-	_ready_btn.custom_minimum_size = Vector2(120, 40)
+	_ready_btn.custom_minimum_size = Vector2(140, 40)
 	_ready_btn.theme = ui_theme
 	_ready_btn.pressed.connect(_on_ready_pressed)
 	actions.add_child(_ready_btn)
 
-	var spacer_r3 := Control.new()
-	spacer_r3.custom_minimum_size = Vector2(60, 0)
-	actions.add_child(spacer_r3)
+	var spacer_r := Control.new()
+	spacer_r.custom_minimum_size = Vector2(40, 0)
+	actions.add_child(spacer_r)
 
 	_start_btn = Button.new()
 	_start_btn.text = "Start War"
@@ -161,9 +133,9 @@ func _build_ui() -> void:
 	_start_btn.pressed.connect(_on_start_pressed)
 	actions.add_child(_start_btn)
 
-	var spacer_l2 := Control.new()
-	spacer_l2.custom_minimum_size = Vector2(20, 0)
-	actions.add_child(spacer_l2)
+	var spacer_r2 := Control.new()
+	spacer_r2.custom_minimum_size = Vector2(40, 0)
+	actions.add_child(spacer_r2)
 
 	var leave_btn := Button.new()
 	leave_btn.text = "Leave"
@@ -172,44 +144,16 @@ func _build_ui() -> void:
 	leave_btn.pressed.connect(_on_leave_pressed)
 	actions.add_child(leave_btn)
 
+	var spacer_r3 := Control.new()
+	spacer_r3.custom_minimum_size = Vector2(100, 0)
+	actions.add_child(spacer_r3)
+
 	# Status label
 	_status_label = Label.new()
 	_status_label.text = "Waiting for players..."
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6, 1))
 	vbox.add_child(_status_label)
-
-func _build_role_dialog() -> void:
-	var ui_theme: Theme = load("res://assets/ui_theme.tres")
-	_role_dialog = AcceptDialog.new()
-	_role_dialog.title = "Select Role"
-	_role_dialog.size = Vector2i(300, 350)
-	_role_dialog.unresizable = true
-	_role_dialog.ok_button_text = "Confirm"
-	_role_dialog.dialog_hide_on_ok = false
-	_role_dialog.visible = false
-	add_child(_role_dialog)
-
-	_role_list = VBoxContainer.new()
-	_role_dialog.add_child(_role_list)
-
-	_role_buttons.clear()
-	for role in LobbyManager.ROLES:
-		var btn := Button.new()
-		btn.text = role
-		btn.theme = ui_theme
-		btn.pressed.connect(_on_role_button_pressed.bind(role))
-		_role_list.add_child(btn)
-		_role_buttons.append(btn)
-
-func _on_role_button_pressed(role: String) -> void:
-	_my_role = role
-	if multiplayer.is_server():
-		LobbyManager.set_role(role)
-	else:
-		LobbyManager.set_role.rpc_id(1, role)
-	_role_dialog.hide()
-	_update_role_buttons()
 
 func _on_lobby_updated() -> void:
 	_refresh_player_list()
@@ -253,12 +197,6 @@ func _make_player_entry(id: int, info: Dictionary) -> HBoxContainer:
 	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	container.add_child(name_lbl)
 
-	var role_lbl := Label.new()
-	role_lbl.text = info.role if info.role != "" else "—"
-	role_lbl.custom_minimum_size.x = 80.0
-	role_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	container.add_child(role_lbl)
-
 	var ready_lbl := Label.new()
 	ready_lbl.text = "✓" if info.ready else "○"
 	ready_lbl.custom_minimum_size.x = 30.0
@@ -293,21 +231,11 @@ func _update_my_status() -> void:
 		return
 
 	_my_team = info.team
-	_my_role = info.role
 	_my_ready = info.ready
 
-	var parts: Array = []
-	parts.append("Team: %s" % ("BLUE" if _my_team == 0 else "RED"))
-	parts.append(" | Role: %s" % (_my_role if _my_role != "" else "None"))
-	parts.append(" | %s" % ("Ready" if _my_ready else "Not Ready"))
-	parts.append(" | %d/10 players" % LobbyManager.players.size())
-
-	_status_label.text = " ".join(parts)
-	_update_role_buttons()
-
-func _update_role_buttons() -> void:
-	if _role_btn:
-		_role_btn.text = _my_role if _my_role != "" else "Select Role"
+	var team_name := "BLUE" if _my_team == 0 else "RED"
+	var ready_str := "Ready" if _my_ready else "Not Ready"
+	_status_label.text = "Team: %s  |  %s  |  %d/10 players" % [team_name, ready_str, LobbyManager.players.size()]
 
 	if _ready_btn:
 		_ready_btn.text = "Not Ready" if _my_ready else "Ready"
@@ -320,15 +248,6 @@ func _check_can_start() -> void:
 	if not _is_host or not _start_btn:
 		return
 	_start_btn.disabled = not LobbyManager.can_start_game()
-
-func _on_switch_team_pressed() -> void:
-	if _is_host:
-		LobbyManager.set_team(1 - _my_team)
-	else:
-		LobbyManager.set_team.rpc_id(1, 1 - _my_team)
-
-func _on_role_pressed() -> void:
-	_role_dialog.popup_centered()
 
 func _on_ready_pressed() -> void:
 	if _is_host:
