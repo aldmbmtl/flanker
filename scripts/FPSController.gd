@@ -334,6 +334,7 @@ func respawn(spawn_pos: Vector3) -> void:
 		]
 	_update_health_bar()
 	_update_ammo_hud()
+	_report_ammo_to_server()
 	if reload_bar:
 		reload_bar.visible = false
 	if reload_prompt:
@@ -351,6 +352,7 @@ func pick_up_weapon(w: WeaponData) -> void:
 			_slot_ammo[i][1] = min(reserve + w.reserve_ammo, max_reserve)
 			if i == active_slot:
 				_update_ammo_hud()
+			_report_ammo_to_server()
 			return
 
 	# New weapon — fill slot 1 if empty, else replace active slot
@@ -364,6 +366,7 @@ func pick_up_weapon(w: WeaponData) -> void:
 	_refresh_viewmodel()
 	_update_weapon_label()
 	_update_ammo_hud()
+	_report_ammo_to_server()
 	emit_signal("weapon_changed", active_slot, w)
 
 func _on_death() -> void:
@@ -425,6 +428,16 @@ func _update_ammo_hud() -> void:
 			reload_prompt.visible = true
 		else:
 			reload_prompt.visible = false
+
+func _report_ammo_to_server() -> void:
+	var w: WeaponData = _current_weapon()
+	var wname: String = w.weapon_name if w != null else ""
+	var total: int = _slot_ammo[0][1] + _slot_ammo[1][1]
+	if multiplayer.has_multiplayer_peer():
+		if multiplayer.is_server():
+			GameSync.set_player_reserve_ammo(_peer_id, total, wname)
+		else:
+			LobbyManager.report_ammo.rpc_id(1, total, wname)
 
 func _refresh_viewmodel() -> void:
 	# Remove old model children
@@ -695,6 +708,7 @@ func _shoot() -> void:
 			LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult, player_team, _peer_id, hit_info)
 
 	_update_ammo_hud()
+	_report_ammo_to_server()
 	_play_kick_animation()
 
 	# Auto-reload when mag hits 0
@@ -812,6 +826,7 @@ func _finish_reload() -> void:
 	if reload_bar:
 		reload_bar.visible = false
 	_update_ammo_hud()
+	_report_ammo_to_server()
 
 func _update_reload_bar() -> void:
 	if reload_bar == null:

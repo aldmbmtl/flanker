@@ -59,6 +59,13 @@ func _process(delta: float) -> void:
 			_light.light_energy = randf_range(1.6, 2.4)
 
 func _impact(pos: Vector3, direct_hit: Object) -> void:
+	# Tree destruction — check before combat so we still explode + clear even if not damaging anything else
+	if direct_hit != null and direct_hit.has_meta("tree_trunk_height"):
+		_spawn_tree_impact(pos)
+		_request_destroy_tree(pos)
+		queue_free()
+		return
+
 	# Direct hit damage
 	if CombatUtils.should_damage(direct_hit, shooter_team):
 		direct_hit.take_damage(damage, "cannonball", shooter_team)
@@ -81,6 +88,116 @@ func _impact(pos: Vector3, direct_hit: Object) -> void:
 
 	_spawn_impact(pos)
 	queue_free()
+
+func _request_destroy_tree(pos: Vector3) -> void:
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		# Server — fan out directly to all peers
+		LobbyManager.sync_destroy_tree.rpc(pos)
+	elif multiplayer.has_multiplayer_peer():
+		# Client — send request to server; server fans out
+		LobbyManager.request_destroy_tree.rpc_id(1, pos)
+	else:
+		# Single-player — destroy locally
+		var tp: Node = get_tree().root.get_node_or_null("Main/World/TreePlacer")
+		if tp != null:
+			tp.clear_trees_at(pos, LobbyManager.TREE_DESTROY_RADIUS)
+
+func _spawn_tree_impact(pos: Vector3) -> void:
+	var root: Node = get_tree().root
+
+	# ── Layer 1: Wood splinters ───────────────────────────────────────────────
+	var p1 := GPUParticles3D.new()
+	var pm1 := ParticleProcessMaterial.new()
+	pm1.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm1.emission_sphere_radius = 0.2
+	pm1.direction = Vector3.UP
+	pm1.spread = 150.0
+	pm1.initial_velocity_min = 6.0
+	pm1.initial_velocity_max = 16.0
+	pm1.gravity = Vector3(0.0, -14.0, 0.0)
+	pm1.scale_min = 0.15
+	pm1.scale_max = 0.4
+	var m1 := QuadMesh.new()
+	m1.size = Vector2(0.18, 0.06)
+	var mat1 := StandardMaterial3D.new()
+	mat1.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat1.albedo_color = Color(0.52, 0.32, 0.14, 1.0)
+	m1.material = mat1
+	p1.process_material = pm1
+	p1.draw_pass_1 = m1
+	p1.amount = 28
+	p1.lifetime = 0.8
+	p1.one_shot = true
+	p1.explosiveness = 1.0
+	root.add_child(p1)
+	p1.global_position = pos + Vector3(0.0, 1.0, 0.0)
+	p1.emitting = true
+	p1.restart()
+	get_tree().create_timer(p1.lifetime + 0.1).timeout.connect(p1.queue_free)
+
+	# ── Layer 2: Leaf scatter ─────────────────────────────────────────────────
+	var p2 := GPUParticles3D.new()
+	var pm2 := ParticleProcessMaterial.new()
+	pm2.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm2.emission_sphere_radius = 0.5
+	pm2.direction = Vector3.UP
+	pm2.spread = 180.0
+	pm2.initial_velocity_min = 2.0
+	pm2.initial_velocity_max = 7.0
+	pm2.gravity = Vector3(0.0, -1.5, 0.0)
+	pm2.scale_min = 0.4
+	pm2.scale_max = 0.9
+	var m2 := QuadMesh.new()
+	m2.size = Vector2(0.22, 0.22)
+	var mat2 := StandardMaterial3D.new()
+	mat2.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat2.albedo_color = Color(0.18, 0.55, 0.12, 0.9)
+	mat2.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat2.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m2.material = mat2
+	p2.process_material = pm2
+	p2.draw_pass_1 = m2
+	p2.amount = 22
+	p2.lifetime = 1.8
+	p2.one_shot = true
+	p2.explosiveness = 0.8
+	root.add_child(p2)
+	p2.global_position = pos + Vector3(0.0, 1.5, 0.0)
+	p2.emitting = true
+	p2.restart()
+	get_tree().create_timer(p2.lifetime + 0.1).timeout.connect(p2.queue_free)
+
+	# ── Layer 3: Bark dust puff ───────────────────────────────────────────────
+	var p3 := GPUParticles3D.new()
+	var pm3 := ParticleProcessMaterial.new()
+	pm3.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm3.emission_sphere_radius = 0.3
+	pm3.direction = Vector3.UP
+	pm3.spread = 180.0
+	pm3.initial_velocity_min = 1.5
+	pm3.initial_velocity_max = 4.0
+	pm3.gravity = Vector3(0.0, -3.0, 0.0)
+	pm3.scale_min = 0.5
+	pm3.scale_max = 1.0
+	var m3 := QuadMesh.new()
+	m3.size = Vector2(0.5, 0.5)
+	var mat3 := StandardMaterial3D.new()
+	mat3.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat3.albedo_color = Color(0.42, 0.33, 0.22, 0.7)
+	mat3.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat3.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m3.material = mat3
+	p3.process_material = pm3
+	p3.draw_pass_1 = m3
+	p3.amount = 14
+	p3.lifetime = 1.2
+	p3.one_shot = true
+	p3.explosiveness = 0.9
+	root.add_child(p3)
+	p3.global_position = pos + Vector3(0.0, 0.5, 0.0)
+	p3.emitting = true
+	p3.restart()
+	get_tree().create_timer(p3.lifetime + 0.1).timeout.connect(p3.queue_free)
 
 func _should_damage(hit: Object) -> bool:
 	if hit == null or not hit.has_method("take_damage"):

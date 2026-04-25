@@ -175,6 +175,12 @@ func register_player_team(peer_id: int, team: int) -> void:
 	GameSync.set_player_team(peer_id, team)
 
 @rpc("any_peer", "reliable")
+func report_ammo(reserve: int, weapon_type: String) -> void:
+	if not multiplayer.is_server():
+		return
+	GameSync.set_player_reserve_ammo(_sender_id(), reserve, weapon_type)
+
+@rpc("any_peer", "reliable")
 func request_start_game() -> void:
 	var id := _sender_id()
 	if id != host_id:
@@ -509,3 +515,21 @@ func sync_wave_announcement(wave_num: int) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main != null and main.has_method("show_wave_announcement"):
 		main.show_wave_announcement(wave_num)
+
+# ── Tree destruction sync ──────────────────────────────────────────────────────
+
+const TREE_DESTROY_RADIUS := 2.5
+
+# Called by any peer when a cannonball hits a tree — server validates + fans out.
+@rpc("any_peer", "call_remote", "reliable")
+func request_destroy_tree(pos: Vector3) -> void:
+	if not multiplayer.is_server():
+		return
+	sync_destroy_tree.rpc(pos)
+
+# Executed on every peer (call_local) — removes tree nodes near pos.
+@rpc("authority", "call_local", "reliable")
+func sync_destroy_tree(pos: Vector3) -> void:
+	var tp: Node = get_tree().root.get_node_or_null("Main/World/TreePlacer")
+	if tp != null:
+		tp.clear_trees_at(pos, TREE_DESTROY_RADIUS)

@@ -99,21 +99,21 @@ text = "JOIN GAME"
 custom_minimum_size = Vector2(0, 16)
 layout_mode = 2
 
-[node name="QuitButton" type="Button" parent="MenuPanel/VBox"]
-layout_mode = 2
-custom_minimum_size = Vector2(260, 40)
-theme = ExtResource("4")
-text = "QUIT"
-
-[node name="Spacer4" type="Control" parent="MenuPanel/VBox"]
-custom_minimum_size = Vector2(0, 8)
-layout_mode = 2
-
 [node name="SettingsButton" type="Button" parent="MenuPanel/VBox"]
 layout_mode = 2
 custom_minimum_size = Vector2(260, 36)
 theme = ExtResource("4")
 text = "SETTINGS"
+
+[node name="Spacer4" type="Control" parent="MenuPanel/VBox"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+
+[node name="QuitButton" type="Button" parent="MenuPanel/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(260, 40)
+theme = ExtResource("4")
+text = "QUIT"
 
 
 [node name="ConnectionStatus" type="Label" parent="."]

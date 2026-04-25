@@ -10,8 +10,7 @@ extends Node
 #   Aggressive — 45–50% of lane (just behind map center)
 #   Jungle     — off-lane |x| 20–75 clearings
 #
-# Player-need drops: healthpack when ally HP < 40, weapon drop when HP < 60
-# (used as ammo-low proxy since reserve ammo is not server-synced).
+# Player-need drops: healthpack when ally HP < 40, weapon drop when ally reserve ammo < 15.
 # Per-player 30s cooldown prevents spam.
 
 const RESERVE_POINTS: float = 5.0
@@ -34,7 +33,7 @@ const DROP_RING_ANGLES: Array = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 31
 
 const PLAYER_NEED_COOLDOWN: float = 30.0
 const LOW_HP_THRESHOLD: float = 40.0
-const LOW_HP_WEAPON_THRESHOLD: float = 60.0  # proxy for "probably low ammo"
+const LOW_AMMO_THRESHOLD: int = 15
 
 var team: int = 0
 var build_system: Node = null
@@ -127,9 +126,12 @@ func _check_player_needs(points: float) -> bool:
 				_drop_cooldowns[peer_id] = PLAYER_NEED_COOLDOWN
 				return true
 
-		# Medium-low HP used as ammo-low proxy → weapon drop
-		if hp < LOW_HP_WEAPON_THRESHOLD:
-			if _try_place_near_player(pos, "weapon", "rifle", 20.0, points):
+		# Low ammo → drop matching weapon type (if server has seen ammo report)
+		var reserve: int = GameSync.get_player_reserve_ammo(peer_id)
+		if reserve < LOW_AMMO_THRESHOLD:
+			var wtype: String = GameSync.player_weapon_type.get(peer_id, "pistol")
+			var cost: float = float(build_system.WEAPON_COSTS.get(wtype, 10))
+			if _try_place_near_player(pos, "weapon", wtype, cost, points):
 				_drop_cooldowns[peer_id] = PLAYER_NEED_COOLDOWN
 				return true
 

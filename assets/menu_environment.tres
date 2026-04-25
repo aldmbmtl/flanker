@@ -1,12 +1,9 @@
 [gd_resource type="Environment" format=3]
 
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMenu"]
-sky_top_color = Color(0.05, 0.05, 0.1, 1)
-sky_horizon_color = Color(0.1, 0.08, 0.15, 1)
-sky_curve = 0.15
+[ext_resource type="Material" path="res://assets/skybox/menu_sky_material.tres" id="MenuSkyMat"]
 
 [sub_resource type="Sky" id="SkyMenu"]
-sky_material = SubResource("ProceduralSkyMenu")
+sky_material = ExtResource("MenuSkyMat")
 
 [resource]
 background_mode = 2

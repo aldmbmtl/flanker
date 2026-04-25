@@ -1,14 +1,9 @@
 [gd_resource type="Environment" format=3]
 
-[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_day"]
-sky_top_color = Color(0.3, 0.5, 0.8, 1)
-sky_horizon_color = Color(0.6, 0.7, 0.9, 1)
-sky_curve = 0.15
-ground_bottom_color = Color(0.35, 0.4, 0.25, 1)
-ground_horizon_color = Color(0.5, 0.55, 0.35, 1)
+[ext_resource type="Material" path="res://assets/skybox/day_sky_material.tres" id="DaySkyMat"]
 
 [sub_resource type="Sky" id="Sky_day"]
-sky_material = SubResource("ProceduralSkyMaterial_day")
+sky_material = ExtResource("DaySkyMat")
 process_mode = 2
 
 [resource]

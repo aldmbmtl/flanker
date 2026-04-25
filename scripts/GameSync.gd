@@ -10,6 +10,8 @@ var player_spawn_positions: Dictionary = {}
 var player_dead: Dictionary = {}
 var respawn_timer: float = 0.0
 var respawn_countdown: Dictionary = {}
+var player_reserve_ammo: Dictionary = {}  # {peer_id: int}  total reserve across both slots
+var player_weapon_type: Dictionary = {}   # {peer_id: String}  active weapon name
 
 const PLAYER_MAX_HP: float = 100.0
 const PLAYER_SYNC_INTERVAL := 5
@@ -18,6 +20,7 @@ signal player_health_changed(peer_id: int, health: float)
 signal player_died(peer_id: int)
 signal player_respawned(peer_id: int, spawn_pos: Vector3)
 signal remote_player_updated(peer_id: int, pos: Vector3, rot: Vector3, team: int)
+signal player_ammo_changed(peer_id: int, reserve: int)
 
 func _ready() -> void:
 	player_spawn_positions[0] = Vector3(0.0, 0.0, 82.0)
@@ -73,3 +76,11 @@ func respawn_player(peer_id: int) -> void:
 
 func get_spawn_position(team: int) -> Vector3:
 	return player_spawn_positions.get(team, Vector3.ZERO)
+
+func get_player_reserve_ammo(peer_id: int) -> int:
+	return player_reserve_ammo.get(peer_id, 999)  # 999 = never synced, assume fine
+
+func set_player_reserve_ammo(peer_id: int, reserve: int, weapon_type: String) -> void:
+	player_reserve_ammo[peer_id] = reserve
+	player_weapon_type[peer_id] = weapon_type
+	player_ammo_changed.emit(peer_id, reserve)
