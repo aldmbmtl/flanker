@@ -398,9 +398,6 @@ func _fire_at(target: Node3D) -> void:
 	bullet.velocity      = dir * BULLET_SPEED
 	get_tree().root.get_child(0).add_child(bullet)
 	bullet.global_position = spawn_pos
-	var main: Node = get_tree().root.get_node("Main")
-	if main.has_method("_on_bullet_hit_something"):
-		bullet.hit_something.connect(main._on_bullet_hit_something)
 
 	if multiplayer.is_server():
 		LobbyManager.spawn_bullet_visuals.rpc(bullet.global_position, dir, attack_damage, team)
