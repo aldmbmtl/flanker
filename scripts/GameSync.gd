@@ -60,9 +60,12 @@ func damage_player(peer_id: int, amount: float, source_team: int, killer_peer_id
 	return hp
 
 func _process(delta: float) -> void:
+	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+		return
 	for peer_id in player_dead.keys():
 		if player_dead.get(peer_id, false):
-			respawn_countdown[peer_id] -= delta
+			if respawn_countdown.has(peer_id):
+				respawn_countdown[peer_id] -= delta
 			if respawn_countdown.get(peer_id, 0.0) <= 0.0:
 				respawn_player(peer_id)
 

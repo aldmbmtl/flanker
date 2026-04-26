@@ -25,6 +25,7 @@ const WEAPON_PRESETS: Array = [
 	"res://assets/weapons/weapon_pistol.tres",
 	"res://assets/weapons/weapon_rifle.tres",
 	"res://assets/weapons/weapon_heavy.tres",
+	"res://assets/weapons/weapon_rocket_launcher.tres",
 ]
 
 var game_over    := false

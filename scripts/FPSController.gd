@@ -113,9 +113,10 @@ var weapon_slot1_icon:  TextureRect   = null
 var weapon_slot2_icon:  TextureRect   = null
 
 const _WEAPON_ICONS: Dictionary = {
-	"Pistol":        "res://assets/kenney_blaster-kit/Previews/blaster-a.png",
-	"Rifle":         "res://assets/kenney_blaster-kit/Previews/blaster-f.png",
-	"Heavy Blaster": "res://assets/kenney_blaster-kit/Previews/blaster-k.png",
+	"Pistol":          "res://assets/kenney_blaster-kit/Previews/blaster-a.png",
+	"Rifle":           "res://assets/kenney_blaster-kit/Previews/blaster-f.png",
+	"Heavy Blaster":   "res://assets/kenney_blaster-kit/Previews/blaster-k.png",
+	"Rocket Launcher": "res://assets/kenney_blaster-kit/Previews/blaster-q.png",
 }
 
 signal died
@@ -133,7 +134,8 @@ const CAMERA_SHAKE_AMP := 0.45
 var camera_shake_time := 0.0
 var _base_cam_y := 0.0
 
-const BulletScene := preload("res://scenes/Bullet.tscn")
+const BulletScene  := preload("res://scenes/Bullet.tscn")
+const RocketScene  := preload("res://scenes/Rocket.tscn")
 const PLAYER_SYNC_INTERVAL := 5
 
 func _ready() -> void:
@@ -325,6 +327,31 @@ func _load_default_weapon() -> void:
 		weapons[0] = default_weapon
 		_slot_ammo[0] = [default_weapon.magazine_size, default_weapon.reserve_ammo]
 
+func drop_weapons() -> void:
+	for i in range(weapons.size()):
+		var w: WeaponData = weapons[i]
+		if w == null:
+			continue
+		var mag: int = _slot_ammo[i][0]
+		var reserve: int = _slot_ammo[i][1]
+		if mag + reserve == 0:
+			continue
+		var drop_dict: Dictionary = {
+			"weapon_name": w.weapon_name,
+			"magazine_size": mag,
+			"reserve_ammo": reserve,
+		}
+		var drop_pos: Vector3 = global_position
+		drop_pos.y = global_position.y - 0.5
+		if not multiplayer.has_multiplayer_peer():
+			LobbyManager.spawn_dropped_weapon(drop_dict, drop_pos)
+		elif multiplayer.is_server():
+			LobbyManager.spawn_dropped_weapon.rpc(drop_dict, drop_pos)
+		else:
+			LobbyManager.request_drop_weapon.rpc_id(1, drop_dict, drop_pos)
+		weapons[i] = null
+		_slot_ammo[i] = [0, 0]
+
 func _apply_role_stats() -> void:
 	if player_role.is_empty():
 		return
@@ -354,8 +381,7 @@ func respawn(spawn_pos: Vector3) -> void:
 	_kicking = false
 	weapon_model.position = WEAPON_REST_POS
 	weapon_model.rotation = WEAPON_REST_ROT
-	if weapons[0] == null:
-		_load_default_weapon()
+	_load_default_weapon()
 	if weapons[0] != null:
 		_slot_ammo = [
 			[weapons[0].magazine_size, weapons[0].reserve_ammo],
@@ -399,6 +425,7 @@ func pick_up_weapon(w: WeaponData) -> void:
 	emit_signal("weapon_changed", active_slot, w)
 
 func _on_death() -> void:
+	drop_weapons()
 	_dead         = true
 	active        = false
 	camera.current = false
@@ -719,27 +746,44 @@ func _shoot() -> void:
 	if shoot_audio.stream != null:
 		shoot_audio.play()
 
-	var bullet: Node3D = BulletScene.instantiate()
-	bullet.damage        = w.damage * player_damage_mult * _get_level_damage_mult()
-	bullet.source        = "player"
-	bullet.shooter_team  = player_team
-	bullet.set_meta("shooter_peer_id", _peer_id)
-	bullet.set("shooter_peer_id", _peer_id)
-	var dir: Vector3     = -camera.global_transform.basis.z
-	bullet.velocity      = dir * w.bullet_speed
-	get_tree().root.get_child(0).add_child(bullet)
-	bullet.global_position = shoot_from.global_position
-	var main: Node = get_tree().root.get_node("Main")
-	if main.has_method("_on_bullet_hit_something") and bullet.shooter_peer_id == _peer_id:
-		bullet.hit_something.connect(main._on_bullet_hit_something)
+	var dir: Vector3 = -camera.global_transform.basis.z
+	var is_rocket: bool = (w.weapon_name == "Rocket Launcher")
 
-	# Send to host for authoritative validation + broadcast to other clients
-	if multiplayer.has_multiplayer_peer():
-		if multiplayer.is_server():
-			LobbyManager.spawn_bullet_visuals.rpc(shoot_from.global_position, dir, w.damage, player_team, _peer_id)
-		else:
-			var hit_info: Dictionary = _local_raycast_hit(shoot_from.global_position, dir)
-			LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, _peer_id, hit_info)
+	if is_rocket:
+		var rocket: Node3D = RocketScene.instantiate()
+		rocket.damage         = w.damage * player_damage_mult * _get_level_damage_mult()
+		rocket.source         = "rocket"
+		rocket.shooter_team   = player_team
+		rocket.shooter_peer_id = _peer_id
+		rocket.velocity       = dir * w.bullet_speed
+		get_tree().root.get_child(0).add_child(rocket)
+		rocket.global_position = shoot_from.global_position
+		# Multiplayer: server broadcasts rocket spawn to all clients
+		if multiplayer.has_multiplayer_peer():
+			if multiplayer.is_server():
+				LobbyManager.spawn_bullet_visuals.rpc(shoot_from.global_position, dir, w.damage, player_team, _peer_id, "rocket")
+			else:
+				LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, _peer_id, {}, "rocket")
+	else:
+		var bullet: Node3D = BulletScene.instantiate()
+		bullet.damage        = w.damage * player_damage_mult * _get_level_damage_mult()
+		bullet.source        = "player"
+		bullet.shooter_team  = player_team
+		bullet.set_meta("shooter_peer_id", _peer_id)
+		bullet.set("shooter_peer_id", _peer_id)
+		bullet.velocity      = dir * w.bullet_speed
+		get_tree().root.get_child(0).add_child(bullet)
+		bullet.global_position = shoot_from.global_position
+		var main: Node = get_tree().root.get_node("Main")
+		if main.has_method("_on_bullet_hit_something") and bullet.shooter_peer_id == _peer_id:
+			bullet.hit_something.connect(main._on_bullet_hit_something)
+		# Send to host for authoritative validation + broadcast to other clients
+		if multiplayer.has_multiplayer_peer():
+			if multiplayer.is_server():
+				LobbyManager.spawn_bullet_visuals.rpc(shoot_from.global_position, dir, w.damage, player_team, _peer_id)
+			else:
+				var hit_info: Dictionary = _local_raycast_hit(shoot_from.global_position, dir)
+				LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, _peer_id, hit_info)
 
 	_update_ammo_hud()
 	_report_ammo_to_server()

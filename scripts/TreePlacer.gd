@@ -24,7 +24,7 @@ const RED_BASE_CENTER := Vector3(0.0, 0.0, -82.0)
 const TREE_SCALE_MIN := 3
 const TREE_SCALE_MAX := 5
 
-const TREE_DENSITY := .1
+const TREE_DENSITY := .07
 
 const CLEARING_CHANCE := 0.1
 const CLEARING_MIN_RADIUS := 8.0
