@@ -4,9 +4,16 @@ LOG        := /tmp/flankers.log
 HOST_LOG   := /tmp/flankers_host.log
 CLIENT_LOG := /tmp/flankers_client.log
 
-.PHONY: run stop restart logs host client hlogs clogs clean-symlink
+.PHONY: run stop restart logs host client hlogs clogs clean-symlink build
 
 .DEFAULT_GOAL := restart
+
+build:
+	@mkdir -p build
+	$(GODOT) --headless --export-release "Linux" build/flanker-linux
+	$(GODOT) --headless --export-release "Windows" build/flanker-windows.exe
+	zip -j build/flanker-linux.zip build/flanker-linux build/flanker-linux.pck
+	zip -j build/flanker-windows.zip build/flanker-windows.exe build/flanker-windows.pck
 
 run:
 	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1

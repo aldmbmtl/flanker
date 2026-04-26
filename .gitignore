@@ -3,3 +3,6 @@
 .ai
 .godot
 *.import
+*.pck
+flanker-linux
+flanker-windows.exe

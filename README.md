@@ -96,6 +96,37 @@ DISPLAY=:0 godot --path /path/to/flanker > /tmp/flankers.log 2>&1 &
 
 ---
 
+## Downloading Pre-built Releases
+
+Pre-built binaries are available from the `build/` folder in the repository.
+
+### Downloading
+
+1. Download the appropriate zip for your OS:
+   - **Linux**: [flanker-linux.zip](./build/flanker-linux.zip)
+   - **Windows**: [flanker-windows.zip](./build/flanker-windows.zip)
+
+2. Extract the zip to a folder of your choice.
+
+### Running the Game
+
+**Linux**
+
+Open a terminal in the extracted folder and run:
+```bash
+./flanker-linux
+```
+
+Or double-click the file in your file manager. If prompted, mark as executable.
+
+**Windows**
+
+Double-click `flanker-windows.exe` to launch the game.
+
+> **Note**: Vulkan 1.1+ is required. Ensure your GPU drivers are up to date.
+
+---
+
 ## Controls
 
 ### FPS Mode (Fighter role only)
