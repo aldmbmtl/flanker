@@ -1,6 +1,6 @@
 extends Node
 
-const MINION_SCENE := "res://scenes/Minion.tscn"
+const MINION_SCENE := "res://scenes/minions/Minion.tscn"
 const WAVE_INTERVAL := 20.0
 const MAX_WAVE_SIZE := 6
 const MINION_STAGGER := 0.5  # seconds between each minion in a wave
@@ -9,6 +9,10 @@ const SYNC_INTERVAL := 6     # physics frames between position broadcasts
 var wave_number := 0
 var wave_timer := 0.0
 var _minion_counter: int = 0
+
+# Per-team lane boosts: _lane_boosts[team][lane_i] = extra minions to spawn next wave.
+# Set via boost_lane() / boost_all_lanes(). Consumed (reset to 0) after each wave fires.
+var _lane_boosts: Array = [[0, 0, 0], [0, 0, 0]]
 var _sync_frame: int = 0
 var _last_synced_next_in: int = -1
 
@@ -67,12 +71,37 @@ func _launch_wave() -> void:
 		_main.show_wave_announcement(wave_number)
 		LobbyManager.sync_wave_announcement.rpc(wave_number)
 
-	var count: int = min(wave_number, 5)
+	var base_count: int = min(wave_number, 5)
 	for lane_i in range(3):
-		for i in range(count):
-			var delay := i * MINION_STAGGER
-			_spawn_minion_delayed(0, lane_i, delay)
-			_spawn_minion_delayed(1, lane_i, delay)
+		for team in range(2):
+			var extra: int = _lane_boosts[team][lane_i]
+			var count: int = base_count + extra
+			for i in range(count):
+				var delay := i * MINION_STAGGER
+				_spawn_minion_delayed(team, lane_i, delay)
+
+	# Reset all boosts after the wave launches and broadcast zeroes to all peers
+	_lane_boosts = [[0, 0, 0], [0, 0, 0]]
+	LobbyManager.sync_lane_boosts.rpc([0, 0, 0], [0, 0, 0])
+
+# ── Lane boost API ────────────────────────────────────────────────────────────
+
+## Adds `amount` extra minions for `team` on `lane_i` for the next wave.
+## Called server-side only.
+func boost_lane(team: int, lane_i: int, amount: int) -> void:
+	if lane_i < 0 or lane_i > 2:
+		return
+	if team < 0 or team > 1:
+		return
+	_lane_boosts[team][lane_i] += amount
+
+## Adds 1 extra minion per lane for `team` on the next wave.
+## Called server-side only.
+func boost_all_lanes(team: int) -> void:
+	if team < 0 or team > 1:
+		return
+	for lane_i in range(3):
+		_lane_boosts[team][lane_i] += 1
 
 func _spawn_minion_delayed(team: int, lane_i: int, delay: float) -> void:
 	if delay <= 0.0:

@@ -1,0 +1,24 @@
+[gd_scene load_steps=4 format=3 uid="uid://remoteplayer"]
+
+[ext_resource type="Script" path="res://scripts/network/RemotePlayerGhost.gd" id="1"]
+[ext_resource type="PackedScene" path="res://assets/kenney_blocky-characters/Models/GLB format/character-a.glb" id="2"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
+height = 1.8
+radius = 0.4
+
+[node name="RemotePlayer" type="Node3D"]
+script = ExtResource("1")
+
+[node name="PlayerBody" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.9, 0)
+
+[node name="CharacterMesh" type="Node3D" parent="PlayerBody"]
+instance = ExtResource("2")
+
+[node name="HitBody" type="StaticBody3D" parent="."]
+collision_layer = 1
+collision_mask = 0
+
+[node name="HitShape" type="CollisionShape3D" parent="HitBody"]
+shape = SubResource("CapsuleShape3D_1")

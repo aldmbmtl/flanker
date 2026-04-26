@@ -1,7 +1,0 @@
-[gd_scene load_steps=3 format=3 uid="uid://launcher_tower"]
-
-[ext_resource type="Script" path="res://scripts/LauncherTower.gd" id="1"]
-[ext_resource type="Script" path="res://scripts/LauncherDefs.gd" id="2"]
-
-[node name="LauncherTower" type="StaticBody3D"]
-script = ExtResource("1")

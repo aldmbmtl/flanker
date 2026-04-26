@@ -4,7 +4,7 @@ LOG        := /tmp/flankers.log
 HOST_LOG   := /tmp/flankers_host.log
 CLIENT_LOG := /tmp/flankers_client.log
 
-.PHONY: run stop restart logs host client hlogs clogs clean-symlink build
+.PHONY: run stop restart logs host client hlogs clogs clean-symlink clean build
 
 .DEFAULT_GOAL := restart
 
@@ -46,3 +46,6 @@ clogs:
 
 clean-symlink:
 	rm -f $(PROJECT)/godot
+
+clean:
+	find $(PROJECT)/scripts -name "*.uid" -delete

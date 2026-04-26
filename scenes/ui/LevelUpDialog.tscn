@@ -1,0 +1,235 @@
+[gd_scene load_steps=8 format=3 uid="uid://levelupdialog"]
+
+[ext_resource type="Script" path="res://scripts/ui/LevelUpDialog.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.04, 0.05, 0.06, 0.92)
+border_width_left = 3
+border_color = Color(0.85, 0.32, 0.05, 1)
+content_margin_left = 10.0
+content_margin_right = 10.0
+content_margin_top = 8.0
+content_margin_bottom = 8.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bar_bg"]
+bg_color = Color(0.04, 0.05, 0.06, 0.90)
+border_width_left = 3
+border_color = Color(0.85, 0.32, 0.05, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_xp_fill"]
+bg_color = Color(1.0, 0.75, 0.1, 1.0)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_normal"]
+bg_color = Color(0.14, 0.08, 0.04, 1.0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.32, 0.05, 1)
+content_margin_left = 4.0
+content_margin_right = 4.0
+content_margin_top = 2.0
+content_margin_bottom = 2.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_hover"]
+bg_color = Color(0.24, 0.12, 0.04, 1.0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1.0, 0.55, 0.1, 1)
+content_margin_left = 4.0
+content_margin_right = 4.0
+content_margin_top = 2.0
+content_margin_bottom = 2.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_btn_disabled"]
+bg_color = Color(0.07, 0.07, 0.07, 1.0)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.3, 0.3, 0.3, 0.5)
+content_margin_left = 4.0
+content_margin_right = 4.0
+content_margin_top = 2.0
+content_margin_bottom = 2.0
+
+[node name="LevelUpDialog" type="Control"]
+layout_mode = 3
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -105.0
+offset_right = 150.0
+offset_bottom = 105.0
+mouse_filter = 0
+script = ExtResource("1")
+
+[node name="Panel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+; ── Title row ──────────────────────────────────────────────────────────────
+[node name="TitleRow" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="TitleLabel" type="Label" parent="Panel/VBox/TitleRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "ATTRIBUTES"
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.85, 0.32, 0.05, 1)
+
+[node name="PtsLabel" type="Label" parent="Panel/VBox/TitleRow"]
+layout_mode = 2
+text = "0 pts"
+horizontal_alignment = 2
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(1.0, 0.85, 0.2, 1.0)
+
+; ── Divider ────────────────────────────────────────────────────────────────
+[node name="Divider" type="ColorRect" parent="Panel/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 1)
+color = Color(0.85, 0.32, 0.05, 0.4)
+
+; ── Health row ─────────────────────────────────────────────────────────────
+[node name="HPRow" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HPLabel" type="Label" parent="Panel/VBox/HPRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(58, 0)
+text = "Health"
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+
+[node name="HPBar" type="ProgressBar" parent="Panel/VBox/HPRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+min_value = 0.0
+max_value = 6.0
+value = 0.0
+show_percentage = false
+theme_override_styles/fill = SubResource("StyleBoxFlat_xp_fill")
+theme_override_styles/background = SubResource("StyleBoxFlat_bar_bg")
+
+[node name="HPFrac" type="Label" parent="Panel/VBox/HPRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(28, 0)
+text = "0/6"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
+
+[node name="HPBtn" type="Button" parent="Panel/VBox/HPRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(26, 26)
+text = "+"
+theme_override_font_sizes/font_size = 14
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_btn_disabled")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_btn_hover")
+theme_override_colors/font_color = Color(1.0, 0.75, 0.1, 1)
+theme_override_colors/font_disabled_color = Color(0.35, 0.35, 0.35, 1)
+
+; ── Speed row ──────────────────────────────────────────────────────────────
+[node name="SpeedRow" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SpeedLabel" type="Label" parent="Panel/VBox/SpeedRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(58, 0)
+text = "Speed"
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+
+[node name="SpeedBar" type="ProgressBar" parent="Panel/VBox/SpeedRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+min_value = 0.0
+max_value = 6.0
+value = 0.0
+show_percentage = false
+theme_override_styles/fill = SubResource("StyleBoxFlat_xp_fill")
+theme_override_styles/background = SubResource("StyleBoxFlat_bar_bg")
+
+[node name="SpeedFrac" type="Label" parent="Panel/VBox/SpeedRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(28, 0)
+text = "0/6"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
+
+[node name="SpeedBtn" type="Button" parent="Panel/VBox/SpeedRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(26, 26)
+text = "+"
+theme_override_font_sizes/font_size = 14
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_btn_disabled")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_btn_hover")
+theme_override_colors/font_color = Color(1.0, 0.75, 0.1, 1)
+theme_override_colors/font_disabled_color = Color(0.35, 0.35, 0.35, 1)
+
+; ── Damage row ─────────────────────────────────────────────────────────────
+[node name="DamageRow" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="DamageLabel" type="Label" parent="Panel/VBox/DamageRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(58, 0)
+text = "Damage"
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
+
+[node name="DamageBar" type="ProgressBar" parent="Panel/VBox/DamageRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+min_value = 0.0
+max_value = 6.0
+value = 0.0
+show_percentage = false
+theme_override_styles/fill = SubResource("StyleBoxFlat_xp_fill")
+theme_override_styles/background = SubResource("StyleBoxFlat_bar_bg")
+
+[node name="DamageFrac" type="Label" parent="Panel/VBox/DamageRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(28, 0)
+text = "0/6"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.55, 0.55, 0.55, 1)
+
+[node name="DamageBtn" type="Button" parent="Panel/VBox/DamageRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(26, 26)
+text = "+"
+theme_override_font_sizes/font_size = 14
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn_normal")
+theme_override_styles/hover = SubResource("StyleBoxFlat_btn_hover")
+theme_override_styles/disabled = SubResource("StyleBoxFlat_btn_disabled")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_btn_hover")
+theme_override_colors/font_color = Color(1.0, 0.75, 0.1, 1)
+theme_override_colors/font_disabled_color = Color(0.35, 0.35, 0.35, 1)

@@ -1,46 +1,34 @@
-extends StaticBody3D
-## Slow Tower — pulses every 2s, applies 40% speed debuff for 3s to nearby enemies.
+## SlowTowerAI.gd — Slow tower (TowerBase subclass).
+## Pulses every 2s, applies speed debuff to nearby enemies.
+## Stats configured via @export in SlowTower.tscn.
+## Overrides _process (pulse-based, not attack-based).
+## Overrides _build_visuals to apply permanent cyan tint.
 
-const TOWER_SCENE := preload("res://assets/kenney_pirate-kit/Models/GLB format/tower-complete-small.glb")
+extends TowerBase
 
 const PULSE_INTERVAL := 2.0
 const SLOW_DURATION  := 3.0
 const SLOW_MULT      := 0.4
 
-var team := 0
-var health := 500.0
-const MAX_HEALTH := 500.0
-var attack_range := 18.0
-var _pulse_timer := 0.0
-var _dead := false
+var _pulse_timer: float = 0.0
 
-@onready var area: Area3D = $Area3D
+# ── Visuals — cyan tint applied permanently via surface override ──────────────
 
-func setup(p_team: int) -> void:
-	team = p_team
-	add_to_group("towers")
-	_load_model()
-	var shape := SphereShape3D.new()
-	shape.radius = attack_range
-	$Area3D/CollisionShape3D.shape = shape
+func _build_visuals() -> void:
+	super._build_visuals()
+	if _mesh_inst == null or _mesh_inst.mesh == null:
+		return
+	var tint := StandardMaterial3D.new()
+	tint.albedo_color = Color(0.3, 0.9, 1.0)
+	tint.emission_enabled = true
+	tint.emission = Color(0.3, 0.9, 1.0)
+	tint.emission_energy_multiplier = 0.6
+	for i in _mesh_inst.mesh.get_surface_count():
+		_mesh_inst.set_surface_override_material(i, tint)
+	# Tint is permanent — replace the hit overlay mat so _flash_hit still works
+	_hit_overlay_mat = null  # disable flash for slow tower (tint is always on)
 
-func _load_model() -> void:
-	var root: Node3D = TOWER_SCENE.instantiate()
-	# Cyan tint to distinguish visually
-	root.scale = Vector3(0.9, 0.9, 0.9)
-	add_child(root)
-	_tint_model(root, Color(0.3, 0.9, 1.0))
-
-func _tint_model(node: Node, color: Color) -> void:
-	if node is MeshInstance3D:
-		var mat := StandardMaterial3D.new()
-		mat.albedo_color = color
-		mat.emission_enabled = true
-		mat.emission = color
-		mat.emission_energy_multiplier = 0.6
-		node.material_override = mat
-	for child in node.get_children():
-		_tint_model(child, color)
+# ── Pulse loop — replaces TowerBase._process ─────────────────────────────────
 
 func _process(delta: float) -> void:
 	if _dead:
@@ -50,21 +38,16 @@ func _process(delta: float) -> void:
 		_pulse_timer = 0.0
 		_emit_pulse()
 
+# ── Pulse logic ───────────────────────────────────────────────────────────────
+
 func _emit_pulse() -> void:
 	_spawn_pulse_vfx()
-	for body in area.get_overlapping_bodies():
+	if _area == null:
+		return
+	for body in _area.get_overlapping_bodies():
 		if not is_instance_valid(body):
 			continue
-		# Get team
-		var body_team := -1
-		var pt = body.get("player_team")
-		if pt != null:
-			body_team = pt as int
-		else:
-			var t = body.get("team")
-			if t != null:
-				body_team = t as int
-		# Only slow enemies with clear LOS
+		var body_team: int = _get_body_team(body)
 		if body_team == team or body_team == -1:
 			continue
 		if not _has_line_of_sight(body):
@@ -72,31 +55,11 @@ func _emit_pulse() -> void:
 		if body.has_method("apply_slow"):
 			body.apply_slow(SLOW_DURATION, SLOW_MULT)
 
-func _has_line_of_sight(target: Node3D) -> bool:
-	var from: Vector3 = global_position + Vector3(0.0, 1.5, 0.0)
-	var to: Vector3 = target.global_position + Vector3(0.0, 0.8, 0.0)
-	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
-	var excluded: Array[RID] = [get_rid(), target.get_rid()]
-	for _attempt in range(4):
-		var query := PhysicsRayQueryParameters3D.create(from, to)
-		query.exclude = excluded
-		query.collision_mask = 0b11
-		var result: Dictionary = space.intersect_ray(query)
-		if result.is_empty():
-			return true
-		var body: Object = result.collider
-		if body != null and body.has_meta("tree_trunk_height"):
-			excluded.append(body.get_rid())
-			continue
-		return false
-	return true
-
 func _spawn_pulse_vfx() -> void:
 	var root: Node = get_tree().root
 	var origin: Vector3 = global_position + Vector3(0.0, 0.3, 0.0)
 
-	# ── Layer 1: Ground shockwave ring ────────────────────────────────────────
-	# Particles emitted outward along the ground plane
+	# Ground shockwave ring
 	var p1 := GPUParticles3D.new()
 	var pm1 := ParticleProcessMaterial.new()
 	pm1.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
@@ -105,7 +68,7 @@ func _spawn_pulse_vfx() -> void:
 	pm1.spread = 180.0
 	pm1.initial_velocity_min = 6.0
 	pm1.initial_velocity_max = 12.0
-	pm1.gravity = Vector3(0.0, -28.0, 0.0)  # snap quickly to ground
+	pm1.gravity = Vector3(0.0, -28.0, 0.0)
 	pm1.scale_min = 0.15
 	pm1.scale_max = 0.35
 	var m1 := QuadMesh.new()
@@ -130,7 +93,7 @@ func _spawn_pulse_vfx() -> void:
 	p1.restart()
 	get_tree().create_timer(p1.lifetime + 0.1).timeout.connect(p1.queue_free)
 
-	# ── Layer 2: Rising ice crystal wisps ─────────────────────────────────────
+	# Rising ice crystal wisps
 	var p2 := GPUParticles3D.new()
 	var pm2 := ParticleProcessMaterial.new()
 	pm2.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
@@ -143,7 +106,7 @@ func _spawn_pulse_vfx() -> void:
 	pm2.scale_min = 0.08
 	pm2.scale_max = 0.2
 	var m2 := QuadMesh.new()
-	m2.size = Vector2(0.15, 0.4)  # tall thin wisp shape
+	m2.size = Vector2(0.15, 0.4)
 	var mat2 := StandardMaterial3D.new()
 	mat2.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat2.albedo_color = Color(0.55, 0.9, 1.0, 0.75)
@@ -165,7 +128,7 @@ func _spawn_pulse_vfx() -> void:
 	p2.restart()
 	get_tree().create_timer(p2.lifetime + 0.1).timeout.connect(p2.queue_free)
 
-	# ── Layer 3: Central flash burst ──────────────────────────────────────────
+	# Central flash burst
 	var p3 := GPUParticles3D.new()
 	var pm3 := ParticleProcessMaterial.new()
 	pm3.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
@@ -199,7 +162,7 @@ func _spawn_pulse_vfx() -> void:
 	p3.restart()
 	get_tree().create_timer(p3.lifetime + 0.1).timeout.connect(p3.queue_free)
 
-	# ── Flash light ───────────────────────────────────────────────────────────
+	# Flash light
 	var flash := OmniLight3D.new()
 	flash.light_color = Color(0.3, 0.9, 1.0)
 	flash.light_energy = 5.0
@@ -210,19 +173,3 @@ func _spawn_pulse_vfx() -> void:
 	var tw: Tween = flash.create_tween()
 	tw.tween_property(flash, "light_energy", 0.0, 0.3)
 	tw.tween_callback(flash.queue_free)
-
-func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void:
-	if not multiplayer.is_server():
-		return
-	if _dead:
-		return
-	health -= amount
-	if health <= 0:
-		_die()
-
-func _die() -> void:
-	_dead = true
-	if multiplayer.has_multiplayer_peer():
-		LobbyManager.despawn_tower.rpc(name)
-	else:
-		queue_free()

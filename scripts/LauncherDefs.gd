@@ -30,7 +30,7 @@ const DEFS: Dictionary = {
 		"blast_radius":    12.0,
 		"blast_damage":    950.0,
 		"flight_time":     4.0,
-		"missile_scene":   "res://scenes/Missile.tscn",
+		"missile_scene":   "res://scenes/projectiles/Missile.tscn",
 		"reveal_radius":   0.0,
 		"reveal_duration": 0.0,
 		"direct_cast":     false,
@@ -99,7 +99,7 @@ static func get_flight_time(launcher_type: String) -> float:
 	return float(DEFS.get(launcher_type, {}).get("flight_time", 4.0))
 
 static func get_missile_scene(launcher_type: String) -> String:
-	return str(DEFS.get(launcher_type, {}).get("missile_scene", "res://scenes/Missile.tscn"))
+	return str(DEFS.get(launcher_type, {}).get("missile_scene", "res://scenes/projectiles/Missile.tscn"))
 
 static func get_label(launcher_type: String) -> String:
 	return str(DEFS.get(launcher_type, {}).get("label", launcher_type.capitalize()))

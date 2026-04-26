@@ -46,16 +46,18 @@ var _active_pickup_positions: Array[Vector3] = []
 var _pickup_sound: AudioStream = null
 var _pending_respawns: Dictionary = {}
 
-const FPSPlayerScene := preload("res://scenes/FPSPlayer.tscn")
-const MinionAI := preload("res://scripts/MinionAI.gd")
-const RoleSelectDialogScene := preload("res://scenes/RoleSelectDialog.tscn")
-const SupporterHUDScene := preload("res://scenes/SupporterHUD.tscn")
-const LauncherHUDScript := preload("res://scripts/LauncherHUD.gd")
-const AISupporterControllerScript := preload("res://scripts/AISupporterController.gd")
-const LevelUpDialogScene := preload("res://scenes/LevelUpDialog.tscn")
+const FPSPlayerScene := preload("res://scenes/roles/FPSPlayer.tscn")
+const MinionAI := preload("res://scripts/minions/MinionAI.gd")
+const RoleSelectDialogScene := preload("res://scenes/ui/RoleSelectDialog.tscn")
+const SupporterHUDScene := preload("res://scenes/ui/SupporterHUD.tscn")
+const LauncherHUDScript := preload("res://scripts/ui/LauncherHUD.gd")
+const LaneBoostHUDScript := preload("res://scripts/ui/LaneBoostHUD.gd")
+const AISupporterControllerScript := preload("res://scripts/roles/supporter/AISupporterController.gd")
+const LevelUpDialogScene := preload("res://scenes/ui/LevelUpDialog.tscn")
 
 var _supporter_hud: Node = null
 var _launcher_hud: Node = null
+var _lane_boost_hud: Node = null
 var _level_up_dialog: Control = null
 
 @onready var rts_camera:         Camera3D        = $RTSCamera
@@ -78,7 +80,7 @@ var _hit_ring_base_color: Color = Color.WHITE
 
 var fps_player: CharacterBody3D = null
 
-@onready var game_over_label:    Label           = $HUD/GameOverLabel
+@onready var game_over_screen:   Control         = $HUD/GameOverScreen
 @onready var wave_info_label:    Label           = $HUD/WaveInfoPanel/WaveInfoLabel
 @onready var wave_announce_panel: PanelContainer = $HUD/WaveAnnouncePanel
 @onready var wave_announce_label: Label          = $HUD/WaveAnnouncePanel/WaveAnnounceLabel
@@ -96,6 +98,8 @@ var fps_player: CharacterBody3D = null
 @onready var vitals_panel:       PanelContainer  = $HUD/VitalsPanel
 @onready var reload_prompt:      Label           = $HUD/ReloadPrompt
 @onready var points_label:      Label           = $HUD/PointsPanel/PointsLabel
+@onready var blue_lives_bar:    ProgressBar     = $HUD/LivesBar/LivesHBox/BlueBar
+@onready var red_lives_bar:     ProgressBar     = $HUD/LivesBar/LivesHBox/RedBar
 @onready var minimap:            Control         = $HUD/MinimapPanel/Minimap
 @onready var stamina_bar:        ProgressBar     = $HUD/VitalsPanel/VitalsBox/StaminaBar
 @onready var health_bar:         ProgressBar     = $HUD/VitalsPanel/VitalsBox/HealthBar
@@ -108,10 +112,11 @@ var fps_player: CharacterBody3D = null
 @onready var event_feed:         Control            = $HUD/EventFeed
 
 const WeaponPickupScene := preload("res://scenes/WeaponPickup.tscn")
+const PortalGoalScene   := preload("res://scenes/PortalGoal.tscn")
 const PickupSoundPath   := "res://assets/kenney_ui-audio/Audio/switch1.ogg"
-const StartMenuScene    := preload("res://scenes/StartMenu.tscn")
-const PauseMenuScene    := preload("res://scenes/PauseMenu.tscn")
-const LoadingScreenScene := preload("res://scenes/LoadingScreen.tscn")
+const StartMenuScene    := preload("res://scenes/ui/StartMenu.tscn")
+const PauseMenuScene    := preload("res://scenes/ui/PauseMenu.tscn")
+const LoadingScreenScene := preload("res://scenes/ui/LoadingScreen.tscn")
 
 var _start_menu: Control
 var _pause_menu: Control
@@ -127,6 +132,8 @@ func _ready() -> void:
 		_setup_singleplayer_game()
 		_on_start_game()
 	GraphicsSettings.settings_changed.connect(_apply_fog_settings)
+	TeamLives.life_lost.connect(_on_life_lost)
+	TeamLives.game_over.connect(_on_team_lives_game_over)
 
 func _setup_singleplayer_game() -> void:
 	_start_menu = StartMenuScene.instantiate()
@@ -148,12 +155,12 @@ func _setup_multiplayer_game() -> void:
 	_start_multiplayer_game()
 
 func _on_kicked_from_server() -> void:
-	get_tree().change_scene_to_file("res://scenes/StartMenu.tscn")
+	get_tree().change_scene_to_file("res://scenes/ui/StartMenu.tscn")
 
 func _spawn_remote_player_manager() -> void:
 	if not multiplayer.has_multiplayer_peer():
 		return
-	var mgr_script := load("res://scripts/RemotePlayerManager.gd")
+	var mgr_script := load("res://scripts/network/RemotePlayerManager.gd")
 	var mgr: Node = Node.new()
 	mgr.set_script(mgr_script)
 	mgr.name = "RemotePlayerManager"
@@ -176,7 +183,7 @@ func _start_multiplayer_game() -> void:
 	var info: Dictionary = LobbyManager.players.get(my_id, {})
 	player_start_team = info.team if info.has("team") else 0
 
-	_setup_bases()
+	_setup_portals()
 	_HUD_set_visible(true)
 	wave_announce_panel.visible = false
 	wave_info_label.text = "Wave: 0 | First wave in: 10s"
@@ -269,6 +276,13 @@ func _start_multiplayer_game() -> void:
 		rts_camera.set_launcher_hud(_launcher_hud)
 		LobbyManager.item_spawned.connect(_launcher_hud._on_item_spawned)
 		LobbyManager.tower_despawned.connect(_launcher_hud._on_tower_despawned)
+		# Spawn LaneBoostHUD — right-edge reinforce toolbar (multiplayer)
+		_lane_boost_hud = CanvasLayer.new()
+		_lane_boost_hud.set_script(LaneBoostHUDScript)
+		_lane_boost_hud.name = "LaneBoostHUD"
+		$HUD.add_child(_lane_boost_hud)
+		_lane_boost_hud.setup(player_start_team)
+		LobbyManager.lane_boosts_synced.connect(_lane_boost_hud.apply_boost_sync)
 
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
@@ -409,7 +423,7 @@ func _on_event_item_spawned(item_type: String, team: int) -> void:
 	else:
 		event_feed.add_event("Supporter placed %s" % display)
 
-func _on_event_tower_despawned(item_type: String, team: int) -> void:
+func _on_event_tower_despawned(item_type: String, team: int, _tower_name: String) -> void:
 	if team != player_start_team:
 		return
 	var display: String = ITEM_DISPLAY_NAMES.get(item_type, item_type.capitalize())
@@ -574,13 +588,33 @@ func _on_bullet_hit_something(hit_type: String) -> void:
 	hit_ring_left.modulate.a = 1.0
 	hit_ring_right.modulate.a = 1.0
 
-func _setup_bases() -> void:
-	var blue_base = $World/BlueBase/BlueBaseInst
-	var red_base  = $World/RedBase/RedBaseInst
-	if blue_base and blue_base.has_method("setup"):
-		blue_base.setup(0)
-	if red_base and red_base.has_method("setup"):
-		red_base.setup(1)
+func _setup_portals() -> void:
+	TeamLives.reset()
+	_update_lives_bars()
+	var portal_scene: PackedScene = PortalGoalScene
+	# Spawn one portal per lane per team at the lane endpoints
+	for lane_i in range(3):
+		var pts: Array = LaneData.get_lane_points(lane_i)
+		if pts.size() == 0:
+			continue
+		# Blue minions march toward red base (last point in blue direction = pts.back())
+		# Red portal sits at the end blue minions walk toward → pts.back() (z≈-82)
+		var red_end: Vector2 = pts.back() as Vector2
+		var red_portal: Area3D = portal_scene.instantiate()
+		red_portal.team   = 1
+		red_portal.lane_i = lane_i
+		red_portal.name   = "PortalRed_%d" % lane_i
+		$World.add_child(red_portal)
+		red_portal.global_position = Vector3(red_end.x, 0.5, red_end.y)
+
+		# Blue portal sits at the end red minions walk toward → pts.front() (z≈+82)
+		var blue_end: Vector2 = pts.front() as Vector2
+		var blue_portal: Area3D = portal_scene.instantiate()
+		blue_portal.team   = 0
+		blue_portal.lane_i = lane_i
+		blue_portal.name   = "PortalBlue_%d" % lane_i
+		$World.add_child(blue_portal)
+		blue_portal.global_position = Vector3(blue_end.x, 0.5, blue_end.y)
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
@@ -661,11 +695,11 @@ func _on_start_game() -> void:
 		add_child(fps_player)
 		fps_player.add_to_group("player")
 
-	loading_screen.set_status("Setting up bases...")
+	loading_screen.set_status("Placing portals...")
 	loading_screen.set_progress(72.0)
 	await get_tree().process_frame
 
-	_setup_bases()
+	_setup_portals()
 
 	loading_screen.set_status("Loading audio & HUD...")
 	loading_screen.set_progress(82.0)
@@ -715,6 +749,13 @@ func _on_start_game() -> void:
 		rts_camera.set_launcher_hud(_launcher_hud)
 		LobbyManager.item_spawned.connect(_launcher_hud._on_item_spawned)
 		LobbyManager.tower_despawned.connect(_launcher_hud._on_tower_despawned)
+		# Spawn LaneBoostHUD — right-edge reinforce toolbar (singleplayer)
+		_lane_boost_hud = CanvasLayer.new()
+		_lane_boost_hud.set_script(LaneBoostHUDScript)
+		_lane_boost_hud.name = "LaneBoostHUD"
+		$HUD.add_child(_lane_boost_hud)
+		_lane_boost_hud.setup(player_start_team)
+		LobbyManager.lane_boosts_synced.connect(_lane_boost_hud.apply_boost_sync)
 
 	# Spawn AI Supporters for any uncovered team (singleplayer — always server)
 	_spawn_ai_supporters_singleplayer(player_role, player_start_team)
@@ -743,7 +784,7 @@ func _on_quit_from_menu() -> void:
 func leave_game() -> void:
 	if not _is_singleplayer and multiplayer.has_multiplayer_peer():
 		multiplayer.multiplayer_peer = null
-	get_tree().change_scene_to_file("res://scenes/StartMenu.tscn")
+	get_tree().change_scene_to_file("res://scenes/ui/StartMenu.tscn")
 
 func toggle_pause(paused: bool) -> void:
 	if paused:
@@ -780,7 +821,8 @@ func toggle_pause(paused: bool) -> void:
 			fps_mode = false
 
 func _HUD_set_visible(visible: bool) -> void:
-	game_over_label.visible = visible and game_over
+	if game_over_screen and game_over:
+		game_over_screen.visible = visible
 	wave_info_label.visible = visible
 	crosshair.visible = visible and fps_mode
 	minimap.visible = visible and fps_mode
@@ -822,9 +864,26 @@ func game_over_signal(winner: String) -> void:
 	if game_over:
 		return
 	game_over = true
-	game_over_label.text = winner + " WINS!\n[Esc] to quit"
-	game_over_label.visible = true
-	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	var winner_team: int = 0 if winner == "BLUE" else 1
+	if game_over_screen:
+		game_over_screen.show_winner(winner_team)
+
+func _on_team_lives_game_over(winner_team: int) -> void:
+	var winner_str: String = "BLUE" if winner_team == 0 else "RED"
+	game_over_signal(winner_str)
+	# In multiplayer the server broadcasts via LobbyManager; handled there.
+
+func _on_life_lost(_team: int, _remaining: int) -> void:
+	_update_lives_bars()
+
+func _update_lives_bars() -> void:
+	if blue_lives_bar == null or red_lives_bar == null:
+		return
+	var max_lives: int = GameSettings.lives_per_team
+	blue_lives_bar.max_value = max_lives
+	red_lives_bar.max_value  = max_lives
+	blue_lives_bar.value = TeamLives.get_lives(0)
+	red_lives_bar.value  = TeamLives.get_lives(1)
 
 func update_wave_info(wave_num: int, next_in: int) -> void:
 	if wave_num == 0:

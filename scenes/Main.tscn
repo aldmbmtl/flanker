@@ -1,17 +1,17 @@
-[gd_scene load_steps=30 format=3 uid="uid://main"]
+[gd_scene load_steps=32 format=3 uid="uid://main"]
 
 [ext_resource type="Script" path="res://scripts/Main.gd" id="1"]
-[ext_resource type="Script" path="res://scripts/EventFeed.gd" id="scripts/EventFeed.gd"]
-[ext_resource type="PackedScene" path="res://scenes/FPSPlayer.tscn" id="2"]
-[ext_resource type="PackedScene" path="res://scenes/Base.tscn" id="3"]
-[ext_resource type="Script" path="res://scripts/RTSController.gd" id="4"]
+[ext_resource type="Script" path="res://scripts/ui/EventFeed.gd" id="scripts/EventFeed.gd"]
+[ext_resource type="PackedScene" path="res://scenes/roles/FPSPlayer.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/ui/GameOverScreen.tscn" id="gameover_screen"]
+[ext_resource type="Script" path="res://scripts/roles/supporter/RTSController.gd" id="4"]
 [ext_resource type="Script" path="res://scripts/MinionSpawner.gd" id="5"]
 [ext_resource type="Script" path="res://scripts/BuildSystem.gd" id="6"]
 [ext_resource type="Script" path="res://scripts/TerrainGenerator.gd" id="7"]
 [ext_resource type="Script" path="res://scripts/LaneVisualizer.gd" id="8"]
 [ext_resource type="Script" path="res://scripts/TreePlacer.gd" id="11"]
 [ext_resource type="Environment" path="res://assets/night_environment.tres" id="10"]
-[ext_resource type="Script" path="res://scripts/Minimap.gd" id="12"]
+[ext_resource type="Script" path="res://scripts/ui/Minimap.gd" id="12"]
 [ext_resource type="Script" path="res://scripts/WallPlacer.gd" id="14"]
 [ext_resource type="Script" path="res://scripts/FencePlacer.gd" id="15"]
 [ext_resource type="Theme" path="res://assets/ui_theme.tres" id="16"]
@@ -65,6 +65,12 @@ border_color = Color(0.85, 0.32, 0.05, 1)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_xp_fill"]
 bg_color = Color(1.0, 0.75, 0.1, 1.0)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_lives_blue"]
+bg_color = Color(0.2, 0.45, 0.95, 1.0)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_lives_red"]
+bg_color = Color(0.95, 0.22, 0.22, 1.0)
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pending_btn_normal"]
 bg_color = Color(0.14, 0.08, 0.04, 1.0)
@@ -123,27 +129,6 @@ directional_shadow_mode = 2
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="World"]
 environment = ExtResource("10")
-
-; ---- Bases ----
-[node name="BlueBase" type="Node3D" parent="World"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 84)
-[node name="BlueBaseInst" parent="World/BlueBase" instance=ExtResource("3")]
-[node name="BlueBaseLight" type="OmniLight3D" parent="World/BlueBase"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
-light_color = Color(0.2, 0.45, 1.0, 1)
-light_energy = 3.5
-omni_range = 22.0
-shadow_enabled = false
-
-[node name="RedBase" type="Node3D" parent="World"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -93)
-[node name="RedBaseInst" parent="World/RedBase" instance=ExtResource("3")]
-[node name="RedBaseLight" type="OmniLight3D" parent="World/RedBase"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
-light_color = Color(1.0, 0.2, 0.2, 1)
-light_energy = 3.5
-omni_range = 22.0
-shadow_enabled = false
 
 ; ---- RTS Camera ----
 [node name="RTSCamera" type="Camera3D" parent="."]
@@ -259,22 +244,53 @@ theme_override_styles/normal = SubResource("StyleBoxFlat_pending_btn_normal")
 theme_override_styles/hover = SubResource("StyleBoxFlat_pending_btn_hover")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_pending_btn_hover")
 
-[node name="GameOverLabel" type="Label" parent="HUD"]
-anchors_preset = 8
+; ── Lives bar (top-center, below XP bar) ─────────────────────────────────────
+[node name="LivesBar" type="PanelContainer" parent="HUD"]
+anchors_preset = 5
 anchor_left = 0.5
-anchor_top = 0.5
+anchor_top = 0.0
 anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -200.0
-offset_top = -60.0
-offset_right = 200.0
+anchor_bottom = 0.0
+offset_left = -180.0
+offset_top = 42.0
+offset_right = 180.0
 offset_bottom = 60.0
-text = ""
-visible = false
-horizontal_alignment = 1
-vertical_alignment = 1
-add_theme_font_size_override = 36
-add_theme_color_override/font_color = Color(1.0, 0.35, 0.1, 1)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="LivesHBox" type="HBoxContainer" parent="HUD/LivesBar"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="BlueBar" type="ProgressBar" parent="HUD/LivesBar/LivesHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+custom_minimum_size = Vector2(0, 10)
+min_value = 0.0
+max_value = 20.0
+value = 20.0
+show_percentage = false
+theme_override_styles/fill = SubResource("StyleBoxFlat_lives_blue")
+theme_override_styles/background = SubResource("StyleBoxFlat_bar_bg")
+
+[node name="RedBar" type="ProgressBar" parent="HUD/LivesBar/LivesHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+custom_minimum_size = Vector2(0, 10)
+min_value = 0.0
+max_value = 20.0
+value = 20.0
+show_percentage = false
+theme_override_styles/fill = SubResource("StyleBoxFlat_lives_red")
+theme_override_styles/background = SubResource("StyleBoxFlat_bar_bg")
+
+[node name="GameOverScreen" parent="HUD" instance=ExtResource("gameover_screen")]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 
 [node name="Crosshair" type="Control" parent="HUD"]
 anchor_left = 0.0
@@ -519,9 +535,9 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = -170.0
-offset_top = -66.0
+offset_top = -94.0
 offset_right = -8.0
-offset_bottom = -38.0
+offset_bottom = -66.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 

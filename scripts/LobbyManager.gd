@@ -22,7 +22,7 @@ signal role_slots_updated(claimed: Dictionary)
 signal all_roles_confirmed
 signal human_supporter_claimed(team: int)
 signal item_spawned(item_type: String, team: int)
-signal tower_despawned(item_type: String, team: int)
+signal tower_despawned(item_type: String, team: int, tower_name: String)
 
 func _ready() -> void:
 	NetworkManager.peer_connected.connect(_on_peer_connected)
@@ -32,6 +32,7 @@ func _ready() -> void:
 	_init_bullet_sync()
 	_init_minion_sync()
 	GameSync.player_respawned.connect(_on_game_sync_player_respawned)
+	TeamLives.game_over.connect(_on_team_lives_game_over)
 
 func _on_game_sync_player_respawned(peer_id: int, spawn_pos: Vector3) -> void:
 	if multiplayer.is_server():
@@ -262,14 +263,14 @@ var _bullet_scene: PackedScene
 var _rocket_scene: PackedScene
 
 func _init_bullet_sync() -> void:
-	_bullet_scene = preload("res://scenes/Bullet.tscn")
-	_rocket_scene = preload("res://scenes/Rocket.tscn")
+	_bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
+	_rocket_scene = preload("res://scenes/projectiles/Rocket.tscn")
 
 @rpc("authority", "call_remote", "reliable")
 func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_team: int, shooter_peer_id: int = -1, projectile_type: String = "bullet") -> void:
 	if projectile_type == "rocket":
 		if _rocket_scene == null:
-			_rocket_scene = preload("res://scenes/Rocket.tscn")
+			_rocket_scene = preload("res://scenes/projectiles/Rocket.tscn")
 		var rocket: Node3D = _rocket_scene.instantiate()
 		rocket.damage          = damage
 		rocket.source          = "rocket"
@@ -280,7 +281,7 @@ func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_tea
 		rocket.global_position = pos
 		return
 	if _bullet_scene == null:
-		_bullet_scene = preload("res://scenes/Bullet.tscn")
+		_bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
 	var bullet: Node3D = _bullet_scene.instantiate()
 	bullet.damage = damage
 	bullet.source = "network_sync"
@@ -296,12 +297,13 @@ func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_tea
 var _minion_scene: PackedScene
 
 func _init_minion_sync() -> void:
-	_minion_scene = preload("res://scenes/Minion.tscn")
+	_minion_scene = preload("res://scenes/minions/Minion.tscn")
 
 @rpc("authority", "call_remote", "reliable")
 func spawn_minion_visuals(team: int, spawn_pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int) -> void:
 	if _minion_scene == null:
-		_minion_scene = preload("res://scenes/Minion.tscn")
+		_minion_scene = preload("res://scenes/minions/Minion.tscn")
+
 	var main: Node = get_tree().root.get_node("Main")
 	if main == null:
 		return
@@ -372,10 +374,7 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 					best = t
 			print("[SERVER tower hit] best=", best, " best_dist=", best_dist)
 			if best != null and best.has_method("take_damage"):
-				var tower_dmg: float = damage
-				if projectile_type == "rocket":
-					tower_dmg = damage * 3.0  # matches Rocket.gd TOWER_MULT
-				best.take_damage(tower_dmg, "player", shooter_team, shooter_peer)
+				best.take_damage(damage, "player", shooter_team, shooter_peer)
 		elif hit_info.has("peer_id"):
 			var target_peer: int = hit_info["peer_id"] as int
 			if target_peer != shooter_peer and not GameSync.player_dead.get(target_peer, false):
@@ -498,6 +497,10 @@ func request_place_item(world_pos: Vector3, team: int, item_type: String, subtyp
 	var assigned_name: String = build_sys.place_item(world_pos, team, item_type, subtype)
 	if assigned_name != "":
 		spawn_item_visuals.rpc(world_pos, team, item_type, subtype, assigned_name)
+		# Server already has the node from place_item but never runs spawn_item_visuals
+		# (call_remote). Emit item_spawned locally so the server-host player's
+		# LauncherHUD registers client-placed launchers.
+		item_spawned.emit(item_type, team)
 		sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
 
 # Legacy alias — still works for any old callers
@@ -549,7 +552,7 @@ func despawn_tower(node_name: String) -> void:
 		var node_team: int = node.get("team") if node.get("team") != null else -1
 		var node_type: String = node.get("tower_type") if node.get("tower_type") != null else _type_from_node_name(node_name)
 		node.queue_free()
-		tower_despawned.emit(node_type, node_team)
+		tower_despawned.emit(node_type, node_team, node_name)
 
 func _type_from_node_name(node_name: String) -> String:
 	# Tower_%s_%d_%d — extract the type segment
@@ -662,6 +665,45 @@ func sync_destroy_tree(pos: Vector3) -> void:
 	if tp != null:
 		tp.clear_trees_at(pos, TREE_DESTROY_RADIUS)
 
+# ── Lane boost sync ──────────────────────────────────────────────────────────
+
+const LANE_BOOST_COST: int = 15
+const LANE_BOOST_AMOUNT: int = 3
+
+signal lane_boosts_synced(boosts_team0: Array, boosts_team1: Array)
+
+# Broadcasts current lane boost state to all peers (call_local so server HUD also updates).
+@rpc("authority", "call_local", "reliable")
+func sync_lane_boosts(boosts_team0: Array, boosts_team1: Array) -> void:
+	lane_boosts_synced.emit(boosts_team0, boosts_team1)
+
+# Client (Supporter) requests a lane boost for the next wave.
+# lane_i: 0=Left, 1=Mid, 2=Right, -1=all lanes (+1 each)
+@rpc("any_peer", "reliable")
+func request_lane_boost(lane_i: int, team: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var id: int = _sender_id()
+	var info: Dictionary = players.get(id, {})
+	# Validate: sender must be Supporter on the correct team
+	if info.get("role", -1) != 1:
+		return
+	if info.get("team", -1) != team:
+		return
+	if not TeamData.spend_points(team, LANE_BOOST_COST):
+		return
+	var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
+	if spawner == null:
+		return
+	if lane_i == -1:
+		spawner.boost_all_lanes(team)
+	else:
+		spawner.boost_lane(team, lane_i, LANE_BOOST_AMOUNT)
+	# Broadcast updated boost state and points to all peers
+	var b: Array = spawner.get("_lane_boosts") as Array
+	sync_lane_boosts.rpc(b[0], b[1])
+	sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+
 # ── Recon strike (fog reveal) sync ───────────────────────────────────────────
 
 # Client requests server to broadcast a recon reveal for their team.
@@ -688,3 +730,17 @@ func broadcast_recon_reveal(target_pos: Vector3, reveal_radius: float, reveal_du
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main != null and main.has_method("apply_recon_reveal"):
 		main.apply_recon_reveal(target_pos, reveal_radius, reveal_duration)
+
+# ── Game over broadcast ───────────────────────────────────────────────────────
+
+func _on_team_lives_game_over(winner_team: int) -> void:
+	# Only the server (or singleplayer) triggers this; broadcast to all clients.
+	if not multiplayer.has_multiplayer_peer():
+		return
+	if not multiplayer.is_server():
+		return
+	_rpc_game_over.rpc(winner_team)
+
+@rpc("authority", "call_remote", "reliable")
+func _rpc_game_over(winner_team: int) -> void:
+	TeamLives.game_over.emit(winner_team)

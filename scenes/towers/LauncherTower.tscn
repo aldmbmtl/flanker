@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3 uid="uid://launcher_tower"]
+
+[ext_resource type="Script" path="res://scripts/towers/LauncherTower.gd" id="1"]
+
+[node name="LauncherTower" type="StaticBody3D"]
+script = ExtResource("1")
+tower_type = "launcher_missile"
+max_health = 600.0
+attack_range = 0.0
+attack_interval = 0.0
+xp_on_death = 50

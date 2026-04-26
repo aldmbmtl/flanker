@@ -4,5 +4,6 @@
 .godot
 *.import
 *.pck
+*.uid
 flanker-linux
 flanker-windows.exe
