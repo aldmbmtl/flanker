@@ -475,8 +475,13 @@ func sync_minion_states(ids: PackedInt32Array, positions: PackedVector3Array,
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
 		return
+	var spawner: Node = main.get_node_or_null("MinionSpawner")
 	for i in ids.size():
-		var minion: Node = main.get_node_or_null("Minion_%d" % ids[i])
+		var minion: Node = null
+		if spawner != null:
+			minion = spawner.get_minion_by_id(ids[i])
+		if minion == null:
+			minion = main.get_node_or_null("Minion_%d" % ids[i])
 		if minion != null and minion.has_method("apply_puppet_state"):
 			minion.apply_puppet_state(positions[i], rotations[i], healths[i])
 

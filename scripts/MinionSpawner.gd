@@ -152,6 +152,9 @@ func spawn_for_network(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: 
 	else:
 		push_warning("MinionSpawner: spawn_for_network id=%d node not found" % minion_id)
 
+func get_minion_by_id(minion_id: int) -> Node:
+	return _minion_node_cache.get(minion_id, null)
+
 func kill_minion_by_id(minion_id: int) -> void:
 	var minion: Node = _minion_node_cache.get(minion_id)
 	_minion_node_cache.erase(minion_id)
