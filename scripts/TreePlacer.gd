@@ -33,6 +33,11 @@ const CLEARING_COUNT := 20
 
 const SECRET_PATH_CLEAR_WIDTH := 5.0
 
+# Distance-band thresholds from map center (XZ magnitude)
+# Near  ≤ 55 u from center, Far > 55 u — two bands keeps MMI count low.
+const BAND_NEAR_MAX := 55.0
+const BAND_FAR_MIN  := 55.0
+
 var _random_clearing_centers: Array[Vector2] = []
 var _random_clearing_radii: Array[float] = []
 
@@ -40,6 +45,10 @@ var _random_clearing_radii: Array[float] = []
 var menu_density: float = -1.0
 
 @onready var terrain_body: StaticBody3D = null
+
+# Per-variant, per-band transform accumulation
+# _band_transforms[variant_idx][band_idx] = Array[Transform3D]
+var _band_transforms: Array = []
 
 func _ready() -> void:
 	var gen_seed: int = GameSync.game_seed
@@ -73,62 +82,112 @@ func _generate_random_clearings() -> void:
 		var radius: float = randf_range(CLEARING_MIN_RADIUS, CLEARING_MAX_RADIUS)
 		_random_clearing_centers.append(pos)
 		_random_clearing_radii.append(radius)
-	print("TreePlacer: generated ", _random_clearing_centers.size(), " random clearings")
 
 func _place_trees() -> void:
-	print("TreePlacer: loading tree scenes...")
 	var tree_scenes: Array[PackedScene] = []
 	for path in TREE_PATHS:
 		var scn: PackedScene = load(path)
 		if scn:
 			tree_scenes.append(scn)
-		else:
-			print("TreePlacer: failed to load ", path)
-	
-	print("TreePlacer: loaded ", tree_scenes.size(), " tree scenes")
-	
+
 	if tree_scenes.is_empty():
-		print("TreePlacer: no tree scenes!")
+		done.emit()
 		return
-	
+
+	# Initialise per-variant, per-band (2 bands: near / far) accumulator
+	_band_transforms.clear()
+	for _vi in tree_scenes.size():
+		_band_transforms.append([[], []])  # [near_transforms, far_transforms]
+
 	var placed: int = 0
 	var density: float = menu_density if menu_density > 0.0 else TREE_DENSITY
 	for gx in range(GRID_STEPS):
 		for gz in range(GRID_STEPS):
 			if randf() > density:
 				continue
-			
+
 			var wx: float = (float(gx) / float(GRID_STEPS) - 0.5) * GRID_SIZE
 			var wz: float = (float(gz) / float(GRID_STEPS) - 0.5) * GRID_SIZE
 			var pos := Vector3(wx, 0.0, wz)
-			
+
 			if _is_in_lane(pos) or _is_on_mountain(pos) or _is_in_base(pos) or _is_in_random_clearing(pos) or _is_on_secret_path(Vector2(pos.x, pos.z)):
 				continue
-			
-			_place_tree(pos, tree_scenes)
+
+			_accumulate_tree(pos, tree_scenes)
 			placed += 1
-	
-	print("TreePlacer: placed ", placed, " trees")
+			_add_tree_collision(pos, randf_range(TREE_SCALE_MIN, TREE_SCALE_MAX))
+
+	# Build MultiMeshInstance3D nodes for each variant × band
+	_commit_multimeshes(tree_scenes)
+
 	if menu_density < 0.0:
 		LoadingState.report("Placing trees...", 45.0)
 	done.emit()
 
-func _place_tree(pos: Vector3, tree_scenes: Array[PackedScene]) -> void:
+func _accumulate_tree(pos: Vector3, tree_scenes: Array[PackedScene]) -> void:
 	var terrain_y: float = _get_terrain_height(pos)
 	pos.y = terrain_y
 
-	var scn: PackedScene = tree_scenes[randi() % tree_scenes.size()]
-	var tree: Node = scn.instantiate()
-	add_child(tree)
-	tree.position = pos
-
-	var angle: float = randf() * TAU
-	tree.rotate_y(angle)
-
+	var vi: int = randi() % tree_scenes.size()
 	var scale: float = randf_range(TREE_SCALE_MIN, TREE_SCALE_MAX)
-	tree.scale = Vector3(scale, scale, scale)
+	var angle: float = randf() * TAU
 
-	_add_tree_collision(pos, scale)
+	var t := Transform3D()
+	t = t.rotated(Vector3.UP, angle)
+	t = t.scaled(Vector3(scale, scale, scale))
+	t.origin = pos
+
+	# Band by distance from map center
+	var dist_from_center: float = Vector2(pos.x, pos.z).length()
+	var band: int = 0 if dist_from_center <= BAND_NEAR_MAX else 1
+	_band_transforms[vi][band].append(t)
+
+func _commit_multimeshes(tree_scenes: Array[PackedScene]) -> void:
+	# Visibility range distances for each band (camera-to-MMI-origin proxy)
+	# Band 0 (near/center): always visible, clip at 200
+	# Band 1 (far/edge): visible up to 260 (camera.far = 250)
+	const BAND_VIS_END: Array = [200.0, 260.0]
+
+	for vi in tree_scenes.size():
+		# Extract a mesh from the scene to use in MultiMesh
+		var mesh: Mesh = _extract_first_mesh(tree_scenes[vi])
+		if mesh == null:
+			continue
+
+		for band in 2:
+			var transforms: Array = _band_transforms[vi][band]
+			if transforms.is_empty():
+				continue
+
+			var mm := MultiMesh.new()
+			mm.mesh = mesh
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.instance_count = transforms.size()
+			for i in transforms.size():
+				mm.set_instance_transform(i, transforms[i] as Transform3D)
+
+			var mmi := MultiMeshInstance3D.new()
+			mmi.multimesh = mm
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			mmi.visibility_range_end = BAND_VIS_END[band]
+			mmi.visibility_range_end_margin = 10.0
+			add_child(mmi)
+
+func _extract_first_mesh(scene: PackedScene) -> Mesh:
+	# Instantiate temporarily to find the first MeshInstance3D
+	var inst: Node = scene.instantiate()
+	var mesh: Mesh = _find_mesh_recursive(inst)
+	inst.queue_free()
+	return mesh
+
+func _find_mesh_recursive(node: Node) -> Mesh:
+	if node is MeshInstance3D:
+		return (node as MeshInstance3D).mesh
+	for child in node.get_children():
+		var m: Mesh = _find_mesh_recursive(child)
+		if m != null:
+			return m
+	return null
 
 func _add_tree_collision(world_pos: Vector3, scale: float) -> void:
 	var trunk_radius: float = 0.4 * scale
@@ -154,22 +213,22 @@ func _add_tree_collision(world_pos: Vector3, scale: float) -> void:
 func _get_terrain_height(pos: Vector3) -> float:
 	if terrain_body == null:
 		return 0.0
-	
+
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	if space == null:
 		return 0.0
-	
+
 	var from: Vector3 = Vector3(pos.x, 50.0, pos.z)
 	var to: Vector3 = Vector3(pos.x, -10.0, pos.z)
-	
+
 	var query := PhysicsRayQueryParameters3D.create(from, to)
 	query.collide_with_bodies = true
 	query.collision_mask = 1
-	
+
 	var result: Dictionary = space.intersect_ray(query)
 	if result.is_empty():
 		return 0.0
-	
+
 	return result.position.y
 
 func _is_in_lane(pos: Vector3) -> bool:
@@ -248,10 +307,14 @@ func _is_in_random_clearing(pos: Vector3) -> bool:
 			return true
 	return false
 
-# Remove all tree nodes and their collision bodies within radius of world_pos (XZ).
+# Remove all tree collision nodes within radius of world_pos (XZ).
+# MultiMesh instances cannot be removed individually — they are purely visual.
+# Collision StaticBody3D trunks are still individual children and can be freed.
 func clear_trees_at(world_pos: Vector3, radius: float) -> void:
 	var center := Vector2(world_pos.x, world_pos.z)
 	for child in get_children():
+		if child is MultiMeshInstance3D:
+			continue  # visual — skip
 		var child_pos := Vector2(child.position.x, child.position.z)
 		if child_pos.distance_to(center) <= radius:
 			child.queue_free()

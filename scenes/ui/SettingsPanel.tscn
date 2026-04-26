@@ -167,6 +167,37 @@ horizontal_alignment = 2
 theme_override_colors/font_color = Color(1.0, 0.35, 0.1, 1)
 theme_override_font_sizes/font_size = 13
 
+[node name="ShadowSection" type="PanelContainer" parent="Card/VBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_section")
+
+[node name="ShadowVBox" type="VBoxContainer" parent="Card/VBox/ShadowSection"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ShadowSectionLabel" type="Label" parent="Card/VBox/ShadowSection/ShadowVBox"]
+layout_mode = 2
+text = "SHADOWS"
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_font_sizes/font_size = 11
+
+[node name="ShadowRow" type="HBoxContainer" parent="Card/VBox/ShadowSection/ShadowVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ShadowLabel" type="Label" parent="Card/VBox/ShadowSection/ShadowVBox/ShadowRow"]
+layout_mode = 2
+text = "Quality"
+vertical_alignment = 1
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+size_flags_horizontal = 3
+
+[node name="ShadowOption" type="OptionButton" parent="Card/VBox/ShadowSection/ShadowVBox/ShadowRow"]
+layout_mode = 2
+theme = ExtResource("2")
+custom_minimum_size = Vector2(110, 0)
+selected = 1
+
 [node name="GameSection" type="PanelContainer" parent="Card/VBox"]
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_section")
@@ -215,6 +246,7 @@ text = "RESTORE DEFAULTS"
 [connection signal="value_changed" from="Card/VBox/FogSection/FogVBox/FogDensityRow/FogSlider" to="." method="_on_fog_slider_value_changed"]
 [connection signal="toggled" from="Card/VBox/DoFSection/DoFVBox/DoFToggle" to="." method="_on_dof_toggle_toggled"]
 [connection signal="value_changed" from="Card/VBox/DoFSection/DoFVBox/DoFStrengthRow/DoFSlider" to="." method="_on_dof_slider_value_changed"]
+[connection signal="item_selected" from="Card/VBox/ShadowSection/ShadowVBox/ShadowRow/ShadowOption" to="." method="_on_shadow_option_item_selected"]
 [connection signal="value_changed" from="Card/VBox/GameSection/GameVBox/LivesRow/LivesSpin" to="." method="_on_lives_spin_value_changed"]
 [connection signal="pressed" from="Card/VBox/BackButton" to="." method="_on_back_pressed"]
 [connection signal="pressed" from="Card/VBox/RestoreDefaultsButton" to="." method="_on_restore_defaults_pressed"]

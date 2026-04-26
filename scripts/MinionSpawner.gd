@@ -9,6 +9,7 @@ const SYNC_INTERVAL := 6     # physics frames between position broadcasts
 var wave_number := 0
 var wave_timer := 0.0
 var _minion_counter: int = 0
+var _minion_node_cache: Dictionary = {}  # minion_id -> Node
 
 # Per-team lane boosts: _lane_boosts[team][lane_i] = extra minions to spawn next wave.
 # Set via boost_lane() / boost_all_lanes(). Consumed (reset to 0) after each wave fires.
@@ -32,20 +33,23 @@ func _physics_process(_delta: float) -> void:
 		_broadcast_minion_states()
 
 func _broadcast_minion_states() -> void:
-	var minions: Array = get_tree().get_nodes_in_group("minions")
-	if minions.is_empty():
+	if _minion_node_cache.is_empty():
 		return
 	var ids:       PackedInt32Array   = PackedInt32Array()
 	var positions: PackedVector3Array = PackedVector3Array()
 	var rotations: PackedFloat32Array = PackedFloat32Array()
 	var healths:   PackedFloat32Array = PackedFloat32Array()
-	for m in minions:
+	for mid in _minion_node_cache.keys():
+		var m: Node = _minion_node_cache[mid]
 		if not is_instance_valid(m):
+			_minion_node_cache.erase(mid)
 			continue
-		ids.append(m.get("_minion_id") as int)
+		ids.append(mid as int)
 		positions.append(m.global_position)
 		rotations.append(m.rotation.y)
 		healths.append(m.get("health") as float)
+	if ids.is_empty():
+		return
 	LobbyManager.sync_minion_states.rpc(ids, positions, rotations, healths)
 
 func _process(delta: float) -> void:
@@ -131,11 +135,14 @@ func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i:
 	minion.position = pos
 	get_tree().root.get_node("Main").add_child(minion)
 	minion.setup(team, waypts, lane_i)
+	_minion_node_cache[minion_id] = minion
 
 func spawn_for_network(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int) -> void:
 	_spawn_at_position(team, pos, waypts, lane_i, minion_id)
 	# Mark as puppet — server drives position
-	var minion: Node = get_tree().root.get_node_or_null("Main/Minion_%d" % minion_id)
+	var minion: Node = _minion_node_cache.get(minion_id)
+	if minion == null:
+		minion = get_tree().root.get_node_or_null("Main/Minion_%d" % minion_id)
 	if minion != null:
 		minion.set("is_puppet", true)
 		minion.set("_physics_process_disabled", true)
@@ -144,6 +151,12 @@ func spawn_for_network(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: 
 		minion.call("set_physics_process", false)
 	else:
 		push_warning("MinionSpawner: spawn_for_network id=%d node not found" % minion_id)
+
+func kill_minion_by_id(minion_id: int) -> void:
+	var minion: Node = _minion_node_cache.get(minion_id)
+	_minion_node_cache.erase(minion_id)
+	if minion != null and is_instance_valid(minion) and minion.has_method("force_die"):
+		minion.force_die()
 
 func get_terrain_height(pos: Vector3) -> float:
 	return _get_terrain_height(pos)

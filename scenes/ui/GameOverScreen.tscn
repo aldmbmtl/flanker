@@ -1,4 +1,4 @@
-[gd_scene load_steps=4 format=3 uid="uid://gameover_screen"]
+[gd_scene load_steps=3 format=3 uid="uid://gameover_screen"]
 
 [ext_resource type="Script" path="res://scripts/ui/GameOverScreen.gd" id="1"]
 [ext_resource type="Theme" path="res://assets/ui_theme.tres" id="2"]
@@ -61,7 +61,7 @@ layout_mode = 2
 text = "BLUE WINS"
 horizontal_alignment = 1
 theme_override_font_sizes/font_size = 56
-theme_override_colors/font_color = Color(0.3, 0.6, 1.0)
+theme_override_colors/font_color = Color(0.3, 0.6, 1.0, 1.0)
 
 [node name="SubtitleLabel" type="Label" parent="Card/VBox"]
 layout_mode = 2

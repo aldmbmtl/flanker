@@ -132,6 +132,7 @@ func _ready() -> void:
 		_setup_singleplayer_game()
 		_on_start_game()
 	GraphicsSettings.settings_changed.connect(_apply_fog_settings)
+	GraphicsSettings.settings_changed.connect(_apply_shadow_settings)
 	TeamLives.life_lost.connect(_on_life_lost)
 	TeamLives.game_over.connect(_on_team_lives_game_over)
 
@@ -468,6 +469,8 @@ func _randomize_time_of_day() -> void:
 			sun.shadow_blur = 3.0
 			world_env.environment = load("res://assets/night_environment.tres")
 	_apply_fog_settings()
+	_apply_shadow_settings()
+
 
 func _apply_fog_settings() -> void:
 	var world_env := $World/WorldEnvironment
@@ -481,6 +484,23 @@ func _apply_fog_settings() -> void:
 	if want_fog:
 		env.fog_density = GraphicsSettings.get_fog_density(time_seed)
 		env.volumetric_fog_density = GraphicsSettings.get_vol_fog_density(time_seed)
+
+
+func _apply_shadow_settings() -> void:
+	var sun: DirectionalLight3D = get_node_or_null("World/SunLight")
+	if sun == null:
+		return
+	match GraphicsSettings.shadow_quality:
+		0: # Off
+			sun.shadow_enabled = false
+		1: # Low — orthogonal, 60 m
+			sun.shadow_enabled = true
+			sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+			sun.directional_shadow_max_distance = 60.0
+		2: # High — PSSM4, 100 m
+			sun.shadow_enabled = true
+			sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+			sun.directional_shadow_max_distance = 100.0
 
 func _pick_minion_characters() -> void:
 	var shuffled := CHARACTER_LETTERS.duplicate()

@@ -23,6 +23,7 @@ const COL_HEALSTATION   := Color(0.0,  0.95, 0.85, 1.0)   # cyan
 const COL_FOG           := Color(0.0,  0.0,  0.0,  0.72)   # fog overlay cell
 
 const FOG_CELL_PX       := 4   # pixel size of each fog cell
+const FOG_TEX_SIZE      := 64  # fog image resolution (cells = FOG_TEX_SIZE × FOG_TEX_SIZE)
 const REDRAW_INTERVAL   := 0.05  # 20 fps
 
 # Computed at runtime
@@ -39,6 +40,12 @@ var _rts_cam: Camera3D = null
 var _main: Node = null
 
 var _terrain_tex: ImageTexture = null   # baked terrain image
+
+# Baked fog-of-war texture (FOG_TEX_SIZE × FOG_TEX_SIZE RGBA8)
+var _fog_img: Image = null
+var _fog_tex: ImageTexture = null
+var _fog_dirty: bool = true
+var _fog_last_sources: Array = []   # cached source list for dirty-check
 
 
 func _ready() -> void:
@@ -59,6 +66,12 @@ func _ready() -> void:
 	if terrain and terrain.has_method("bake_minimap_image"):
 		var img: Image = terrain.bake_minimap_image(TERRAIN_IMG_SIZE)
 		_terrain_tex = ImageTexture.create_from_image(img)
+
+	# Pre-allocate fog image — updated lazily when sources change
+	_fog_img = Image.create(FOG_TEX_SIZE, FOG_TEX_SIZE, false, Image.FORMAT_RGBA8)
+	_fog_img.fill(COL_FOG)
+	_fog_tex = ImageTexture.create_from_image(_fog_img)
+	_fog_dirty = true
 
 
 func _notification(what: int) -> void:
@@ -87,6 +100,7 @@ func _recalc_size() -> void:
 	_bake_lane_pixels()
 	_blue_base_px = _world_to_map(Vector2(0.0,  84.0))
 	_red_base_px  = _world_to_map(Vector2(0.0, -84.0))
+	_fog_dirty = true
 
 
 func _bake_lane_pixels() -> void:
@@ -213,11 +227,10 @@ func _draw() -> void:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 func _draw_fog_overlay(fps_players: Array, all_minions: Array, all_towers: Array, player_team: int) -> void:
-	if _main == null:
+	if _main == null or _fog_tex == null:
 		return
 
-	# Collect vision circle centres (world XZ) and their squared radii
-	# Sources: local player (35u), friendly minions (25u), friendly towers (20u)
+	# ── Build source list ────────────────────────────────────────────────────
 	var sources: Array = []   # each entry: [world_x, world_z, r_sq]
 
 	for p in fps_players:
@@ -243,18 +256,28 @@ func _draw_fog_overlay(fps_players: Array, all_minions: Array, all_towers: Array
 		var tp: Vector3 = (tower as Node3D).global_position
 		sources.append([tp.x, tp.z, 20.0 * 20.0])
 
-	var cell: float = float(FOG_CELL_PX)
-	var cell_sz := Vector2(cell, cell)
-	var cells: int = int(ceil(_map_size / cell))
+	# ── Dirty-check: only rebake when sources changed ────────────────────────
+	if sources != _fog_last_sources:
+		_fog_last_sources = sources
+		_fog_dirty = true
 
-	for cy in range(cells):
-		for cx in range(cells):
-			# World position at cell centre
-			var px: float = (float(cx) + 0.5) * cell
-			var pz: float = (float(cy) + 0.5) * cell
-			# pixel → normalised → world
-			var wx: float = ((px / _map_size) - 0.5) * (MAP_RADIUS * 2.0)
-			var wz: float = ((pz / _map_size) - 0.5) * (MAP_RADIUS * 2.0)
+	if _fog_dirty:
+		_fog_dirty = false
+		_bake_fog_texture(sources)
+
+	# ── Draw pre-baked texture stretched over the minimap ────────────────────
+	draw_texture_rect(_fog_tex, Rect2(Vector2.ZERO, Vector2(_map_size, _map_size)), false)
+
+
+func _bake_fog_texture(sources: Array) -> void:
+	var n: int = FOG_TEX_SIZE
+	var map_diam: float = MAP_RADIUS * 2.0
+
+	for cy in range(n):
+		for cx in range(n):
+			# Cell centre in world XZ
+			var wx: float = (((float(cx) + 0.5) / float(n)) - 0.5) * map_diam
+			var wz: float = (((float(cy) + 0.5) / float(n)) - 0.5) * map_diam
 			var visible: bool = false
 			for src in sources:
 				var dx: float = wx - src[0]
@@ -262,8 +285,12 @@ func _draw_fog_overlay(fps_players: Array, all_minions: Array, all_towers: Array
 				if dx * dx + dz * dz <= src[2]:
 					visible = true
 					break
-			if not visible:
-				draw_rect(Rect2(Vector2(float(cx) * cell, float(cy) * cell), cell_sz), COL_FOG)
+			if visible:
+				_fog_img.set_pixel(cx, cy, Color(0.0, 0.0, 0.0, 0.0))
+			else:
+				_fog_img.set_pixel(cx, cy, COL_FOG)
+
+	_fog_tex.update(_fog_img)
 
 
 func _draw_arrow(center: Vector2, angle: float, size: float, col: Color) -> void:

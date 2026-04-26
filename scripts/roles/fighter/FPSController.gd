@@ -33,6 +33,10 @@ var _peer_id: int = 1
 var _is_local: bool = true
 var _sync_frame: int = 0
 var _avatar_anim: AnimationPlayer = null
+var _last_sent_pos: Vector3 = Vector3.ZERO
+var _last_sent_rot: Vector3 = Vector3.ZERO
+const _TRANSFORM_POS_THRESHOLD_SQ: float = 0.0025  # 0.05 m dead-zone squared
+const _TRANSFORM_ROT_THRESHOLD: float = 0.02        # 0.02 rad dead-zone
 
 const FOV_NORMAL  := 75.0
 const FOV_ZOOM    := 30.0
@@ -141,6 +145,7 @@ const PLAYER_SYNC_INTERVAL := 5
 func _ready() -> void:
 	add_to_group("players")
 	_base_cam_y = camera.position.y
+	camera.far = 250.0
 	var _has_network_peer: bool = NetworkManager._peer != null
 	_peer_id = multiplayer.get_unique_id() if _has_network_peer else 1
 	_is_local = not _has_network_peer or multiplayer.get_unique_id() == _peer_id
@@ -679,11 +684,16 @@ func _physics_process(delta: float) -> void:
 		if _sync_frame >= PLAYER_SYNC_INTERVAL:
 			_sync_frame = 0
 			var cam_rot: Vector3 = camera.global_rotation
-			if multiplayer.is_server():
-				# Host broadcasts directly (can't rpc_id to self)
-				LobbyManager.report_player_transform(global_position, cam_rot, player_team)
-			else:
-				LobbyManager.report_player_transform.rpc_id(1, global_position, cam_rot, player_team)
+			var pos_delta_sq: float = global_position.distance_squared_to(_last_sent_pos)
+			var rot_delta: float = (cam_rot - _last_sent_rot).length()
+			if pos_delta_sq >= _TRANSFORM_POS_THRESHOLD_SQ or rot_delta >= _TRANSFORM_ROT_THRESHOLD:
+				_last_sent_pos = global_position
+				_last_sent_rot = cam_rot
+				if multiplayer.is_server():
+					# Host broadcasts directly (can't rpc_id to self)
+					LobbyManager.report_player_transform(global_position, cam_rot, player_team)
+				else:
+					LobbyManager.report_player_transform.rpc_id(1, global_position, cam_rot, player_team)
 
 func _set_crouch(crouch: bool) -> void:
 	_crouching = crouch
@@ -734,12 +744,12 @@ func _shoot() -> void:
 		rocket.global_position = shoot_from.global_position
 		# Multiplayer: server broadcasts rocket spawn to all clients
 		if multiplayer.has_multiplayer_peer():
+			var rocket_hit_info: Dictionary = {}
 			if multiplayer.is_server():
 				LobbyManager.spawn_bullet_visuals.rpc(shoot_from.global_position, dir, w.damage, player_team, _peer_id, "rocket")
 			else:
-				var rocket_hit_info: Dictionary = _local_raycast_hit(shoot_from.global_position, dir)
-				print("[CLIENT rocket] hit_info=", rocket_hit_info, " origin=", shoot_from.global_position, " dir=", dir)
-				LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, _peer_id, rocket_hit_info, "rocket")
+				rocket_hit_info = _local_raycast_hit(shoot_from.global_position, dir)
+			LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, _peer_id, rocket_hit_info, "rocket")
 	else:
 		var bullet: Node3D = BulletScene.instantiate()
 		bullet.damage        = w.damage * player_damage_mult * _get_level_damage_mult()
@@ -762,7 +772,6 @@ func _shoot() -> void:
 				LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, _peer_id, hit_info)
 
 	_update_ammo_hud()
-	_report_ammo_to_server()
 	_play_kick_animation()
 
 	# Auto-reload when mag hits 0
@@ -784,7 +793,6 @@ func _local_raycast_hit(origin: Vector3, dir: Vector3) -> Dictionary:
 	var node: Node = result.collider if result.collider is Node else null
 	if node == null:
 		return {}
-	print("[CLIENT raycast] hit=", node.name, " class=", node.get_class(), " groups=", node.get_groups())
 	var check: Node = node
 	while check != null and check != get_tree().root:
 		if check == self:
@@ -810,13 +818,10 @@ func _local_raycast_hit(origin: Vector3, dir: Vector3) -> Dictionary:
 			return {"minion_id": mid}
 		# Tower hit — report hit position to server for proximity lookup
 		if check.is_in_group("towers"):
-			print("[CLIENT raycast] tower match on node: ", check.name)
 			return {"tower_pos": result.position}
 		if check.get_parent() != null and check.get_parent().is_in_group("towers"):
-			print("[CLIENT raycast] tower match on parent: ", check.get_parent().name)
 			return {"tower_pos": result.position}
 		check = check.get_parent()
-	print("[CLIENT raycast] no hit_info match for: ", node.name)
 	return {}
 
 func _start_reload() -> void:

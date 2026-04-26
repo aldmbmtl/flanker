@@ -87,16 +87,20 @@ func _on_expire() -> void:
 
 ## Sphere-overlap splash damage. Skips exclude_body (the direct-hit collider).
 ## Friendly-fire guarded via CombatUtils.should_damage.
+static var _splash_shape: SphereShape3D = null
+static var _splash_params: PhysicsShapeQueryParameters3D = null
+
 func _apply_splash(pos: Vector3, radius: float, splash_dmg: float,
 		splash_source: String, exclude_body: Object = null) -> void:
+	if _splash_shape == null:
+		_splash_shape = SphereShape3D.new()
+		_splash_params = PhysicsShapeQueryParameters3D.new()
+		_splash_params.shape = _splash_shape
+		_splash_params.collision_mask = 0xFFFFFFFF
+	_splash_shape.radius = radius
+	_splash_params.transform = Transform3D(Basis.IDENTITY, pos)
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
-	var shape := SphereShape3D.new()
-	shape.radius = radius
-	var params := PhysicsShapeQueryParameters3D.new()
-	params.shape = shape
-	params.transform = Transform3D(Basis.IDENTITY, pos)
-	params.collision_mask = 0xFFFFFFFF
-	var overlaps: Array = space.intersect_shape(params, 64)
+	var overlaps: Array = space.intersect_shape(_splash_params, 64)
 	for overlap in overlaps:
 		var body: Object = overlap.get("collider")
 		if body == null or body == exclude_body:

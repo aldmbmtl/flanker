@@ -22,6 +22,11 @@ const TORCH_MIN_DIST := FENCE_SPACING * 3.0  # min distance between torches
 @onready var _terrain_body: StaticBody3D = null
 var _last_torch_pos := Vector3(INF, INF, INF)
 
+# Accumulated fence visual transforms for MultiMesh batching
+# _fence_transforms[i] = Transform3D
+var _fence_transforms: Array[Transform3D] = []
+var _fence_mesh: Mesh = null
+
 func _ready() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -33,15 +38,47 @@ func _ready() -> void:
 		push_error("FencePlacer: failed to load " + FENCE_PATH)
 		return
 
+	# Extract mesh from the GLB for MultiMesh use
+	_fence_mesh = _extract_first_mesh(fence_scene)
+
 	for lane_i in range(3):
 		var pts: Array = LaneData.get_lane_points(lane_i)
-		_place_lane_fences(pts, lane_i, fence_scene)
+		_place_lane_fences(pts, lane_i)
 
-func _place_lane_fences(pts: Array, lane_i: int, fence_scene: PackedScene) -> void:
-	# Accumulate distance along the polyline and place pieces at regular intervals
-	# for each side (+offset and -offset from lane center)
+	_commit_fence_multimesh()
+
+func _extract_first_mesh(scene: PackedScene) -> Mesh:
+	var inst: Node = scene.instantiate()
+	var mesh: Mesh = _find_mesh_recursive(inst)
+	inst.queue_free()
+	return mesh
+
+func _find_mesh_recursive(node: Node) -> Mesh:
+	if node is MeshInstance3D:
+		return (node as MeshInstance3D).mesh
+	for child in node.get_children():
+		var m: Mesh = _find_mesh_recursive(child)
+		if m != null:
+			return m
+	return null
+
+func _commit_fence_multimesh() -> void:
+	if _fence_mesh == null or _fence_transforms.is_empty():
+		return
+	var mm := MultiMesh.new()
+	mm.mesh = _fence_mesh
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.instance_count = _fence_transforms.size()
+	for i in _fence_transforms.size():
+		mm.set_instance_transform(i, _fence_transforms[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mmi)
+
+func _place_lane_fences(pts: Array, lane_i: int) -> void:
 	for side in [-1, 1]:
-		var carry: float = 0.0  # leftover distance from previous segment
+		var carry: float = 0.0
 
 		for i in range(pts.size() - 1):
 			var a: Vector2 = pts[i]
@@ -52,41 +89,31 @@ func _place_lane_fences(pts: Array, lane_i: int, fence_scene: PackedScene) -> vo
 				continue
 
 			var seg_dir: Vector2 = seg / seg_len
-			# Perpendicular (rotate 90° CCW)
 			var perp: Vector2 = Vector2(-seg_dir.y, seg_dir.x)
-
-			# Offset center of the lane edge
 			var edge_a: Vector2 = a + perp * (FENCE_OFFSET * float(side))
 
-			# Place fence pieces spaced FENCE_SPACING apart, starting after carry
 			var t: float = FENCE_SPACING - carry
 			while t <= seg_len:
 				var world_xz: Vector2 = edge_a + seg_dir * t
-				# Check intersection using the lane centerline point (not the offset position)
 				var center_xz: Vector2 = a + seg_dir * t
 				if not _is_near_other_lane(center_xz, lane_i) and randf() >= FENCE_GAP_CHANCE:
 					var world_pos := Vector3(world_xz.x, 0.0, world_xz.y)
-					_spawn_fence(world_pos, seg_dir, fence_scene)
+					_spawn_fence(world_pos, seg_dir)
 				t += FENCE_SPACING
 
-			# Update carry for next segment
 			carry = fmod(carry + seg_len, FENCE_SPACING)
 
-func _spawn_fence(pos: Vector3, seg_dir: Vector2, fence_scene: PackedScene) -> void:
-	var fence: Node = fence_scene.instantiate()
-	fence.position = Vector3(-1.25, 0.0, 0.0)
-
+func _spawn_fence(pos: Vector3, seg_dir: Vector2) -> void:
+	# Collision-only StaticBody3D (no visual mesh child)
 	var body := StaticBody3D.new()
 	body.collision_layer = 2
 	body.collision_mask = 1
 	body.position = pos
 
-	# Rotate to align with lane direction
 	var dir3 := Vector3(seg_dir.x, 0.0, seg_dir.y).normalized()
 	var angle: float = Vector3.FORWARD.signed_angle_to(dir3, Vector3.UP)
 	body.rotation.y = angle
 
-	# Collision shape
 	var col_shape := BoxShape3D.new()
 	col_shape.size = FENCE_COL_SIZE
 	var col_node := CollisionShape3D.new()
@@ -94,12 +121,21 @@ func _spawn_fence(pos: Vector3, seg_dir: Vector2, fence_scene: PackedScene) -> v
 	col_node.position = Vector3(0.0, FENCE_COL_SIZE.y * 0.5, 0.0)
 	body.add_child(col_node)
 
-	fence.scale = Vector3(FENCE_SCALE, FENCE_SCALE, FENCE_SCALE)
-	body.add_child(fence)
+	add_child(body)
+
+	# Accumulate visual transform for MultiMesh
+	# Build rotation-only basis first so the -1.25 local offset is applied at
+	# model scale (pre-scale), then scale the basis afterwards.
+	var rot_basis := Basis(Vector3.UP, angle)
+	var world_offset: Vector3 = rot_basis * Vector3(-1.25, 0.0, 0.0)
+	var t := Transform3D()
+	t.basis = rot_basis.scaled(Vector3(FENCE_SCALE, FENCE_SCALE, FENCE_SCALE))
+	t.origin = pos + world_offset
+	_fence_transforms.append(t)
+
 	if randf() < TORCH_CHANCE and pos.distance_to(_last_torch_pos) >= TORCH_MIN_DIST:
 		_add_torch(body)
 		_last_torch_pos = pos
-	add_child(body)
 
 func _add_torch(body: StaticBody3D) -> void:
 	var torch_root := Node3D.new()
@@ -127,12 +163,14 @@ func _add_torch(body: StaticBody3D) -> void:
 	light.position = Vector3(0.0, 0.4, 0.0)
 	torch_root.add_child(light)
 
-	# Fire particles
+	# Fire particles — with custom visibility AABB for culling
 	var particles := GPUParticles3D.new()
 	particles.amount = 16
 	particles.lifetime = 0.5
 	particles.explosiveness = 0.0
 	particles.position = Vector3(0.0, 0.4, 0.0)
+	# Small AABB so the GPU culls this when off-screen
+	particles.visibility_aabb = AABB(Vector3(-0.5, -0.1, -0.5), Vector3(1.0, 1.2, 1.0))
 
 	var pmat := ParticleProcessMaterial.new()
 	pmat.direction = Vector3(0.0, 1.0, 0.0)
@@ -143,7 +181,6 @@ func _add_torch(body: StaticBody3D) -> void:
 	pmat.scale_min = 0.3
 	pmat.scale_max = 0.5
 
-	# Color ramp: orange → yellow → transparent smoke
 	var grad := Gradient.new()
 	grad.set_color(0, Color(1.0, 0.55, 0.05, 1.0))
 	grad.add_point(0.5, Color(1.0, 0.9, 0.1, 0.6))

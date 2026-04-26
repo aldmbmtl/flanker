@@ -86,7 +86,7 @@ var _active_char: Node3D     = null
 var _anim: AnimationPlayer   = null
 
 # Throttle counters
-const TARGET_INTERVAL     := 10
+const TARGET_INTERVAL     := 15
 const SEPARATION_INTERVAL := 3
 const TOWER_CACHE_INTERVAL := 120   # re-cache towers/bases every ~2s at 60fps
 var _target_frame: int = 0
@@ -384,6 +384,8 @@ func _apply_separation() -> void:
 			continue
 		var diff: Vector3 = global_position - m.global_position
 		diff.y = 0.0
+		if diff.length_squared() >= 16.0:  # skip minions > 4 m away
+			continue
 		var d: float = diff.length()
 		if d < SEPARATION_DIST and d > 0.01:
 			push += diff.normalized() * (SEPARATION_DIST - d) / SEPARATION_DIST
@@ -534,8 +536,7 @@ func _die() -> void:
 	tween.tween_callback(queue_free)
 
 	if multiplayer.is_server():
-		var path: NodePath = get_path()
-		LobbyManager.kill_minion_visuals.rpc(path)
+		LobbyManager.kill_minion_visuals.rpc(_minion_id)
 		if _killer_peer_id > 0:
 			LevelSystem.award_xp(_killer_peer_id, LevelSystem.XP_MINION)
 	elif not multiplayer.has_multiplayer_peer():

@@ -2,9 +2,17 @@ extends ProjectileBase
 
 signal hit_something(hit_type: String)
 
+# Shared spark materials — allocated once, reused every hit
+static var _mat_ground: StandardMaterial3D = null
+static var _mat_unit: StandardMaterial3D = null
+static var _mat_building: StandardMaterial3D = null
+static var _spark_mesh: QuadMesh = null
+static var _spark_pmat: ParticleProcessMaterial = null
+
 func _ready() -> void:
 	var mi: MeshInstance3D = $MeshInstance3D
 	mi.material_override = CombatUtils.make_team_tracer_material(shooter_team)
+	_ensure_spark_resources()
 
 # ── Hit handling ──────────────────────────────────────────────────────────────
 
@@ -33,10 +41,11 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 # ── Orientation ───────────────────────────────────────────────────────────────
 
 func _after_move() -> void:
-	if velocity.length() > 0.1:
-		var target_pos: Vector3 = global_position + velocity.normalized()
-		if (target_pos - global_position).normalized().length() > 0.0:
-			look_at(target_pos, Vector3.UP)
+	var spd_sq: float = velocity.length_squared()
+	if spd_sq > 0.01:
+		var spd: float = sqrt(spd_sq)
+		var target_pos: Vector3 = global_position + velocity / spd
+		look_at(target_pos, Vector3.UP)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -64,37 +73,65 @@ func _spawn_sparks(pos: Vector3, hit: Object) -> void:
 				spark_type = "unit"
 
 	var particles := GPUParticles3D.new()
-	var pmat := ParticleProcessMaterial.new()
-	pmat.direction = Vector3.UP
-	pmat.spread = 45.0
-	pmat.initial_velocity_min = 3.0
-	pmat.initial_velocity_max = 6.0
-	pmat.gravity = Vector3(0, -15, 0)
+	particles.process_material = _spark_pmat
+	particles.draw_pass_1 = _spark_mesh
 
-	var mesh := QuadMesh.new()
-	mesh.size = Vector2(0.15, 0.15)
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.vertex_color_use_as_albedo = true
-	mat.no_depth_test = true
+	match spark_type:
+		"ground":    particles.material_override = _mat_ground
+		"unit":      particles.material_override = _mat_unit
+		_:           particles.material_override = _mat_building
 
-	if spark_type == "ground":
-		mat.albedo_color = Color(0.55, 0.35, 0.2, 1.0)
-	elif spark_type == "unit":
-		mat.albedo_color = Color(1.0, 0.2, 0.1, 1.0)
-	else:
-		mat.albedo_color = Color(1.0, 1.0, 0.3, 1.0)
-		mat.emission_enabled = true
-		mat.emission = Color(1.0, 1.0, 0.3)
-		mat.emission_energy_multiplier = 4.0
+	# Override draw_pass mesh material per-type using a per-instance surface override
+	# QuadMesh is shared — apply per-particle colour via material_override on the particles node
+	# (material_override is instance-level, safe to set differently each call)
+	particles.draw_pass_1 = _spark_mesh
+	var chosen_mat: StandardMaterial3D
+	match spark_type:
+		"ground":   chosen_mat = _mat_ground
+		"unit":     chosen_mat = _mat_unit
+		_:          chosen_mat = _mat_building
+	particles.set_draw_pass_material(0, chosen_mat)
 
-	mesh.material = mat
-	particles.process_material = pmat
-	particles.draw_pass_1 = mesh
 	particles.amount = 20
-
 	get_tree().root.add_child(particles)
 	particles.global_position = pos
 	particles.emitting = true
 	particles.restart()
 	particles.call_deferred("free")
+
+
+static func _ensure_spark_resources() -> void:
+	if _spark_pmat != null:
+		return
+
+	_spark_pmat = ParticleProcessMaterial.new()
+	_spark_pmat.direction = Vector3.UP
+	_spark_pmat.spread = 45.0
+	_spark_pmat.initial_velocity_min = 3.0
+	_spark_pmat.initial_velocity_max = 6.0
+	_spark_pmat.gravity = Vector3(0, -15, 0)
+
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(0.15, 0.15)
+	_spark_mesh = mesh
+
+	_mat_ground = StandardMaterial3D.new()
+	_mat_ground.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mat_ground.vertex_color_use_as_albedo = true
+	_mat_ground.no_depth_test = true
+	_mat_ground.albedo_color = Color(0.55, 0.35, 0.2, 1.0)
+
+	_mat_unit = StandardMaterial3D.new()
+	_mat_unit.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mat_unit.vertex_color_use_as_albedo = true
+	_mat_unit.no_depth_test = true
+	_mat_unit.albedo_color = Color(1.0, 0.2, 0.1, 1.0)
+
+	_mat_building = StandardMaterial3D.new()
+	_mat_building.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mat_building.vertex_color_use_as_albedo = true
+	_mat_building.no_depth_test = true
+	_mat_building.albedo_color = Color(1.0, 1.0, 0.3, 1.0)
+	_mat_building.emission_enabled = true
+	_mat_building.emission = Color(1.0, 1.0, 0.3)
+	_mat_building.emission_energy_multiplier = 4.0

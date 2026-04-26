@@ -6,7 +6,7 @@ const MIN_FOV := 30.0
 const MAX_FOV := 100.0
 
 const TOWER_MODEL_PATH := "res://assets/tower-defense-kit/Models/GLB format/tower-square-build-a.glb"
-const RANGE_CIRCLE_SEGMENTS := 72
+const RANGE_CIRCLE_SEGMENTS := 36
 const PLAYER_VISION_RADIUS := 35.0
 const MINION_VISION_RADIUS := 25.0
 
@@ -35,6 +35,7 @@ var _player_team: int = 0
 var _fog_overlay: MeshInstance3D = null
 var _main: Node = null
 var _fog_frame_counter: int = 0
+var _los_frame_counter: int = 0
 
 var _range_mesh_inst: MeshInstance3D = null
 var _range_imesh: ImmediateMesh = null
@@ -181,6 +182,7 @@ func _destroy_ghost() -> void:
 		_los_mesh_inst.queue_free()
 	_los_mesh_inst = null
 	_los_imesh = null
+	_los_frame_counter = 0
 
 func _apply_ghost_material(mat: StandardMaterial3D) -> void:
 	if _ghost == null or not is_instance_valid(_ghost):
@@ -409,7 +411,10 @@ func _update_ghost() -> void:
 		_apply_ghost_material(_ghost_mat_valid if valid else _ghost_mat_invalid)
 
 	_draw_range_circle(snapped)
-	_draw_los_fan(snapped)
+	_los_frame_counter += 1
+	if _los_frame_counter >= 4:
+		_los_frame_counter = 0
+		_draw_los_fan(snapped)
 
 # ── Input ────────────────────────────────────────────────────────────────────
 
@@ -526,45 +531,43 @@ func _restore_fog() -> void:
 			node.visible = true
 
 func _update_fog() -> void:
-	var sources: Array[Vector3] = []
-
 	var main: Node = _main
 	var player_pos := Vector3(0.0, 0.0, 84.0 if _player_team == 0 else -84.0)
 	if main and main.get("fps_player") != null and is_instance_valid(main.fps_player):
 		player_pos = main.fps_player.global_position
-		sources.append(player_pos)
 
 	var all_minions: Array = get_tree().get_nodes_in_group("minions")
 	var all_towers: Array  = get_tree().get_nodes_in_group("towers")
 
-	var minion_positions: Array = []
+	# Pre-collect friendly positions — avoids per-entity team check in inner loop
+	var friendly_minion_positions: PackedVector3Array = PackedVector3Array()
+	var tower_positions: Array = []
+
 	for minion in all_minions:
 		if not is_instance_valid(minion):
 			continue
 		var t: int = minion.get("team") if minion.get("team") != null else -1
 		if t == _player_team:
-			sources.append(minion.global_position)
-			minion_positions.append(minion.global_position)
+			friendly_minion_positions.append(minion.global_position)
 
-	var tower_positions: Array = []
 	for tower in all_towers:
 		if not is_instance_valid(tower):
 			continue
 		var t: int = tower.get("team") if tower.get("team") != null else -1
 		if t == _player_team:
-			sources.append(tower.global_position)
 			tower_positions.append(tower.global_position)
 
 	if _fog_overlay and is_instance_valid(_fog_overlay):
 		_fog_overlay.visible = true
 		_fog_overlay.call("update_sources", player_pos, PLAYER_VISION_RADIUS,
-				minion_positions, MINION_VISION_RADIUS,
+				Array(friendly_minion_positions), MINION_VISION_RADIUS,
 				tower_positions, 30.0)
 
-	_apply_fog_to_group(all_towers, player_pos, all_minions, tower_positions)
-	_apply_fog_to_group(all_minions, player_pos, all_minions, tower_positions)
+	_apply_fog_to_group(all_towers, player_pos, friendly_minion_positions, tower_positions)
+	_apply_fog_to_group(all_minions, player_pos, friendly_minion_positions, tower_positions)
 
-func _apply_fog_to_group(nodes: Array, player_pos: Vector3, friendly_minions_cache: Array, friendly_tower_positions: Array) -> void:
+
+func _apply_fog_to_group(nodes: Array, player_pos: Vector3, friendly_minion_positions: PackedVector3Array, friendly_tower_positions: Array) -> void:
 	for node in nodes:
 		if not is_instance_valid(node):
 			continue
@@ -572,18 +575,16 @@ func _apply_fog_to_group(nodes: Array, player_pos: Vector3, friendly_minions_cac
 		if node_team == _player_team:
 			node.visible = true
 			continue
-		node.visible = _is_visible_to_sources(node.global_position, player_pos, friendly_minions_cache, friendly_tower_positions)
+		node.visible = _is_visible_to_sources(node.global_position, player_pos, friendly_minion_positions, friendly_tower_positions)
 
-func _is_visible_to_sources(world_pos: Vector3, player_pos: Vector3, friendly_minions: Array, friendly_tower_positions: Array) -> bool:
+
+func _is_visible_to_sources(world_pos: Vector3, player_pos: Vector3, friendly_minion_positions: PackedVector3Array, friendly_tower_positions: Array) -> bool:
 	if world_pos.distance_squared_to(player_pos) <= PLAYER_VISION_RADIUS * PLAYER_VISION_RADIUS:
 		return true
 
-	for minion in friendly_minions:
-		if not is_instance_valid(minion):
-			continue
-		if minion.get("team") != _player_team:
-			continue
-		if world_pos.distance_squared_to(minion.global_position) <= MINION_VISION_RADIUS * MINION_VISION_RADIUS:
+	var minion_vis_sq: float = MINION_VISION_RADIUS * MINION_VISION_RADIUS
+	for mp in friendly_minion_positions:
+		if world_pos.distance_squared_to(mp) <= minion_vis_sq:
 			return true
 
 	var tower_vision_sq: float = 30.0 * 30.0

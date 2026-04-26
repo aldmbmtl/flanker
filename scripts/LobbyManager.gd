@@ -266,7 +266,7 @@ func _init_bullet_sync() -> void:
 	_bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
 	_rocket_scene = preload("res://scenes/projectiles/Rocket.tscn")
 
-@rpc("authority", "call_remote", "reliable")
+@rpc("authority", "call_remote", "unreliable_ordered")
 func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_team: int, shooter_peer_id: int = -1, projectile_type: String = "bullet") -> void:
 	if projectile_type == "rocket":
 		if _rocket_scene == null:
@@ -313,13 +313,18 @@ func spawn_minion_visuals(team: int, spawn_pos: Vector3, waypts: Array[Vector3],
 	spawner.spawn_for_network(team, spawn_pos, waypts, lane_i, minion_id)
 
 @rpc("authority", "call_remote", "reliable")
-func kill_minion_visuals(minion_path: NodePath) -> void:
-	var main: Node = get_tree().root.get_node("Main")
+func kill_minion_visuals(minion_id: int) -> void:
+	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
 		return
-	var minion: Node = main.get_node(minion_path)
-	if minion != null and minion.has_method("force_die"):
-		minion.force_die()
+	var spawner: Node = main.get_node_or_null("MinionSpawner")
+	if spawner != null and spawner.has_method("kill_minion_by_id"):
+		spawner.kill_minion_by_id(minion_id)
+	else:
+		# Fallback: node-path lookup
+		var minion: Node = main.get_node_or_null("Minion_%d" % minion_id)
+		if minion != null and minion.has_method("force_die"):
+			minion.force_die()
 
 @rpc("any_peer", "reliable")
 func report_avatar_char(char: String) -> void:
@@ -332,7 +337,7 @@ func report_avatar_char(char: String) -> void:
 	# Broadcast updated state so all clients get the new avatar_char
 	sync_lobby_state.rpc(players)
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "call_remote", "unreliable_ordered")
 func report_player_transform(pos: Vector3, rot: Vector3, team: int) -> void:
 	var sender: int = _sender_id()
 	# Do NOT set_player_team here — team is authoritative from spawn (FPSController._ready)
@@ -340,7 +345,7 @@ func report_player_transform(pos: Vector3, rot: Vector3, team: int) -> void:
 	if multiplayer.is_server():
 		broadcast_player_transform.rpc(sender, pos, rot, team)
 
-@rpc("authority", "call_local", "reliable")
+@rpc("authority", "call_local", "unreliable_ordered")
 func broadcast_player_transform(peer_id: int, pos: Vector3, rot: Vector3, team: int) -> void:
 	GameSync.remote_player_updated.emit(peer_id, pos, rot, team)
 
@@ -348,7 +353,6 @@ func broadcast_player_transform(peer_id: int, pos: Vector3, rot: Vector3, team: 
 func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_team: int, shooter_peer: int, hit_info: Dictionary = {}, projectile_type: String = "bullet") -> void:
 	if not multiplayer.is_server():
 		return
-	print("[SERVER validate_shot] peer=", shooter_peer, " type=", projectile_type, " hit_info=", hit_info)
 
 	# --- Client-reported hit path (avoids server raycast hitting FPSPlayer_1) ---
 	if not hit_info.is_empty():
@@ -364,7 +368,6 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 		elif hit_info.has("tower_pos"):
 			var tpos: Vector3 = hit_info["tower_pos"] as Vector3
 			var towers: Array = get_tree().get_nodes_in_group("towers")
-			print("[SERVER tower hit] reported_pos=", tpos, " tower_count=", towers.size())
 			var best: Node = null
 			var best_dist: float = 5.0
 			for t in towers:
@@ -372,7 +375,6 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 				if d < best_dist:
 					best_dist = d
 					best = t
-			print("[SERVER tower hit] best=", best, " best_dist=", best_dist)
 			if best != null and best.has_method("take_damage"):
 				best.take_damage(damage, "player", shooter_team, shooter_peer)
 		elif hit_info.has("peer_id"):
