@@ -1,7 +1,7 @@
 extends StaticBody3D
 ## Mortar Tower — long-range ballistic shell, high damage, large splash.
 
-const TOWER_MODEL_PATH := "res://assets/kenney_pirate-kit/Models/GLB format/tower-complete-small.glb"
+const TOWER_SCENE := preload("res://assets/kenney_pirate-kit/Models/GLB format/tower-complete-small.glb")
 const SHELL_SCENE := "res://scenes/MortarShell.tscn"
 
 var team := 0
@@ -26,13 +26,7 @@ func setup(p_team: int) -> void:
 	$Area3D/CollisionShape3D.shape = shape
 
 func _load_model() -> void:
-	var gltf := GLTFDocument.new()
-	var state := GLTFState.new()
-	if gltf.append_from_file(TOWER_MODEL_PATH, state) != OK:
-		return
-	var root: Node3D = gltf.generate_scene(state)
-	if root == null:
-		return
+	var root: Node3D = TOWER_SCENE.instantiate()
 	# Scale slightly larger to visually distinguish from cannon tower
 	root.scale = Vector3(1.1, 1.3, 1.1)
 	add_child(root)

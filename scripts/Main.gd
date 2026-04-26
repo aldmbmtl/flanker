@@ -230,9 +230,12 @@ func _start_multiplayer_game() -> void:
 	game_state = GameState.PLAYING
 	_setup_event_feed()
 
-	# Spawn AI Supporters for any team without a human Supporter (server only)
+	# Spawn AI Supporters for any team without a human Supporter (server only).
+	# Done asynchronously so role selection doesn't block the server player's own
+	# game setup. Waits up to 30s for all peers to confirm before spawning.
 	if multiplayer.is_server():
-		_spawn_ai_supporters_multiplayer()
+		LobbyManager.human_supporter_claimed.connect(_on_human_supporter_claimed)
+		_spawn_ai_supporters_when_ready()
 
 	if player_role == Role.FIGHTER:
 		_spawn_local_player()
@@ -948,6 +951,18 @@ func _spawn_ai_supporters_multiplayer() -> void:
 		if not LobbyManager.supporter_claimed.get(t, false):
 			_spawn_ai_supporter(t)
 
+# Async wrapper: waits for all peers to confirm roles (up to 30s) then spawns.
+func _spawn_ai_supporters_when_ready() -> void:
+	if LobbyManager._roles_pending > 0:
+		var _timeout_timer := get_tree().create_timer(30.0)
+		_timeout_timer.timeout.connect(func() -> void:
+			if LobbyManager._roles_pending > 0:
+				LobbyManager._roles_pending = 0
+				LobbyManager.all_roles_confirmed.emit()
+		)
+		await LobbyManager.all_roles_confirmed
+	_spawn_ai_supporters_multiplayer()
+
 func _spawn_ai_supporter(t: int) -> void:
 	# Avoid duplicates
 	for child in get_children():
@@ -959,3 +974,15 @@ func _spawn_ai_supporter(t: int) -> void:
 	ai.set("team", t)
 	LobbyManager.ai_supporter_teams.append(t)
 	add_child(ai)
+
+func _on_human_supporter_claimed(team: int) -> void:
+	# A human player has taken the Supporter slot — remove any AI Supporter
+	# that was already running for that team (can happen if the server spawned
+	# one before all role confirmations arrived).
+	var ai_name := "AISupporterTeam%d" % team
+	var ai := get_node_or_null(ai_name)
+	if ai != null:
+		ai.queue_free()
+	var idx: int = LobbyManager.ai_supporter_teams.find(team)
+	if idx != -1:
+		LobbyManager.ai_supporter_teams.remove_at(idx)

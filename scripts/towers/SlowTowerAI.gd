@@ -1,7 +1,7 @@
 extends StaticBody3D
 ## Slow Tower — pulses every 2s, applies 40% speed debuff for 3s to nearby enemies.
 
-const TOWER_MODEL_PATH := "res://assets/kenney_pirate-kit/Models/GLB format/tower-complete-small.glb"
+const TOWER_SCENE := preload("res://assets/kenney_pirate-kit/Models/GLB format/tower-complete-small.glb")
 
 const PULSE_INTERVAL := 2.0
 const SLOW_DURATION  := 3.0
@@ -25,13 +25,7 @@ func setup(p_team: int) -> void:
 	$Area3D/CollisionShape3D.shape = shape
 
 func _load_model() -> void:
-	var gltf := GLTFDocument.new()
-	var state := GLTFState.new()
-	if gltf.append_from_file(TOWER_MODEL_PATH, state) != OK:
-		return
-	var root: Node3D = gltf.generate_scene(state)
-	if root == null:
-		return
+	var root: Node3D = TOWER_SCENE.instantiate()
 	# Cyan tint to distinguish visually
 	root.scale = Vector3(0.9, 0.9, 0.9)
 	add_child(root)

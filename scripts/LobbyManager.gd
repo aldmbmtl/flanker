@@ -12,12 +12,15 @@ var player_death_counts: Dictionary = {}
 var ai_supporter_teams: Array = []  # teams where an AI Supporter was spawned
 
 var _dirty := false
+var _roles_pending: int = 0
 
 signal lobby_updated
 signal game_start_requested
 signal kicked_from_server
 signal player_left(id: int)
 signal role_slots_updated(claimed: Dictionary)
+signal all_roles_confirmed
+signal human_supporter_claimed(team: int)
 signal item_spawned(item_type: String, team: int)
 signal tower_despawned(item_type: String, team: int)
 
@@ -95,9 +98,14 @@ func set_role_ingame(role: int) -> void:
 			_notify_role_rejected.rpc_id(id, supporter_claimed)
 			return
 		supporter_claimed[team] = true
+		human_supporter_claimed.emit(team)
 	players[id].role = role
 	_dirty = true
 	_sync_role_slots.rpc(supporter_claimed)
+	_roles_pending -= 1
+	if _roles_pending <= 0:
+		_roles_pending = 0
+		all_roles_confirmed.emit()
 
 @rpc("authority", "call_local", "reliable")
 func _sync_role_slots(claimed: Dictionary) -> void:
@@ -145,6 +153,7 @@ func start_game(path: String, map_seed: int = 0, time_seed: int = -1) -> void:
 	supporter_claimed = { 0: false, 1: false }
 	player_death_counts.clear()
 	ai_supporter_teams.clear()
+	_roles_pending = players.size()
 	LevelSystem.clear_all()
 	# Re-register all connected peers for the new match
 	for pid in players.keys():
@@ -223,6 +232,15 @@ func _on_peer_connected(id: int) -> void:
 
 func _on_peer_disconnected(id: int) -> void:
 	print("Lobby: peer disconnected ", id)
+	# If roles haven't all been confirmed yet and this peer hadn't submitted,
+	# decrement so the server doesn't wait forever.
+	if game_started and _roles_pending > 0:
+		var info: Dictionary = players.get(id, {})
+		if not info.has("role") or info.get("role", "") == "":
+			_roles_pending -= 1
+			if _roles_pending <= 0:
+				_roles_pending = 0
+				all_roles_confirmed.emit()
 	players.erase(id)
 	_dirty = true
 	player_left.emit(id)
