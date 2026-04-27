@@ -65,7 +65,6 @@ var _slow_mult: float  = 1.0
 
 # Multiplayer puppet
 var is_puppet: bool                       = false
-var _physics_process_disabled: bool       = false
 var _minion_id: int                       = 0
 var _puppet_target_pos: Vector3           = Vector3.ZERO
 var _puppet_target_rot: float             = 0.0
@@ -276,6 +275,15 @@ func _play_anim(anim_name: String) -> void:
 
 func _physics_process(delta: float) -> void:
 	if is_puppet:
+		# Drive puppet body toward server-authoritative target via physics
+		var diff: Vector3 = _puppet_target_pos - global_position
+		diff.y = 0.0
+		velocity.x = diff.x * 12.0
+		velocity.z = diff.z * 12.0
+		velocity.y -= GRAVITY * delta
+		if is_on_floor():
+			velocity.y = 0.0
+		move_and_slide()
 		return
 	if _dead:
 		return
@@ -356,7 +364,6 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	if not is_puppet or _dead:
 		return
-	global_position = global_position.lerp(_puppet_target_pos, delta * 12.0)
 	rotation.y = lerp_angle(rotation.y, _puppet_target_rot, delta * 12.0)
 	var dist: float = global_position.distance_to(_puppet_target_pos)
 	if dist > 0.15:
@@ -514,9 +521,6 @@ func apply_slow(duration: float, mult: float) -> void:
 	_slow_mult  = min(_slow_mult, mult)
 
 func apply_puppet_state(pos: Vector3, rot: float, hp: float) -> void:
-	if is_puppet and not _physics_process_disabled:
-		set_physics_process(false)
-		_physics_process_disabled = true
 	_puppet_target_pos = pos
 	_puppet_target_rot = rot
 	if hp <= 0.0 and not _dead:

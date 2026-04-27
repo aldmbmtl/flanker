@@ -1,8 +1,8 @@
 extends Node
 
 const MAX_PLAYERS := 10
-const RESPAWN_BASE: float = 5.0
-const RESPAWN_INCREMENT: float = 5.0
+const RESPAWN_BASE: float = 10.0
+const RESPAWN_INCREMENT: float = 0.0
 
 var players: Dictionary = {}
 var host_id: int = 1

@@ -145,10 +145,8 @@ func spawn_for_network(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: 
 		minion = get_tree().root.get_node_or_null("Main/Minion_%d" % minion_id)
 	if minion != null:
 		minion.set("is_puppet", true)
-		minion.set("_physics_process_disabled", true)
 		minion.set("velocity", Vector3.ZERO)
 		minion.set("_puppet_target_pos", pos)
-		minion.call("set_physics_process", false)
 	else:
 		push_warning("MinionSpawner: spawn_for_network id=%d node not found" % minion_id)
 

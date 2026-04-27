@@ -81,17 +81,6 @@ func _spawn_sparks(pos: Vector3, hit: Object) -> void:
 		"unit":      particles.material_override = _mat_unit
 		_:           particles.material_override = _mat_building
 
-	# Override draw_pass mesh material per-type using a per-instance surface override
-	# QuadMesh is shared — apply per-particle colour via material_override on the particles node
-	# (material_override is instance-level, safe to set differently each call)
-	particles.draw_pass_1 = _spark_mesh
-	var chosen_mat: StandardMaterial3D
-	match spark_type:
-		"ground":   chosen_mat = _mat_ground
-		"unit":     chosen_mat = _mat_unit
-		_:          chosen_mat = _mat_building
-	particles.set_draw_pass_material(0, chosen_mat)
-
 	particles.amount = 20
 	get_tree().root.add_child(particles)
 	particles.global_position = pos
