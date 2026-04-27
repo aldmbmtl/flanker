@@ -161,7 +161,7 @@ anchor_bottom = 1.0
 mouse_filter = 2
 material = SubResource("ShaderMaterial_damage_flash")
 
-[node name="HUDOverlay" type="Node" parent="HUD"]
+[node name="HUDOverlay" type="Control" parent="HUD"]
 
 [node name="WaveInfoPanel" type="PanelContainer" parent="HUD"]
 anchors_preset = 0

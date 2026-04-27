@@ -58,7 +58,7 @@ func _build_mesh() -> void:
 	_mat.set_shader_parameter("sources", _sources_buf)
 	_mat.set_shader_parameter("source_count", 0)
 
-func update_sources(player_pos: Vector3, player_radius: float,
+func update_sources(player_positions: Array, player_radius: float,
 		minion_positions: Array, minion_radius: float,
 		tower_positions: Array, tower_radius: float) -> void:
 	if _mat == null:
@@ -66,9 +66,11 @@ func update_sources(player_pos: Vector3, player_radius: float,
 
 	var count := 0
 
-	# Player
-	if count < MAX_SOURCES:
-		_sources_buf[count] = Vector4(player_pos.x, player_pos.z, player_radius, 0.0)
+	# Players (allied — array of Vector3)
+	for ppos in player_positions:
+		if count >= MAX_SOURCES:
+			break
+		_sources_buf[count] = Vector4(ppos.x, ppos.z, player_radius, 0.0)
 		count += 1
 
 	# Minions

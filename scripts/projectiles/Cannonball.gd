@@ -30,10 +30,21 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 		_request_destroy_tree(pos)
 		return
 
-	if CombatUtils.should_damage(collider, shooter_team):
-		collider.take_damage(damage, "cannonball", shooter_team)
-
-	_apply_splash(pos, SPLASH_RADIUS, damage * SPLASH_DAMAGE_MULT, "cannonball_splash", collider)
+	var is_server: bool = not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
+	if is_server:
+		# Ghost hitbox — remote player; route damage via GameSync like Bullet does
+		if collider is StaticBody3D and collider.has_meta("ghost_peer_id"):
+			var target_peer: int = collider.get_meta("ghost_peer_id") as int
+			if not GameSync.player_dead.get(target_peer, false):
+				var ghost_team: int = GameSync.get_player_team(target_peer)
+				if ghost_team != shooter_team:
+					var new_hp: float = GameSync.damage_player(target_peer, damage, shooter_team, -1)
+					LobbyManager.apply_player_damage.rpc(target_peer, new_hp)
+					if new_hp <= 0.0:
+						LobbyManager.notify_player_died.rpc(target_peer)
+		elif CombatUtils.should_damage(collider, shooter_team):
+			collider.take_damage(damage, "cannonball", shooter_team)
+		_apply_splash(pos, SPLASH_RADIUS, damage * SPLASH_DAMAGE_MULT, "cannonball_splash", collider)
 	_spawn_impact(pos)
 
 # ── Trail flicker ─────────────────────────────────────────────────────────────

@@ -34,6 +34,8 @@ func _physics_process(_delta: float) -> void:
 		_sync_frame = 0
 		_broadcast_minion_states()
 
+const SYNC_CHUNK_SIZE := 50  # max minions per RPC packet (stays under MTU)
+
 func _broadcast_minion_states() -> void:
 	if _minion_node_cache.is_empty():
 		return
@@ -56,7 +58,17 @@ func _broadcast_minion_states() -> void:
 		_minion_node_cache.erase(mid)
 	if ids.is_empty():
 		return
-	LobbyManager.sync_minion_states.rpc(ids, positions, rotations, healths)
+	var total: int = ids.size()
+	var offset: int = 0
+	while offset < total:
+		var end: int = min(offset + SYNC_CHUNK_SIZE, total)
+		LobbyManager.sync_minion_states.rpc(
+			ids.slice(offset, end),
+			positions.slice(offset, end),
+			rotations.slice(offset, end),
+			healths.slice(offset, end)
+		)
+		offset = end
 
 func _process(delta: float) -> void:
 	if not multiplayer.is_server():

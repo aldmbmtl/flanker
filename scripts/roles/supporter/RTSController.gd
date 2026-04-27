@@ -46,6 +46,9 @@ var _los_mesh_inst: MeshInstance3D = null
 var _los_imesh: ImmediateMesh = null
 var _los_mat: StandardMaterial3D = null
 
+# Blocker exclusion rings — one per tower currently blocking placement
+var _blocker_rings: Array = []  # Array of [MeshInstance3D, ImmediateMesh]
+
 # Current placement selection — driven by SupporterHUD
 var _selected_type:    String = "cannon"
 var _selected_subtype: String = ""
@@ -96,12 +99,12 @@ func _add_fog_to_world() -> void:
 
 func _build_ghost_materials() -> void:
 	_ghost_mat_valid = StandardMaterial3D.new()
-	_ghost_mat_valid.wireframe = true
-	_ghost_mat_valid.albedo_color = Color(0.0, 1.0, 0.4, 1.0)
+	_ghost_mat_valid.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_ghost_mat_valid.albedo_color = Color(0.0, 1.0, 0.4, 0.45)
 
 	_ghost_mat_invalid = StandardMaterial3D.new()
-	_ghost_mat_invalid.wireframe = true
-	_ghost_mat_invalid.albedo_color = Color(1.0, 0.2, 0.2, 1.0)
+	_ghost_mat_invalid.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_ghost_mat_invalid.albedo_color = Color(1.0, 0.2, 0.2, 0.45)
 
 	_range_mat_valid = StandardMaterial3D.new()
 	_range_mat_valid.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -171,6 +174,7 @@ func _create_ghost() -> void:
 	_apply_ghost_material(_ghost_mat_invalid)
 
 func _destroy_ghost() -> void:
+	_clear_blocker_rings()
 	if _ghost != null and is_instance_valid(_ghost):
 		_ghost.queue_free()
 	_ghost = null
@@ -196,6 +200,66 @@ func _set_material_recursive(node: Node, mat: StandardMaterial3D) -> void:
 		node.material_override = mat
 	for child in node.get_children():
 		_set_material_recursive(child, mat)
+
+func _clear_blocker_rings() -> void:
+	for pair in _blocker_rings:
+		var mesh_inst: MeshInstance3D = pair[0]
+		if is_instance_valid(mesh_inst):
+			mesh_inst.queue_free()
+	_blocker_rings.clear()
+
+func _draw_blocker_rings(snapped: Vector3) -> void:
+	if build_system == null:
+		return
+	var def: Dictionary = build_system.PLACEABLE_DEFS.get(_selected_type, {})
+	var spacing: float = def.get("spacing", 5.0)
+	var group: String = "towers" if def.get("is_tower", false) else "supporter_drops"
+
+	# Collect all towers currently blocking this position
+	var blockers: Array = []
+	var blocker_radii: Array = []
+	for node in get_tree().get_nodes_in_group(group):
+		if not is_instance_valid(node):
+			continue
+		var existing_def: Dictionary = build_system.PLACEABLE_DEFS.get(node.get("tower_type") if node.get("tower_type") != null else "", {})
+		var existing_spacing: float = existing_def.get("spacing", 5.0)
+		var effective: float = maxf(spacing, existing_spacing)
+		if snapped.distance_to(node.global_position) < effective:
+			blockers.append(node)
+			blocker_radii.append(effective)
+
+	# Grow ring pool if needed
+	while _blocker_rings.size() < blockers.size():
+		var imesh := ImmediateMesh.new()
+		var inst := MeshInstance3D.new()
+		inst.mesh = imesh
+		inst.material_override = _range_mat_invalid
+		get_tree().root.get_child(0).add_child(inst)
+		_blocker_rings.append([inst, imesh])
+
+	# Draw / hide each slot
+	for i in range(_blocker_rings.size()):
+		var inst: MeshInstance3D = _blocker_rings[i][0]
+		var imesh: ImmediateMesh  = _blocker_rings[i][1]
+		if not is_instance_valid(inst):
+			continue
+		if i >= blockers.size():
+			inst.visible = false
+			continue
+		inst.visible = true
+		var tower_pos: Vector3 = blockers[i].global_position
+		var ring_radius: float = blocker_radii[i]
+		inst.global_position = Vector3(tower_pos.x, tower_pos.y + 0.3, tower_pos.z)
+		imesh.clear_surfaces()
+		imesh.surface_begin(Mesh.PRIMITIVE_LINES)
+		for s in range(RANGE_CIRCLE_SEGMENTS):
+			var a0: float = (float(s)     / float(RANGE_CIRCLE_SEGMENTS)) * TAU
+			var a1: float = (float(s + 1) / float(RANGE_CIRCLE_SEGMENTS)) * TAU
+			var p0 := Vector3(cos(a0) * ring_radius, 0.0, sin(a0) * ring_radius)
+			var p1 := Vector3(cos(a1) * ring_radius, 0.0, sin(a1) * ring_radius)
+			imesh.surface_add_vertex(p0)
+			imesh.surface_add_vertex(p1)
+		imesh.surface_end()
 
 func _draw_range_circle(center: Vector3) -> void:
 	if _range_imesh == null or not is_instance_valid(_range_imesh):
@@ -387,6 +451,10 @@ func _update_ghost() -> void:
 			_range_mesh_inst.visible = false
 		if _los_mesh_inst != null and is_instance_valid(_los_mesh_inst):
 			_los_mesh_inst.visible = false
+		for pair in _blocker_rings:
+			var inst: MeshInstance3D = pair[0]
+			if is_instance_valid(inst):
+				inst.visible = false
 		return
 
 	_ghost.visible = true
@@ -411,6 +479,7 @@ func _update_ghost() -> void:
 		_apply_ghost_material(_ghost_mat_valid if valid else _ghost_mat_invalid)
 
 	_draw_range_circle(snapped)
+	_draw_blocker_rings(snapped)
 	_los_frame_counter += 1
 	if _los_frame_counter >= 4:
 		_los_frame_counter = 0
@@ -531,13 +600,28 @@ func _restore_fog() -> void:
 			node.visible = true
 
 func _update_fog() -> void:
-	var main: Node = _main
-	var player_pos := Vector3(0.0, 0.0, 84.0 if _player_team == 0 else -84.0)
-	if main and main.get("fps_player") != null and is_instance_valid(main.fps_player):
-		player_pos = main.fps_player.global_position
-
 	var all_minions: Array = get_tree().get_nodes_in_group("minions")
 	var all_towers: Array  = get_tree().get_nodes_in_group("towers")
+
+	# Collect allied player positions: local FPS players + allied remote ghosts
+	var allied_player_positions: Array = []
+	for p in get_tree().get_nodes_in_group("player"):
+		if not is_instance_valid(p):
+			continue
+		var t: int = p.get("player_team") if p.get("player_team") != null else -1
+		if t == _player_team:
+			allied_player_positions.append(p.global_position)
+	for ghost in get_tree().get_nodes_in_group("remote_players"):
+		if not is_instance_valid(ghost):
+			continue
+		var pid: int = ghost.get("peer_id") if ghost.get("peer_id") != null else 0
+		var t: int = GameSync.get_player_team(pid)
+		if t < 0:
+			var info: Dictionary = LobbyManager.players.get(pid, {})
+			if info.has("team"):
+				t = info["team"]
+		if t == _player_team:
+			allied_player_positions.append(ghost.global_position)
 
 	# Pre-collect friendly positions — avoids per-entity team check in inner loop
 	var friendly_minion_positions: PackedVector3Array = PackedVector3Array()
@@ -559,15 +643,30 @@ func _update_fog() -> void:
 
 	if _fog_overlay and is_instance_valid(_fog_overlay):
 		_fog_overlay.visible = true
-		_fog_overlay.call("update_sources", player_pos, PLAYER_VISION_RADIUS,
+		_fog_overlay.call("update_sources", allied_player_positions, PLAYER_VISION_RADIUS,
 				Array(friendly_minion_positions), MINION_VISION_RADIUS,
 				tower_positions, 30.0)
 
-	_apply_fog_to_group(all_towers, player_pos, friendly_minion_positions, tower_positions)
-	_apply_fog_to_group(all_minions, player_pos, friendly_minion_positions, tower_positions)
+	_apply_fog_to_group(all_towers, allied_player_positions, friendly_minion_positions, tower_positions)
+	_apply_fog_to_group(all_minions, allied_player_positions, friendly_minion_positions, tower_positions)
+
+	# Hide/show enemy remote player ghosts based on fog visibility
+	for ghost in get_tree().get_nodes_in_group("remote_players"):
+		if not is_instance_valid(ghost):
+			continue
+		var pid: int = ghost.get("peer_id") if ghost.get("peer_id") != null else 0
+		var t: int = GameSync.get_player_team(pid)
+		if t < 0:
+			var info: Dictionary = LobbyManager.players.get(pid, {})
+			if info.has("team"):
+				t = info["team"]
+		if t == _player_team:
+			ghost.visible = true
+		else:
+			ghost.visible = _is_visible_to_sources(ghost.global_position, allied_player_positions, friendly_minion_positions, tower_positions)
 
 
-func _apply_fog_to_group(nodes: Array, player_pos: Vector3, friendly_minion_positions: PackedVector3Array, friendly_tower_positions: Array) -> void:
+func _apply_fog_to_group(nodes: Array, allied_player_positions: Array, friendly_minion_positions: PackedVector3Array, friendly_tower_positions: Array) -> void:
 	for node in nodes:
 		if not is_instance_valid(node):
 			continue
@@ -575,12 +674,14 @@ func _apply_fog_to_group(nodes: Array, player_pos: Vector3, friendly_minion_posi
 		if node_team == _player_team:
 			node.visible = true
 			continue
-		node.visible = _is_visible_to_sources(node.global_position, player_pos, friendly_minion_positions, friendly_tower_positions)
+		node.visible = _is_visible_to_sources(node.global_position, allied_player_positions, friendly_minion_positions, friendly_tower_positions)
 
 
-func _is_visible_to_sources(world_pos: Vector3, player_pos: Vector3, friendly_minion_positions: PackedVector3Array, friendly_tower_positions: Array) -> bool:
-	if world_pos.distance_squared_to(player_pos) <= PLAYER_VISION_RADIUS * PLAYER_VISION_RADIUS:
-		return true
+func _is_visible_to_sources(world_pos: Vector3, allied_player_positions: Array, friendly_minion_positions: PackedVector3Array, friendly_tower_positions: Array) -> bool:
+	var player_vis_sq: float = PLAYER_VISION_RADIUS * PLAYER_VISION_RADIUS
+	for pp in allied_player_positions:
+		if world_pos.distance_squared_to(pp) <= player_vis_sq:
+			return true
 
 	var minion_vis_sq: float = MINION_VISION_RADIUS * MINION_VISION_RADIUS
 	for mp in friendly_minion_positions:

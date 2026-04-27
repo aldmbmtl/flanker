@@ -1,19 +1,23 @@
 extends Node
 
 # ── Placeable definitions ─────────────────────────────────────────────────────
-# Each entry: { cost, scene, spacing, is_tower, lane_setback }
+# Each entry: { cost, scene, attack_range, is_tower, lane_setback, [spacing] }
+# Towers: spacing is computed in _ready() from attack_range (see SPACING_* constants).
+#   Attacking towers: spacing = max(SPACING_FLOOR, attack_range * SPACING_FACTOR)
+#   Passive towers (attack_range 0): spacing = SPACING_PASSIVE
+# Non-tower drops: spacing is set explicitly here and left unchanged.
 # "weapon" cost is 0 — actual cost comes from WEAPON_COSTS keyed by subtype.
-const PLACEABLE_DEFS := {
-	"cannon":           { "cost": 25, "scene": "res://scenes/towers/Tower.tscn",                  "spacing": 20.0, "is_tower": true,  "lane_setback": true  },
-	"mortar":           { "cost": 35, "scene": "res://scenes/towers/MortarTower.tscn",     "spacing": 20.0, "is_tower": true,  "lane_setback": true  },
-	"slow":             { "cost": 30, "scene": "res://scenes/towers/SlowTower.tscn",       "spacing": 20.0, "is_tower": true,  "lane_setback": true  },
-	"barrier":          { "cost": 10, "scene": "res://scenes/towers/BarrierTower.tscn",    "spacing":  5.0, "is_tower": true,  "lane_setback": false },
-	"machinegun":       { "cost": 40, "scene": "res://scenes/towers/MachineGunTower.tscn", "spacing": 15.0, "is_tower": true,  "lane_setback": true  },
-	"weapon":           { "cost":  0, "scene": "res://scenes/WeaponPickup.tscn",           "spacing":  5.0, "is_tower": false, "lane_setback": false },
-	"healthpack":       { "cost": 15, "scene": "res://scenes/HealthPackPickup.tscn",       "spacing":  5.0, "is_tower": false, "lane_setback": false },
-	"healstation":      { "cost": 25, "scene": "res://scenes/HealStation.tscn",            "spacing": 10.0, "is_tower": false, "lane_setback": false },
+var PLACEABLE_DEFS := {
+	"cannon":           { "cost": 25, "scene": "res://scenes/towers/Tower.tscn",           "attack_range": 30.0, "is_tower": true,  "lane_setback": true  },
+	"mortar":           { "cost": 35, "scene": "res://scenes/towers/MortarTower.tscn",     "attack_range": 50.0, "is_tower": true,  "lane_setback": true  },
+	"slow":             { "cost": 30, "scene": "res://scenes/towers/SlowTower.tscn",       "attack_range": 18.0, "is_tower": true,  "lane_setback": true  },
+	"barrier":          { "cost": 10, "scene": "res://scenes/towers/BarrierTower.tscn",    "attack_range":  0.0, "is_tower": true,  "lane_setback": false },
+	"machinegun":       { "cost": 40, "scene": "res://scenes/towers/MachineGunTower.tscn", "attack_range": 22.0, "is_tower": true,  "lane_setback": true  },
+	"weapon":           { "cost":  0, "scene": "res://scenes/WeaponPickup.tscn",           "spacing":  5.0,      "is_tower": false, "lane_setback": false },
+	"healthpack":       { "cost": 15, "scene": "res://scenes/HealthPackPickup.tscn",       "spacing":  5.0,      "is_tower": false, "lane_setback": false },
+	"healstation":      { "cost": 25, "scene": "res://scenes/HealStation.tscn",            "spacing": 10.0,      "is_tower": false, "lane_setback": false },
 	# ── Launcher towers — one entry per type in LauncherDefs ─────────────────
-	"launcher_missile": { "cost": 50, "scene": "res://scenes/towers/LauncherTower.tscn",          "spacing": 20.0, "is_tower": true,  "lane_setback": true, "is_launcher": true, "launcher_type": "launcher_missile" },
+	"launcher_missile": { "cost": 50, "scene": "res://scenes/towers/LauncherTower.tscn",  "attack_range":  0.0, "is_tower": true,  "lane_setback": true, "is_launcher": true, "launcher_type": "launcher_missile" },
 }
 
 const WEAPON_COSTS := { "pistol": 10, "rifle": 20, "heavy": 30, "rocket_launcher": 60 }
@@ -25,9 +29,21 @@ const LANE_SETBACK   := 8.0
 const SLOPE_THRESHOLD := 0.85
 const MIN_TOWER_SPACING := 20.0
 
+# Spacing formula constants for attacking towers
+const SPACING_FACTOR  := 1.4   # multiplied by attack_range
+const SPACING_FLOOR   := 10.0  # minimum spacing for attacking towers
+const SPACING_PASSIVE := 3.0   # spacing for passive towers (attack_range == 0)
+
 var _loaded_scenes: Dictionary = {}
 
 func _ready() -> void:
+	# Compute spacing for all tower entries from their attack_range
+	for key in PLACEABLE_DEFS:
+		var def: Dictionary = PLACEABLE_DEFS[key]
+		if not def.get("is_tower", false):
+			continue
+		var r: float = def.get("attack_range", 0.0)
+		def["spacing"] = SPACING_PASSIVE if r == 0.0 else maxf(SPACING_FLOOR, r * SPACING_FACTOR)
 	for key in PLACEABLE_DEFS:
 		var path: String = PLACEABLE_DEFS[key]["scene"]
 		_loaded_scenes[key] = load(path)
@@ -75,7 +91,10 @@ func can_place_item(world_pos: Vector3, team: int, item_type: String) -> bool:
 	var spacing: float = def.get("spacing", 5.0)
 	var group: String = "towers" if def.get("is_tower", false) else "supporter_drops"
 	for node in get_tree().get_nodes_in_group(group):
-		if world_pos.distance_to(node.global_position) < spacing:
+		var existing_def: Dictionary = PLACEABLE_DEFS.get(node.get("tower_type") if node.get("tower_type") != null else "", {})
+		var existing_spacing: float = existing_def.get("spacing", 5.0)
+		var effective: float = maxf(spacing, existing_spacing)
+		if world_pos.distance_to(node.global_position) < effective:
 			return false
 
 	return true

@@ -146,6 +146,8 @@ func _build_detection_area() -> void:
 # ── Attack loop ───────────────────────────────────────────────────────────────
 
 func _process(delta: float) -> void:
+	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+		return
 	if _dead or _area == null:
 		return
 	_attack_timer -= delta
@@ -167,17 +169,55 @@ func _process(delta: float) -> void:
 func _find_target() -> Node3D:
 	var best: Node3D = null
 	var best_dist: float = attack_range + 1.0
+
+	# Area3D overlap — catches minions, local FPSPlayer, and any ghosts in range
 	for body in _area.get_overlapping_bodies():
-		if not body.has_method("take_damage"):
-			continue
-		var body_team: int = _get_body_team(body)
+		var body_team: int = _resolve_body_team(body)
 		if body_team < 0 or body_team == team:
 			continue
 		var d: float = global_position.distance_to(body.global_position)
 		if d < best_dist and _has_line_of_sight(body):
 			best_dist = d
 			best = body
+
+	# Direct group scan — catches players whose ghosts haven't entered the Area3D yet
+	if multiplayer.has_multiplayer_peer():
+		for player in get_tree().get_nodes_in_group("players"):
+			if not player.has_method("take_damage"):
+				continue
+			var body_team: int = _get_body_team(player)
+			if body_team < 0 or body_team == team:
+				continue
+			var d: float = global_position.distance_to(player.global_position)
+			if d < best_dist and d <= attack_range and _has_line_of_sight(player):
+				best_dist = d
+				best = player
+		for ghost in get_tree().get_nodes_in_group("remote_players"):
+			var pid: int = ghost.get("peer_id") as int
+			var body_team: int = GameSync.get_player_team(pid)
+			if body_team < 0 or body_team == team:
+				continue
+			var d: float = global_position.distance_to(ghost.global_position)
+			# Use HitBody (StaticBody3D) for LOS so get_rid() is valid;
+			# fall back to skipping LOS check if HitBody is absent.
+			var hit_body: Node3D = ghost.get_node_or_null("HitBody")
+			var los_target: Node3D = hit_body if hit_body != null else null
+			if los_target == null:
+				continue
+			if d < best_dist and d <= attack_range and _has_line_of_sight(los_target):
+				best_dist = d
+				best = ghost
+
 	return best
+
+## Resolves the team for a body — handles both direct nodes (take_damage) and
+## RemotePlayerGhost HitBody nodes (ghost_peer_id meta + GameSync lookup).
+func _resolve_body_team(body: Object) -> int:
+	if body.has_method("take_damage"):
+		return _get_body_team(body)
+	if body.has_meta("ghost_peer_id"):
+		return GameSync.get_player_team(body.get_meta("ghost_peer_id") as int)
+	return -1
 
 ## Duck-types team out of a body node (players use player_team, minions use team).
 func _get_body_team(body: Object) -> int:
@@ -231,6 +271,14 @@ func get_fire_position() -> Vector3:
 	if fp != null:
 		return fp.global_position
 	return global_position + Vector3(0.0, fire_point_fallback_height, 0.0)
+
+# ── Public health accessors ───────────────────────────────────────────────────
+
+func get_health() -> float:
+	return _health
+
+func get_max_health() -> float:
+	return max_health
 
 # ── Damage / death ────────────────────────────────────────────────────────────
 

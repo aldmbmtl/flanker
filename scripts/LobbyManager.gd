@@ -261,6 +261,8 @@ func _on_server_disconnected() -> void:
 
 var _bullet_scene: PackedScene
 var _rocket_scene: PackedScene
+var _cannonball_scene: PackedScene
+var _mortar_scene: PackedScene
 
 func _init_bullet_sync() -> void:
 	_bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
@@ -293,6 +295,30 @@ func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_tea
 	var main: Node = get_tree().root.get_node("Main")
 	if main.has_method("_on_bullet_hit_something") and shooter_peer_id == multiplayer.get_unique_id():
 		bullet.hit_something.connect(main._on_bullet_hit_something)
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func spawn_cannonball_visuals(pos: Vector3, target: Vector3, damage: float, team: int) -> void:
+	if _cannonball_scene == null:
+		_cannonball_scene = preload("res://scenes/projectiles/Cannonball.tscn")
+	var ball: Node3D = _cannonball_scene.instantiate()
+	ball.damage       = damage
+	ball.source       = "cannonball"
+	ball.shooter_team = team
+	ball.target_pos   = target
+	ball.position     = pos
+	get_tree().root.get_child(0).add_child(ball)
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func spawn_mortar_visuals(pos: Vector3, target: Vector3, damage: float, team: int) -> void:
+	if _mortar_scene == null:
+		_mortar_scene = preload("res://scenes/projectiles/MortarShell.tscn")
+	var shell: Node3D = _mortar_scene.instantiate()
+	shell.damage       = damage
+	shell.source       = "mortar_shell"
+	shell.shooter_team = team
+	shell.target_pos   = target
+	shell.position     = pos
+	get_tree().root.get_child(0).add_child(shell)
 
 var _minion_scene: PackedScene
 
@@ -387,6 +413,9 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 					if new_hp <= 0.0:
 						notify_player_died.rpc(target_peer)
 		spawn_bullet_visuals.rpc(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
+		# call_remote skips the server itself — spawn locally for the host
+		if projectile_type == "rocket":
+			spawn_bullet_visuals(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
 		return
 
 	# --- Server-side fallback (used when host fires, hit_info is empty) ---
@@ -406,6 +435,9 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 				minion.take_damage(damage, "player", shooter_team, shooter_peer)
 
 	spawn_bullet_visuals.rpc(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
+	# call_remote skips the server itself — spawn locally for the host
+	if projectile_type == "rocket":
+		spawn_bullet_visuals(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
 
 @rpc("authority", "call_local", "reliable")
 func apply_player_damage(peer_id: int, new_health: float) -> void:

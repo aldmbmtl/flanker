@@ -53,11 +53,13 @@ const SupporterHUDScene := preload("res://scenes/ui/SupporterHUD.tscn")
 const LauncherHUDScript := preload("res://scripts/ui/LauncherHUD.gd")
 const LaneBoostHUDScript := preload("res://scripts/ui/LaneBoostHUD.gd")
 const AISupporterControllerScript := preload("res://scripts/roles/supporter/AISupporterController.gd")
+const EntityHUDScript             := preload("res://scripts/hud/EntityHUD.gd")
 const LevelUpDialogScene := preload("res://scenes/ui/LevelUpDialog.tscn")
 
 var _supporter_hud: Node = null
 var _launcher_hud: Node = null
 var _lane_boost_hud: Node = null
+var _entity_hud: Control = null
 var _level_up_dialog: Control = null
 
 @onready var rts_camera:         Camera3D        = $RTSCamera
@@ -284,6 +286,11 @@ func _start_multiplayer_game() -> void:
 		$HUD.add_child(_lane_boost_hud)
 		_lane_boost_hud.setup(player_start_team)
 		LobbyManager.lane_boosts_synced.connect(_lane_boost_hud.apply_boost_sync)
+
+		# Wire EntityHUD — player circles + tower health bars
+		_entity_hud = $HUD/HUDOverlay
+		_entity_hud.set_script(EntityHUDScript)
+		_entity_hud.setup(player_start_team)
 
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
@@ -776,6 +783,11 @@ func _on_start_game() -> void:
 		$HUD.add_child(_lane_boost_hud)
 		_lane_boost_hud.setup(player_start_team)
 		LobbyManager.lane_boosts_synced.connect(_lane_boost_hud.apply_boost_sync)
+
+		# Wire EntityHUD — player circles + tower health bars
+		_entity_hud = $HUD/HUDOverlay
+		_entity_hud.set_script(EntityHUDScript)
+		_entity_hud.setup(player_start_team)
 
 	# Spawn AI Supporters for any uncovered team (singleplayer — always server)
 	_spawn_ai_supporters_singleplayer(player_role, player_start_team)

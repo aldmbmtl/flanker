@@ -17,17 +17,15 @@ build:
 
 run:
 	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1
-	DISPLAY=:0 $(GODOT) --path $(PROJECT) > $(LOG) 2>&1 &
-	sleep 8 && cat $(LOG)
+	DISPLAY=:0 $(GODOT) --path $(PROJECT) > $(LOG)
 
 host:
 	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1
-	DISPLAY=:0 $(GODOT) --path $(PROJECT) > $(HOST_LOG) 2>&1 &
-	sleep 8 && cat $(HOST_LOG)
+	DISPLAY=:0 $(GODOT) --path $(PROJECT) > $(HOST_LOG)
 
 client:
-	DISPLAY=:0 $(GODOT) --path $(PROJECT) > $(CLIENT_LOG) 2>&1 &
-	sleep 8 && cat $(CLIENT_LOG)
+	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1
+	DISPLAY=:0 $(GODOT) --path $(PROJECT) > $(CLIENT_LOG)
 
 stop:
 	@pkill -f "godot --path" || true

@@ -4,7 +4,8 @@ var _my_peer_id: int = 1
 var _my_ready: bool = false
 var _is_host: bool = false
 
-var _player_list: VBoxContainer
+var _blue_list: VBoxContainer
+var _red_list: VBoxContainer
 var _status_label: Label
 var _player_count_label: Label
 var _seed_label: Label
@@ -52,7 +53,7 @@ func _build_ui() -> void:
 
 	# Card panel — sized to content
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(480, 0)
+	panel.custom_minimum_size = Vector2(640, 0)
 
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.04, 0.05, 0.06, 0.92)
@@ -97,11 +98,50 @@ func _build_ui() -> void:
 	var sep_top := HSeparator.new()
 	vbox.add_child(sep_top)
 
-	# Player list
-	_player_list = VBoxContainer.new()
-	_player_list.add_theme_constant_override("separation", 6)
-	_player_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(_player_list)
+	# Team columns
+	var teams_hbox := HBoxContainer.new()
+	teams_hbox.add_theme_constant_override("separation", 12)
+	teams_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(teams_hbox)
+
+	# Blue column
+	var blue_col := VBoxContainer.new()
+	blue_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	blue_col.add_theme_constant_override("separation", 6)
+	teams_hbox.add_child(blue_col)
+
+	var blue_header := Label.new()
+	blue_header.text = "BLUE TEAM"
+	blue_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	blue_header.add_theme_color_override("font_color", Color(0.3, 0.55, 1.0, 1.0))
+	blue_header.add_theme_font_size_override("font_size", 13)
+	blue_col.add_child(blue_header)
+	blue_col.add_child(HSeparator.new())
+
+	_blue_list = VBoxContainer.new()
+	_blue_list.add_theme_constant_override("separation", 6)
+	blue_col.add_child(_blue_list)
+
+	# Vertical divider
+	teams_hbox.add_child(VSeparator.new())
+
+	# Red column
+	var red_col := VBoxContainer.new()
+	red_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	red_col.add_theme_constant_override("separation", 6)
+	teams_hbox.add_child(red_col)
+
+	var red_header := Label.new()
+	red_header.text = "RED TEAM"
+	red_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	red_header.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3, 1.0))
+	red_header.add_theme_font_size_override("font_size", 13)
+	red_col.add_child(red_header)
+	red_col.add_child(HSeparator.new())
+
+	_red_list = VBoxContainer.new()
+	_red_list.add_theme_constant_override("separation", 6)
+	red_col.add_child(_red_list)
 
 	# Separator
 	vbox.add_child(HSeparator.new())
@@ -162,17 +202,25 @@ func _update_seed_label() -> void:
 		_seed_label.text = "SEED  #%d" % seed_val
 
 func _refresh_player_list() -> void:
-	if not _player_list:
+	if not _blue_list or not _red_list:
 		return
 
-	for child in _player_list.get_children():
+	for child in _blue_list.get_children():
+		child.queue_free()
+	for child in _red_list.get_children():
 		child.queue_free()
 
+	var ui_theme: Theme = load("res://assets/ui_theme.tres")
 	for id in LobbyManager.players:
 		var info: Dictionary = LobbyManager.players[id]
-		_player_list.add_child(_make_player_entry(id, info))
+		var team: int = info.get("team", 0)
+		var entry: HBoxContainer = _make_player_entry(id, info, ui_theme)
+		if team == 0:
+			_blue_list.add_child(entry)
+		else:
+			_red_list.add_child(entry)
 
-func _make_player_entry(id: int, info: Dictionary) -> HBoxContainer:
+func _make_player_entry(id: int, info: Dictionary, ui_theme: Theme) -> HBoxContainer:
 	var row := HBoxContainer.new()
 
 	var name_lbl := Label.new()
@@ -188,7 +236,7 @@ func _make_player_entry(id: int, info: Dictionary) -> HBoxContainer:
 
 	var ready_lbl := Label.new()
 	ready_lbl.text = "READY" if info.ready else "—"
-	ready_lbl.custom_minimum_size.x = 60.0
+	ready_lbl.custom_minimum_size.x = 48.0
 	ready_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ready_lbl.add_theme_font_size_override("font_size", 12)
 	if info.ready:
@@ -196,6 +244,22 @@ func _make_player_entry(id: int, info: Dictionary) -> HBoxContainer:
 	else:
 		ready_lbl.add_theme_color_override("font_color", Color(0.35, 0.30, 0.25, 1.0))
 	row.add_child(ready_lbl)
+
+	# Switch button — only shown on your own row
+	if id == _my_peer_id:
+		var switch_btn := Button.new()
+		switch_btn.text = "SWITCH"
+		switch_btn.custom_minimum_size = Vector2(68, 26)
+		switch_btn.theme = ui_theme
+		var current_team: int = info.get("team", 0)
+		switch_btn.pressed.connect(func() -> void:
+			var new_team: int = 1 - current_team
+			if _is_host:
+				LobbyManager.set_team(new_team)
+			else:
+				LobbyManager.set_team.rpc_id(1, new_team)
+		)
+		row.add_child(switch_btn)
 
 	return row
 

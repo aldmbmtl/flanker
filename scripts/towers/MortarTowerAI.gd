@@ -20,3 +20,5 @@ func _do_attack(target: Node3D) -> void:
 	shell.target_pos = aim_pos
 	shell.position = spawn_pos
 	get_tree().root.get_child(0).add_child(shell)
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		LobbyManager.spawn_mortar_visuals.rpc(spawn_pos, aim_pos, attack_damage, team)
