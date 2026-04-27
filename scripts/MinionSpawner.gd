@@ -4,7 +4,7 @@ const MINION_SCENE := "res://scenes/minions/Minion.tscn"
 const WAVE_INTERVAL := 20.0
 const MAX_WAVE_SIZE := 6
 const MINION_STAGGER := 0.5  # seconds between each minion in a wave
-const SYNC_INTERVAL := 6     # physics frames between position broadcasts
+const SYNC_INTERVAL := 3     # physics frames between position broadcasts
 
 var wave_number := 0
 var wave_timer := 0.0
@@ -23,6 +23,8 @@ var _main: Node = null
 func _ready() -> void:
 	_minion_scene = load(MINION_SCENE)
 	_main = get_node_or_null("/root/Main")
+	_minion_node_cache.clear()
+	_minion_counter = 0
 
 func _physics_process(_delta: float) -> void:
 	if not multiplayer.is_server():
@@ -39,15 +41,19 @@ func _broadcast_minion_states() -> void:
 	var positions: PackedVector3Array = PackedVector3Array()
 	var rotations: PackedFloat32Array = PackedFloat32Array()
 	var healths:   PackedFloat32Array = PackedFloat32Array()
+	var stale: Array = []
 	for mid in _minion_node_cache.keys():
-		var m: Node = _minion_node_cache[mid]
+		var m = _minion_node_cache.get(mid)
 		if not is_instance_valid(m):
-			_minion_node_cache.erase(mid)
+			stale.append(mid)
 			continue
+		var mn: Node = m as Node
 		ids.append(mid as int)
-		positions.append(m.global_position)
-		rotations.append(m.rotation.y)
-		healths.append(m.get("health") as float)
+		positions.append(mn.global_position)
+		rotations.append(mn.rotation.y)
+		healths.append(mn.get("health") as float)
+	for mid in stale:
+		_minion_node_cache.erase(mid)
 	if ids.is_empty():
 		return
 	LobbyManager.sync_minion_states.rpc(ids, positions, rotations, healths)

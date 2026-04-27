@@ -68,6 +68,8 @@ var is_puppet: bool                       = false
 var _minion_id: int                       = 0
 var _puppet_target_pos: Vector3           = Vector3.ZERO
 var _puppet_target_rot: float             = 0.0
+var _puppet_last_received_pos: Vector3    = Vector3.ZERO
+var _puppet_idle_frames: int              = 0
 
 # Waypoint navigation
 var waypoints: Array[Vector3]  = []
@@ -275,16 +277,7 @@ func _play_anim(anim_name: String) -> void:
 
 func _physics_process(delta: float) -> void:
 	if is_puppet:
-		# Drive puppet body toward server-authoritative target via physics
-		var diff: Vector3 = _puppet_target_pos - global_position
-		diff.y = 0.0
-		velocity.x = diff.x * 12.0
-		velocity.z = diff.z * 12.0
-		velocity.y -= GRAVITY * delta
-		if is_on_floor():
-			velocity.y = 0.0
-		move_and_slide()
-		return
+		return  # puppet position driven by _process lerp, not physics
 	if _dead:
 		return
 
@@ -366,10 +359,16 @@ func _process(delta: float) -> void:
 		return
 	rotation.y = lerp_angle(rotation.y, _puppet_target_rot, delta * 12.0)
 	var dist: float = global_position.distance_to(_puppet_target_pos)
-	if dist > 0.15:
+	if dist > 0.05:
+		global_position = global_position.move_toward(_puppet_target_pos, speed * delta)
+		_puppet_idle_frames = 0
 		_play_anim("walk")
 	else:
-		_play_anim("idle")
+		_puppet_idle_frames += 1
+		if _puppet_idle_frames > 10:
+			_play_anim("idle")
+		else:
+			_play_anim("walk")
 
 # ─── Movement helpers ─────────────────────────────────────────────────────────
 
@@ -523,6 +522,9 @@ func apply_slow(duration: float, mult: float) -> void:
 func apply_puppet_state(pos: Vector3, rot: float, hp: float) -> void:
 	_puppet_target_pos = pos
 	_puppet_target_rot = rot
+	if pos.distance_squared_to(_puppet_last_received_pos) > 0.001:
+		_puppet_last_received_pos = pos
+		_puppet_idle_frames = 0
 	if hp <= 0.0 and not _dead:
 		_die()
 
@@ -541,6 +543,9 @@ func _die() -> void:
 
 	if multiplayer.is_server():
 		LobbyManager.kill_minion_visuals.rpc(_minion_id)
+		var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
+		if spawner != null:
+			spawner.get("_minion_node_cache").erase(_minion_id)
 		if _killer_peer_id > 0:
 			LevelSystem.award_xp(_killer_peer_id, LevelSystem.XP_MINION)
 	elif not multiplayer.has_multiplayer_peer():
