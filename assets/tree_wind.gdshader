@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode depth_draw_opaque, cull_back, diffuse_lambert, specular_schlick_ggx;
+render_mode depth_draw_opaque, depth_prepass_alpha, cull_back, diffuse_lambert, specular_schlick_ggx;
 
 // ── Albedo ────────────────────────────────────────────────────────────────────
 uniform sampler2D albedo_texture : source_color, hint_default_white;

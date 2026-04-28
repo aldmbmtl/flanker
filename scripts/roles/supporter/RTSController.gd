@@ -10,12 +10,16 @@ const RANGE_CIRCLE_SEGMENTS := 36
 const PLAYER_VISION_RADIUS := 35.0
 const MINION_VISION_RADIUS := 25.0
 
+# Item-drop ping colors
+const COL_PING_WEAPON  := Color(1.0, 0.55, 0.0, 1.0)   # orange — weapon drop
+const COL_PING_HEALTH  := Color(0.0, 0.85, 0.25, 1.0)  # green  — healthpack drop
+
 # Range per tower type (0 = no circle)
 const TYPE_RANGES := {
 	"cannon":      30.0,
 	"mortar":      50.0,
 	"slow":        18.0,
-	"barrier":     0.0,
+	"machinegun":  22.0,
 	"weapon":      0.0,
 	"healthpack":  0.0,
 	"healstation": 4.0,
@@ -143,8 +147,6 @@ func _create_ghost() -> void:
 			root.scale = Vector3(0.4, 0.4, 0.4)
 		"healstation":
 			root.scale = Vector3(0.6, 0.3, 0.6)
-		"barrier":
-			root.scale = Vector3(0.8, 1.4, 0.4)
 		_:
 			pass  # default scale
 
@@ -512,6 +514,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
 		_fire_ping(event.position)
 
+func _get_item_ping_color(item_type: String) -> Color:
+	if item_type == "weapon":
+		return COL_PING_WEAPON
+	elif item_type == "healthpack":
+		return COL_PING_HEALTH
+	return Color(0.62, 0.0, 1.0, 1.0)  # default purple for other types
+
 func _try_place_item(_screen_pos: Vector2) -> void:
 	# Direct-cast strikes are handled via LauncherHUD targeting, not placement
 	if LauncherDefs.is_direct_cast(_selected_type):
@@ -525,11 +534,17 @@ func _try_place_item(_screen_pos: Vector2) -> void:
 				LobbyManager.spawn_item_visuals.rpc(_ghost_world_pos, _player_team, _selected_type, _selected_subtype, assigned_name)
 				LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
 				LobbyManager.item_spawned.emit(_selected_type, _player_team)
+				if _selected_type in ["weapon", "healthpack"]:
+					LobbyManager.broadcast_ping.rpc(_ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
 		else:
 			LobbyManager.request_place_item.rpc_id(1, _ghost_world_pos, _player_team, _selected_type, _selected_subtype)
+			if _selected_type in ["weapon", "healthpack"]:
+				LobbyManager.request_ping.rpc_id(1, _ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
 	else:
 		if build_system.place_item(_ghost_world_pos, _player_team, _selected_type, _selected_subtype) != "":
 			LobbyManager.item_spawned.emit(_selected_type, _player_team)
+			if _selected_type in ["weapon", "healthpack"]:
+				LobbyManager.ping_received.emit(_ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
 
 func _try_fire_missile(screen_pos: Vector2) -> void:
 	if _launcher_hud == null or not is_instance_valid(_launcher_hud):

@@ -32,6 +32,11 @@ var source: String       = "unknown"
 var shooter_team: int    = -1
 var shooter_peer_id: int = -1   # -1 = minion / unknown; set for player-fired projectiles
 
+## RID of the node that spawned this projectile (e.g. the firing tower).
+## Set by the spawner before add_child. Excluded from the raycast so the
+## projectile never immediately hits its own spawn point.
+var spawner_rid: RID = RID()
+
 # ── Movement ──────────────────────────────────────────────────────────────────
 var max_lifetime: float  = 3.0
 var gravity: float       = 18.0   # set 0.0 for non-ballistic projectiles (rockets, missiles)
@@ -55,6 +60,8 @@ func _process(delta: float) -> void:
 
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(prev_pos, new_pos)
+	if spawner_rid.is_valid():
+		query.exclude = [spawner_rid]
 	var result: Dictionary = space.intersect_ray(query)
 
 	if not result.is_empty():

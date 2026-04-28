@@ -91,3 +91,17 @@ func set_player_reserve_ammo(peer_id: int, reserve: int, weapon_type: String) ->
 	player_reserve_ammo[peer_id] = reserve
 	player_weapon_type[peer_id] = weapon_type
 	player_ammo_changed.emit(peer_id, reserve)
+
+func reset() -> void:
+	game_seed = 0
+	time_seed = -1
+	player_healths.clear()
+	player_teams.clear()
+	player_dead.clear()
+	respawn_countdown.clear()
+	player_reserve_ammo.clear()
+	player_weapon_type.clear()
+	# Restore default spawn positions
+	player_spawn_positions.clear()
+	player_spawn_positions[0] = Vector3(0.0, 0.0, 82.0)
+	player_spawn_positions[1] = Vector3(0.0, 0.0, -82.0)

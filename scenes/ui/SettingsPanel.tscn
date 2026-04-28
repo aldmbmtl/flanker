@@ -198,6 +198,23 @@ theme = ExtResource("2")
 custom_minimum_size = Vector2(110, 0)
 selected = 1
 
+[node name="TreeShadowRow" type="HBoxContainer" parent="Card/VBox/ShadowSection/ShadowVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TreeShadowLabel" type="Label" parent="Card/VBox/ShadowSection/ShadowVBox/TreeShadowRow"]
+layout_mode = 2
+text = "Tree shadows"
+vertical_alignment = 1
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+size_flags_horizontal = 3
+
+[node name="TreeShadowOption" type="OptionButton" parent="Card/VBox/ShadowSection/ShadowVBox/TreeShadowRow"]
+layout_mode = 2
+theme = ExtResource("2")
+custom_minimum_size = Vector2(110, 0)
+selected = 1
+
 [node name="GameSection" type="PanelContainer" parent="Card/VBox"]
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_section")
@@ -247,6 +264,7 @@ text = "RESTORE DEFAULTS"
 [connection signal="toggled" from="Card/VBox/DoFSection/DoFVBox/DoFToggle" to="." method="_on_dof_toggle_toggled"]
 [connection signal="value_changed" from="Card/VBox/DoFSection/DoFVBox/DoFStrengthRow/DoFSlider" to="." method="_on_dof_slider_value_changed"]
 [connection signal="item_selected" from="Card/VBox/ShadowSection/ShadowVBox/ShadowRow/ShadowOption" to="." method="_on_shadow_option_item_selected"]
+[connection signal="item_selected" from="Card/VBox/ShadowSection/ShadowVBox/TreeShadowRow/TreeShadowOption" to="." method="_on_tree_shadow_option_item_selected"]
 [connection signal="value_changed" from="Card/VBox/GameSection/GameVBox/LivesRow/LivesSpin" to="." method="_on_lives_spin_value_changed"]
 [connection signal="pressed" from="Card/VBox/BackButton" to="." method="_on_back_pressed"]
 [connection signal="pressed" from="Card/VBox/RestoreDefaultsButton" to="." method="_on_restore_defaults_pressed"]

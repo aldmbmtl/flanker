@@ -27,3 +27,7 @@ func spend_points(team: int, amount: int) -> bool:
 func sync_from_server(blue: int, red: int) -> void:
 	team_points[0] = blue
 	team_points[1] = red
+
+func reset() -> void:
+	team_points[0] = 75
+	team_points[1] = 75

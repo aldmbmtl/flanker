@@ -74,11 +74,24 @@ class TestTreePlacer extends Node3D:
 		return mmi
 
 
+# Mirrors the cast_shadow selection logic from TreePlacer._commit_multimeshes.
+class ShadowTestHelper extends Node3D:
+	func resolve_cast_shadow(tsd: int, band: int) -> int:
+		if tsd == 1 and band == 0:
+			return GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		elif tsd == 2:
+			return GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		return GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+
 var tp: TestTreePlacer
+var shadow_helper: ShadowTestHelper
 
 func before_each() -> void:
 	tp = TestTreePlacer.new()
 	add_child_autofree(tp)
+	shadow_helper = ShadowTestHelper.new()
+	add_child_autofree(shadow_helper)
 
 
 # ── Default wind parameter sanity ─────────────────────────────────────────────
@@ -257,3 +270,36 @@ func test_process_with_no_mmis_does_not_crash() -> void:
 	# _wind_mmis is empty by default — simulate_process must be a clean no-op.
 	tp.simulate_process(1.0)
 	assert_true(true, "simulate_process with empty _wind_mmis must not crash")
+
+
+# ── Tree shadow distance applied in _commit_multimeshes ───────────────────────
+
+func test_shadow_off_near_band_is_off() -> void:
+	var result: int = shadow_helper.resolve_cast_shadow(0, 0)
+	assert_eq(result, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+		"tsd=Off, near band → SHADOW_CASTING_SETTING_OFF")
+
+func test_shadow_off_far_band_is_off() -> void:
+	var result: int = shadow_helper.resolve_cast_shadow(0, 1)
+	assert_eq(result, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+		"tsd=Off, far band → SHADOW_CASTING_SETTING_OFF")
+
+func test_shadow_close_near_band_is_on() -> void:
+	var result: int = shadow_helper.resolve_cast_shadow(1, 0)
+	assert_eq(result, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+		"tsd=Close, near band → SHADOW_CASTING_SETTING_ON")
+
+func test_shadow_close_far_band_is_off() -> void:
+	var result: int = shadow_helper.resolve_cast_shadow(1, 1)
+	assert_eq(result, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+		"tsd=Close, far band → SHADOW_CASTING_SETTING_OFF")
+
+func test_shadow_far_near_band_is_on() -> void:
+	var result: int = shadow_helper.resolve_cast_shadow(2, 0)
+	assert_eq(result, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+		"tsd=Far, near band → SHADOW_CASTING_SETTING_ON")
+
+func test_shadow_far_far_band_is_on() -> void:
+	var result: int = shadow_helper.resolve_cast_shadow(2, 1)
+	assert_eq(result, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+		"tsd=Far, far band → SHADOW_CASTING_SETTING_ON")

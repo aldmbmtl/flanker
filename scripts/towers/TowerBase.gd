@@ -9,14 +9,21 @@
 ##      are handled here with no extra wiring.
 ##
 ## Overridable hooks:
-##   _build_visuals()       — override for procedural mesh towers; default loads model_scene
+##   _build_visuals()       — override for procedural mesh towers; default loads component models
 ##   _do_attack(target)     — override for non-projectile attacks (slow pulse, heal, raycast)
 ##                            default spawns projectile_scene and calls configure() on it
 ##
-## Multi-part models with rotating turrets:
-##   Set turret_node_name to the name of the child node to rotate toward the target.
-##   The node is found via find_child() so it may be at any depth in the hierarchy.
+## Composite model system:
+##   Towers are assembled from up to three component GLBs:
+##     model_base     — static body/base (never rotates)
+##     model_turret   — turret head, parented to _turret_pivot which yaws toward target
+##     model_attachment — optional extra piece co-parented to _turret_pivot (e.g. a barrel)
+##   Each component has its own scale and offset export.
 ##   Place a child node named "FirePoint" at the barrel tip for accurate projectile origin.
+##
+## Backward compatibility:
+##   model_scene / model_scale / model_offset are kept as deprecated exports.
+##   If model_base is null and model_scene is set, model_scene is used as the base.
 
 class_name TowerBase
 extends StaticBody3D
@@ -39,18 +46,43 @@ extends StaticBody3D
 ## Projectile scene to instantiate on attack. null = override _do_attack() instead.
 @export var projectile_scene: PackedScene = null
 
-## Name of child node to rotate toward target each frame. "" = no rotation.
-## Searched recursively via find_child() — may be at any depth in the hierarchy.
-@export var turret_node_name: String = ""
+# ── Composite model exports ───────────────────────────────────────────────────
 
-## Scene (GLB or subscene) to instantiate as the tower model.
-## null = override _build_visuals() to build procedural geometry.
+## Static base / body of the tower. Never rotates.
+@export var model_base: PackedScene = null
+@export var model_base_scale: Vector3 = Vector3.ONE
+@export var model_base_offset: Vector3 = Vector3.ZERO
+
+## Middle section(s) stacked on top of the base (optional). Also static.
+## model_mid_count controls how many times the same GLB is repeated.
+## model_mid_offset is the position of the first repeat.
+## model_mid_step is the per-repeat increment (stacking direction + distance).
+@export var model_mid: PackedScene = null
+@export var model_mid_scale: Vector3 = Vector3.ONE
+@export var model_mid_offset: Vector3 = Vector3.ZERO
+@export var model_mid_count: int = 1
+@export var model_mid_step: Vector3 = Vector3(0.0, 1.0, 0.0)
+
+## Top cap piece placed above all mid sections (optional). Also static.
+@export var model_top: PackedScene = null
+@export var model_top_scale: Vector3 = Vector3.ONE
+@export var model_top_offset: Vector3 = Vector3.ZERO
+
+## Turret head. Parented to _turret_pivot which yaws toward the current target.
+@export var model_turret: PackedScene = null
+@export var model_turret_scale: Vector3 = Vector3.ONE
+## World-space Y height at which the turret pivot sits (relative to tower origin).
+@export var model_turret_offset: Vector3 = Vector3(0.0, 3.0, 0.0)
+
+## Optional attachment (barrel, scope, flag). Co-parented to _turret_pivot — rotates with turret.
+@export var model_attachment: PackedScene = null
+@export var model_attachment_scale: Vector3 = Vector3.ONE
+@export var model_attachment_offset: Vector3 = Vector3.ZERO
+
+# ── Deprecated single-model exports (backward compat — use model_base instead) ──
+## @deprecated Use model_base. If model_base is null, model_scene is used as base.
 @export var model_scene: PackedScene = null
-
-## Scale applied to the instantiated model_scene root.
 @export var model_scale: Vector3 = Vector3.ONE
-
-## Local position offset applied to the instantiated model_scene root.
 @export var model_offset: Vector3 = Vector3.ZERO
 
 ## Y offset above global_position used as fire origin when no "FirePoint" child exists.
@@ -68,8 +100,12 @@ var _health: float = 0.0
 var _dead: bool = false
 var _attack_timer: float = 0.0
 var _area: Area3D = null
-var _mesh_inst: MeshInstance3D = null   # first mesh in model subtree; used for hit flash
-var _turret_node: Node3D = null          # cached ref to the turret rotation node
+## All MeshInstance3D nodes across all components — used for hit-flash.
+var _all_mesh_insts: Array[MeshInstance3D] = []
+## First mesh in the subtree; kept for backward compat with subclasses that read _mesh_inst.
+var _mesh_inst: MeshInstance3D = null
+## Pivot node that yaws toward the current target. Created by _build_visuals().
+var _turret_pivot: Node3D = null
 var _killer_peer_id: int = -1
 var _hit_flash_tween: Tween = null
 var _hit_overlay_mat: StandardMaterial3D = null
@@ -83,10 +119,6 @@ func setup(p_team: int) -> void:
 
 	_build_visuals()
 
-	# Cache turret node
-	if turret_node_name != "":
-		_turret_node = find_child(turret_node_name, true, false) as Node3D
-
 	# Build detection area entirely in code — no .tscn dependency
 	if attack_range > 0.0:
 		_build_detection_area()
@@ -95,29 +127,86 @@ func setup(p_team: int) -> void:
 
 # ── Visual construction ───────────────────────────────────────────────────────
 
-## Default: instantiate model_scene, apply scale/offset, cache first MeshInstance3D.
-## Override for procedural geometry (no model_scene).
+## Default: assemble tower from component GLBs (model_base, model_mid, model_turret,
+## model_attachment). Falls back to legacy model_scene if model_base is null.
+## Override entirely for fully procedural geometry (see LauncherTower).
 func _build_visuals() -> void:
-	if model_scene == null:
-		return
-	var root: Node3D = model_scene.instantiate() as Node3D
-	if root == null:
-		push_error("TowerBase(%s): model_scene.instantiate() returned null" % tower_type)
-		return
-	root.scale = model_scale
-	root.position = model_offset
-	add_child(root)
+	# Determine effective base scene (new or legacy)
+	var base_scene: PackedScene = model_base if model_base != null else model_scene
+	var base_scale: Vector3    = model_base_scale if model_base != null else model_scale
+	var base_offset: Vector3   = model_base_offset if model_base != null else model_offset
 
-	# Cache first MeshInstance3D in the subtree for hit-flash
-	var meshes: Array = find_children("*", "MeshInstance3D", true, false)
-	if meshes.size() > 0:
-		_mesh_inst = meshes[0] as MeshInstance3D
-		_add_hit_overlay(_mesh_inst)
+	# ── Base ──────────────────────────────────────────────────────────────────
+	if base_scene != null:
+		var root: Node3D = base_scene.instantiate() as Node3D
+		if root == null:
+			push_error("TowerBase(%s): model_base instantiate() returned null" % tower_type)
+		else:
+			root.scale    = base_scale
+			root.position = base_offset
+			add_child(root)
+			_collect_meshes(root)
 
-## Prepares the hit-flash overlay material — does NOT apply it to the mesh yet.
-## Applied only during _flash_hit() so the GLB's own material shows at rest.
-func _add_hit_overlay(mi: MeshInstance3D) -> void:
-	if mi == null or mi.mesh == null:
+	# ── Mid section(s) — repeated model_mid_count times ─────────────────────────
+	if model_mid != null:
+		for i in model_mid_count:
+			var mid: Node3D = model_mid.instantiate() as Node3D
+			if mid != null:
+				mid.scale    = model_mid_scale
+				mid.position = model_mid_offset + model_mid_step * i
+				add_child(mid)
+				_collect_meshes(mid)
+
+	# ── Top cap ───────────────────────────────────────────────────────────────
+	if model_top != null:
+		var top: Node3D = model_top.instantiate() as Node3D
+		if top != null:
+			top.scale    = model_top_scale
+			top.position = model_top_offset
+			add_child(top)
+			_collect_meshes(top)
+
+	# ── Turret pivot (always created so subclasses and _process can rely on it) ─
+	_turret_pivot = Node3D.new()
+	_turret_pivot.name = "TurretPivot"
+	_turret_pivot.position = model_turret_offset
+	add_child(_turret_pivot)
+
+	# ── Turret head ───────────────────────────────────────────────────────────
+	if model_turret != null:
+		var turret: Node3D = model_turret.instantiate() as Node3D
+		if turret != null:
+			turret.scale    = model_turret_scale
+			turret.position = Vector3.ZERO
+			_turret_pivot.add_child(turret)
+			_collect_meshes(turret)
+
+	# ── Attachment (co-rotates with turret) ───────────────────────────────────
+	if model_attachment != null:
+		var att: Node3D = model_attachment.instantiate() as Node3D
+		if att != null:
+			att.scale    = model_attachment_scale
+			att.position = model_attachment_offset
+			_turret_pivot.add_child(att)
+			_collect_meshes(att)
+
+	# Cache first mesh for backward compat
+	if _all_mesh_insts.size() > 0:
+		_mesh_inst = _all_mesh_insts[0]
+
+	_build_hit_overlay()
+
+## Collect all MeshInstance3D nodes from a subtree into _all_mesh_insts.
+func _collect_meshes(root: Node3D) -> void:
+	for m in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		if mi != null and mi.mesh != null:
+			_all_mesh_insts.append(mi)
+
+## Prepares the hit-flash overlay material — does NOT apply it to any mesh yet.
+## Applied only during _flash_hit() so GLB materials show at rest.
+func _build_hit_overlay() -> void:
+	if _all_mesh_insts.is_empty():
 		return
 	var mat := StandardMaterial3D.new()
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -126,6 +215,11 @@ func _add_hit_overlay(mi: MeshInstance3D) -> void:
 	mat.emission = Color(1.0, 0.2, 0.2, 1.0)
 	mat.emission_energy_multiplier = 3.0
 	_hit_overlay_mat = mat
+
+## Kept for backward compat — subclasses that called _add_hit_overlay(mi) directly.
+## Delegates to _build_hit_overlay(); mi parameter is ignored.
+func _add_hit_overlay(_mi: MeshInstance3D) -> void:
+	_build_hit_overlay()
 
 # ── Detection area ────────────────────────────────────────────────────────────
 
@@ -156,12 +250,12 @@ func _process(delta: float) -> void:
 	var target: Node3D = _find_target()
 	if target == null:
 		return
-	# Rotate turret toward target before firing
-	if _turret_node != null and is_instance_valid(_turret_node):
+	# Yaw turret pivot toward target (horizontal only — no barrel tilt)
+	if _turret_pivot != null and is_instance_valid(_turret_pivot) and model_turret != null:
 		var look_pos: Vector3 = target.global_position
-		look_pos.y = _turret_node.global_position.y   # keep level on y-axis
-		if look_pos.distance_squared_to(_turret_node.global_position) > 0.01:
-			_turret_node.look_at(look_pos, Vector3.UP)
+		look_pos.y = _turret_pivot.global_position.y
+		if look_pos.distance_squared_to(_turret_pivot.global_position) > 0.01:
+			_turret_pivot.look_at(look_pos, Vector3.UP)
 	_do_attack(target)
 	_attack_timer = attack_interval
 
@@ -261,6 +355,7 @@ func _do_attack(target: Node3D) -> void:
 		return
 	var fire_pos: Vector3 = get_fire_position()
 	proj.set("shooter_team", team)
+	proj.set("spawner_rid", get_rid())
 	proj.position = fire_pos   # set before add_child so _ready() sees origin
 	get_tree().root.get_child(0).add_child(proj)
 
@@ -325,19 +420,24 @@ func _die() -> void:
 # ── Hit flash ─────────────────────────────────────────────────────────────────
 
 func _flash_hit() -> void:
-	if _mesh_inst == null or not is_instance_valid(_mesh_inst):
-		return
-	if _hit_overlay_mat == null:
+	if _all_mesh_insts.is_empty() or _hit_overlay_mat == null:
 		return
 	if _hit_flash_tween and _hit_flash_tween.is_valid():
 		_hit_flash_tween.kill()
-	# Apply overlay, tween emission down, then clear the override so base mat returns
-	for i in _mesh_inst.mesh.get_surface_count():
-		_mesh_inst.set_surface_override_material(i, _hit_overlay_mat)
+	# Reset emission energy before applying (previous tween may have left it at 0)
+	_hit_overlay_mat.emission_energy_multiplier = 3.0
+	# Apply overlay to all mesh surfaces
+	for mi in _all_mesh_insts:
+		if not is_instance_valid(mi) or mi.mesh == null:
+			continue
+		for i in mi.mesh.get_surface_count():
+			mi.set_surface_override_material(i, _hit_overlay_mat)
 	_hit_flash_tween = create_tween()
 	_hit_flash_tween.tween_property(_hit_overlay_mat, "emission_energy_multiplier", 0.0, 0.3)
 	_hit_flash_tween.tween_callback(func() -> void:
-		if is_instance_valid(_mesh_inst):
-			for i in _mesh_inst.mesh.get_surface_count():
-				_mesh_inst.set_surface_override_material(i, null)
+		for mi in _all_mesh_insts:
+			if not is_instance_valid(mi) or mi.mesh == null:
+				continue
+			for i in mi.mesh.get_surface_count():
+				mi.set_surface_override_material(i, null)
 	)

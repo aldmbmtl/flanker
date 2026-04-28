@@ -1,18 +1,18 @@
 extends ProjectileBase
 
-const MAX_SPEED            := 49.0
-const MIN_SPEED  : float   = 3.0   # forward floor — keeps rocket clear of terrain while swirling
-const RAMP_TIME  : float   = 1.2   # seconds to reach full speed
+const MAX_SPEED            := 55.0
+const MIN_SPEED  : float   = 20.0  # forward floor — rocket leaves muzzle fast, player can't outrun it
+const RAMP_TIME  : float   = 0.6   # seconds to reach full speed
 const RAMP_POWER : float   = 4.0   # quartic curve — near-zero for most of ramp, then snaps hard
 const SPLASH_RADIUS        := 8.0
 const SPLASH_DAMAGE        := 80.0
 const TREE_DESTROY_RADIUS  := 8.0
 
 # ── Swirl constants ───────────────────────────────────────────────────────────
-const SWIRL_AMP   : float = 10.0  # peak lateral speed (m/s) — wild chaotic launch
+const SWIRL_AMP   : float = 2.5  # slight wobble out of barrel — won't throw shots wide
 const SWIRL_HZ    : float = 1.0   # full rotations per second (~1 spiral visible)
-const SWIRL_DECAY : float = 2.5   # e-fold damping rate — locks on quickly
-const SWIRL_START_DIST : float = 3.0   # units of straight flight before spiral begins
+const SWIRL_DECAY : float = 4.0   # decays quickly so rocket locks on fast
+const SWIRL_START_DIST : float = 2.0   # units of straight flight before spiral begins
 
 const SND_LAUNCH    := "res://assets/kenney_sci-fi-sounds/Audio/thrusterFire_000.ogg"
 const SND_EXPLOSION := "res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_003.ogg"
@@ -24,6 +24,7 @@ var _smoke_trail: GPUParticles3D = null
 var _initial_dir    : Vector3 = Vector3.ZERO
 var _swirl_axis1    : Vector3 = Vector3.ZERO
 var _swirl_axis2    : Vector3 = Vector3.ZERO
+var _swirl_phase    : float   = 0.0     # random per-shot offset so no two spirals look identical
 var _forward_dist   : float   = 0.0    # cumulative forward distance traveled
 var _swirl_start_age: float   = -1.0   # age when swirl activated; -1 = not yet
 
@@ -45,6 +46,7 @@ func _ready() -> void:
 		var up: Vector3 = Vector3.UP if abs(_initial_dir.dot(Vector3.UP)) < 0.9 else Vector3.RIGHT
 		_swirl_axis1 = _initial_dir.cross(up).normalized()
 		_swirl_axis2 = _swirl_axis1.cross(_initial_dir).normalized()
+		_swirl_phase = randf() * TAU
 
 # ── Core loop override ────────────────────────────────────────────────────────
 # Identical to ProjectileBase._process except collision_mask excludes layer 2
@@ -92,7 +94,7 @@ func _after_move() -> void:
 			_swirl_start_age = _age
 		var swirl_age: float = _age - _swirl_start_age
 		var swirl_amp: float = SWIRL_AMP * exp(-swirl_age * SWIRL_DECAY)
-		var angle: float     = swirl_age * SWIRL_HZ * TAU
+		var angle: float     = swirl_age * SWIRL_HZ * TAU + _swirl_phase
 		swirl = (_swirl_axis1 * cos(angle) + _swirl_axis2 * sin(angle)) * swirl_amp
 
 	velocity = _initial_dir * fwd_speed + swirl

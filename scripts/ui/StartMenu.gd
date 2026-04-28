@@ -3,10 +3,14 @@ extends Control
 signal start_game
 signal quit_game
 
-const LobbyScene    := preload("res://scenes/ui/Lobby.tscn")
-const TerrainScript := preload("res://scripts/TerrainGenerator.gd")
-const LaneVizScript := preload("res://scripts/LaneVisualizer.gd")
-const TreeScript    := preload("res://scripts/TreePlacer.gd")
+const LobbyScene          := preload("res://scenes/ui/Lobby.tscn")
+const TerrainScript       := preload("res://scripts/TerrainGenerator.gd")
+const LaneVizScript       := preload("res://scripts/LaneVisualizer.gd")
+const TreeScript          := preload("res://scripts/TreePlacer.gd")
+const FencePlacerScript   := preload("res://scripts/FencePlacer.gd")
+const PortalGoalScene     := preload("res://scenes/PortalGoal.tscn")
+const MenuSimScript       := preload("res://scripts/ui/MenuSimulation.gd")
+const WindParticlesScript  := preload("res://scripts/WindParticles.gd")
 
 var _lobby: Node
 var _join_overlay: Control
@@ -31,7 +35,12 @@ const LABEL_COLOR     := Color(0.55, 0.45, 0.35, 1.0)
 func _ready() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	_build_dialogs()
-	_spawn_menu_world()
+	# Only spawn the background simulation when we are the root scene.
+	# When Main adds us as a child (singleplayer flow) it calls _on_start_game()
+	# immediately — spawning a world here would overwrite GameSync.game_seed and
+	# LaneData with a random menu seed, diverging the terrain from Main's world.
+	if get_parent() is Window:
+		_spawn_menu_world()
 	_graphics_panel = $SettingsPanelInstance
 	_graphics_panel.back_pressed.connect(_on_graphics_settings_back)
 
@@ -315,6 +324,8 @@ func _on_settings_confirmed() -> void:
 		map_seed = randi_range(1, 2147483647)
 	GameSettings.lives_per_team = int(_settings_lives_spin.value)
 	GameSettings.save_settings()
+	_stop_menu_simulation()
+	_reset_autoloads_for_new_game()
 	GameSync.time_seed = TIME_VALUES[_settings_time_idx]
 	GameSync.game_seed = map_seed
 	LaneData.regenerate_for_new_game()
@@ -323,10 +334,32 @@ func _on_settings_confirmed() -> void:
 func _spawn_menu_world() -> void:
 	# Random seed each launch — different view every time
 	GameSync.game_seed = randi_range(1, 2147483647)
+	LaneData.regenerate_for_new_game()
 
 	var world: Node3D = $World3D
 
-	# Terrain (StaticBody3D, builds HeightMapShape3D + mesh in _ready)
+	# Replace the camera's environment with the day (noon) one.
+	# Camera3D.environment takes priority over WorldEnvironment nodes, so we
+	# must swap it here rather than adding a separate WorldEnvironment.
+	# Duplicate so we don't mutate the shared asset used by the actual game.
+	var day_env: Environment = load("res://assets/day_environment.tres").duplicate()
+	day_env.fog_density *= 0.06
+	day_env.volumetric_fog_density *= 0.06
+	var camera: Camera3D = $MenuCamera
+	camera.environment = day_env
+
+	# Noon sun — matches Main.gd time_seed=1 (noon) settings exactly
+	var sun := DirectionalLight3D.new()
+	sun.name = "SunLight"
+	sun.light_color = Color(1.0, 0.95, 0.85)
+	sun.light_energy = 1.0
+	sun.rotation_degrees = Vector3(-50.0, 0.0, 0.0)
+	sun.shadow_enabled = true
+	sun.light_volumetric_fog_energy = 0.8
+	sun.shadow_blur = 0.8
+	world.add_child(sun)
+
+	# Terrain (StaticBody3D, builds HeightMapShape3D + mesh in _ready via call_deferred)
 	var terrain := StaticBody3D.new()
 	terrain.set_script(TerrainScript)
 	terrain.name = "Terrain"
@@ -346,8 +379,66 @@ func _spawn_menu_world() -> void:
 	trees.set("menu_density", 0.1)
 	world.add_child(trees)
 
-	# Reset seed to 0 so multiplayer seed guard works correctly if RPC is missed
-	GameSync.game_seed = 0
+	# Kick off the async coroutine — does not block _ready()
+	_start_simulation_when_ready(terrain, trees, world)
+
+# Coroutine: waits for terrain collision AND trees to finish (guarded by
+# generation_done so we never hang if a signal already fired), then waits
+# one physics frame so HeightMapShape3D is registered before raycasts run.
+func _start_simulation_when_ready(terrain: Node, trees: Node, world: Node3D) -> void:
+	if not terrain.get("generation_done"):
+		await terrain.done
+	if not trees.get("generation_done"):
+		await trees.done
+	await get_tree().physics_frame
+	_on_menu_world_ready(trees, world)
+
+func _on_menu_world_ready(trees: Node, world: Node3D) -> void:
+	# Fences + torches along lane edges
+	var fence := Node3D.new()
+	fence.set_script(FencePlacerScript)
+	fence.name = "FencePlacer"
+	world.add_child(fence)
+
+	# Portals — one per lane per team at lane endpoints.
+	# body_entered is disconnected immediately after _ready() connects it so
+	# the menu simulation never calls TeamLives.lose_life() on scoring.
+	for lane_i in range(3):
+		var pts: Array = LaneData.get_lane_points(lane_i)
+		if pts.is_empty():
+			continue
+		var red_end: Vector2 = pts.back() as Vector2
+		var red_portal: Area3D = PortalGoalScene.instantiate()
+		red_portal.team   = 1
+		red_portal.lane_i = lane_i
+		red_portal.name   = "PortalRed_%d" % lane_i
+		world.add_child(red_portal)
+		red_portal.global_position = Vector3(red_end.x, 0.5, red_end.y)
+		red_portal.body_entered.disconnect(red_portal._on_body_entered)
+
+		var blue_end: Vector2 = pts.front() as Vector2
+		var blue_portal: Area3D = PortalGoalScene.instantiate()
+		blue_portal.team   = 0
+		blue_portal.lane_i = lane_i
+		blue_portal.name   = "PortalBlue_%d" % lane_i
+		world.add_child(blue_portal)
+		blue_portal.global_position = Vector3(blue_end.x, 0.5, blue_end.y)
+		blue_portal.body_entered.disconnect(blue_portal._on_body_entered)
+
+	# Wind particles — bioluminescent ambient particles riding the wind
+	var wind := Node3D.new()
+	wind.set_script(WindParticlesScript)
+	wind.name = "WindParticles"
+	world.add_child(wind)
+	wind.set("_tree_placer", trees)
+	# No player reference needed — WindParticles gracefully handles null player
+
+	# Battle simulation — minions + towers
+	var sim := Node.new()
+	sim.set_script(MenuSimScript)
+	sim.name = "MenuSimulation"
+	world.add_child(sim)
+	sim.start(world)
 
 func _on_host_pressed() -> void:
 	_host_overlay.visible = true
@@ -379,6 +470,10 @@ func _on_host_confirmed(overlay: Control) -> void:
 		_show_connection_status("Failed to host: port may be in use")
 		return
 
+	# Stop simulation synchronously so no more autoload mutations happen
+	_stop_menu_simulation()
+	# Reset sim-dirtied autoload state before entering the lobby
+	_reset_autoloads_for_new_game()
 	overlay.visible = false
 	# Host registers itself directly — no RPC needed, peer id 1 is always the server
 	LobbyManager.register_player_local(1, "Host")
@@ -397,6 +492,10 @@ func _on_join_confirmed(overlay: Control) -> void:
 
 	var port: int = port_text.to_int() if port_text.is_valid_int() else NetworkManager.DEFAULT_PORT
 
+	# Stop simulation synchronously so no more autoload mutations happen
+	_stop_menu_simulation()
+	# Reset sim-dirtied autoload state before joining
+	_reset_autoloads_for_new_game()
 	overlay.visible = false
 	_show_connection_status("Connecting...")
 	var err: int = NetworkManager.join_game(address, port)
@@ -427,3 +526,27 @@ func _show_connection_status(msg: String) -> void:
 	var tween := create_tween()
 	tween.tween_interval(3.0)
 	tween.tween_property(status, "visible", false, 0.0)
+
+func _stop_menu_simulation() -> void:
+	# Disable and free all menu minions/towers without running _die() logic —
+	# prevents further TeamData/LevelSystem mutations before the autoload reset.
+	var world: Node3D = get_node_or_null("World3D")
+	if world == null:
+		return
+	for child in world.get_children():
+		if child.name.begins_with("MenuMinion_") or child.is_in_group("towers"):
+			child.set_process(false)
+			child.set_physics_process(false)
+			child.queue_free()
+	var sim: Node = world.get_node_or_null("MenuSimulation")
+	if sim != null:
+		sim.set_process(false)
+		sim.queue_free()
+
+func _reset_autoloads_for_new_game() -> void:
+	# Clear all state dirtied by the menu simulation so every new game starts clean.
+	GameSync.reset()
+	LobbyManager.reset()
+	TeamData.reset()
+	TeamLives.reset()
+	LevelSystem.clear_all()

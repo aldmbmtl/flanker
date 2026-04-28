@@ -7,7 +7,13 @@ CLIENT_LOG := /tmp/flankers_client.log
 TEST_LOG      := /tmp/flankers_tests.log
 COVERAGE_LOG  := /tmp/flankers_coverage.txt
 
-.PHONY: run stop restart logs host client hlogs clogs clean-symlink clean build test coverage
+GUT_VERSION  := v9.6.0
+GUT_ZIP_URL  := https://github.com/bitwes/Gut/zipball/$(GUT_VERSION)
+GUT_ZIP      := /tmp/gut_$(GUT_VERSION).zip
+GUT_DEST     := $(PROJECT)/addons/gut
+GUT_SENTINEL := $(GUT_DEST)/gut_cmdln.gd
+
+.PHONY: run stop restart logs host client hlogs clogs clean-symlink clean build test coverage install-gut
 
 .DEFAULT_GOAL := restart
 
@@ -51,11 +57,24 @@ clean-symlink:
 clean:
 	find $(PROJECT)/scripts -name "*.uid" -delete
 
-test:
+install-gut:
+	@if [ -f "$(GUT_SENTINEL)" ]; then \
+		echo "GUT already installed — skipping."; \
+	else \
+		echo "Downloading GUT $(GUT_VERSION)..."; \
+		curl -sL "$(GUT_ZIP_URL)" -o "$(GUT_ZIP)"; \
+		mkdir -p "$(GUT_DEST)"; \
+		unzip -q "$(GUT_ZIP)" -d /tmp/gut_extract; \
+		cp -r /tmp/gut_extract/*/addons/gut/. "$(GUT_DEST)/"; \
+		rm -rf /tmp/gut_extract "$(GUT_ZIP)"; \
+		echo "GUT $(GUT_VERSION) installed at $(GUT_DEST)."; \
+	fi
+
+test: install-gut
 	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1
 	$(GODOT) --headless -s addons/gut/gut_cmdln.gd --path $(PROJECT) -gconfig=.gutconfig.json 2>&1 | tee $(TEST_LOG)
 
-coverage:
+coverage: install-gut
 	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1
 	$(GODOT) --headless -s addons/gut/gut_cmdln.gd --path $(PROJECT) -gconfig=.gutconfig.coverage.json 2>&1 | tee $(TEST_LOG)
 	@echo ""

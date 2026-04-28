@@ -64,6 +64,25 @@ var generation_done: bool = false
 # Spatial frequency of the travelling wave: smaller = longer wavelength (more natural).
 @export var wave_scale: float           = 0.05
 
+# ── Wind spike (random large gusts layered on top of the base rhythm) ─────────
+# Maximum shader strength reached at the peak of a spike.
+@export var wind_strength_peak: float           = 0.16
+# Seconds between random spike events (randomised in this range each time).
+@export var wind_gust_spike_min_interval: float = 8.0
+@export var wind_gust_spike_max_interval: float = 22.0
+# Rate at which the spike magnitude decays back to zero (units per second).
+@export var wind_gust_spike_decay: float        = 2.5
+
+# Rate at which _gust_spike ramps UP to the target (units per second).
+# Lower = slower attack = smoother onset. ~1.2 gives a ~0.8s build-up.
+@export var wind_gust_spike_attack: float       = 1.2
+
+# Current spike magnitude [0..1]; ramps up toward _gust_target, decays back to 0.
+var _gust_spike: float       = 0.0
+var _gust_target: float      = 0.0
+# Absolute time (seconds) at which the next spike fires.
+var _next_spike_time: float  = 0.0
+
 # All live MMIs that have a wind ShaderMaterial applied — updated each _process.
 var _wind_mmis: Array[MultiMeshInstance3D] = []
 
@@ -94,18 +113,42 @@ func _ready() -> void:
 	_generate_random_clearings()
 	await _place_trees()
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	var t: float = Time.get_ticks_msec() / 1000.0
+
+	# ── Random spike trigger ──────────────────────────────────────────────────
+	# Set target to 1.0; spike ramps up smoothly then decays — no snap.
+	if t >= _next_spike_time:
+		_gust_target = 1.0
+		_next_spike_time = t + randf_range(wind_gust_spike_min_interval, wind_gust_spike_max_interval)
+	# Ramp up toward target at attack rate, then decay back to zero.
+	if _gust_spike < _gust_target:
+		_gust_spike = minf(_gust_target, _gust_spike + wind_gust_spike_attack * delta)
+	else:
+		_gust_spike = maxf(0.0, _gust_spike - wind_gust_spike_decay * delta)
+		if _gust_spike <= 0.0:
+			_gust_target = 0.0
+
 	if _wind_mmis.is_empty():
 		return
-	# Slow sine oscillation creates the feel of gusts building and fading.
-	var t: float = Time.get_ticks_msec() / 1000.0
+
+	# ── Base sine rhythm + spike combined ────────────────────────────────────
 	var gust_factor: float = sin(t * wind_gust_cycle_speed) * 0.5 + 0.5
-	var current_strength: float = wind_strength_base + wind_strength_gust * gust_factor
+	var current_strength: float = wind_strength_base \
+		+ wind_strength_gust * gust_factor \
+		+ (wind_strength_peak - wind_strength_base) * _gust_spike
 	for mmi in _wind_mmis:
 		if is_instance_valid(mmi):
 			var mat: ShaderMaterial = mmi.material_override as ShaderMaterial
 			if mat:
 				mat.set_shader_parameter("wind_strength", current_strength)
+
+# Returns a normalised [0..1] wind intensity for external consumers (e.g. WindParticles).
+# Blends 40 % base sine rhythm with 60 % spike so particles react strongly to gusts.
+func get_wind_intensity() -> float:
+	var t: float = Time.get_ticks_msec() / 1000.0
+	var base: float = sin(t * wind_gust_cycle_speed) * 0.5 + 0.5
+	return clampf(base * 0.4 + _gust_spike * 0.6, 0.0, 1.0)
 
 func _find_terrain() -> StaticBody3D:
 	if has_node("/root/Main/World/Terrain"):
@@ -272,7 +315,14 @@ func _commit_multimeshes(tree_scenes: Array[PackedScene]) -> void:
 
 			var mmi := MultiMeshInstance3D.new()
 			mmi.multimesh = mm
-			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			# tree_shadow_distance: 0=Off, 1=Close (near band only), 2=Far (both bands)
+			var tsd: int = GraphicsSettings.tree_shadow_distance
+			var cast: int = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			if tsd == 1 and band == 0:
+				cast = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			elif tsd == 2:
+				cast = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			mmi.cast_shadow = cast
 			mmi.visibility_range_end = BAND_VIS_END[band]
 			mmi.visibility_range_end_margin = 10.0
 			add_child(mmi)

@@ -785,21 +785,36 @@ func _rpc_game_over(winner_team: int) -> void:
 
 # ── Ping system ───────────────────────────────────────────────────────────────
 
-signal ping_received(world_pos: Vector3, team: int)
+signal ping_received(world_pos: Vector3, team: int, color: Color)
+
+const _PING_COL_DEFAULT := Color(0.62, 0.0, 1.0, 1.0)  # vivid purple
 
 # Any peer calls this on the server with their world position and team.
 # Server validates team membership then broadcasts to all peers.
+# color defaults to purple so existing callers need no changes.
 @rpc("any_peer", "reliable")
-func request_ping(world_pos: Vector3, team: int) -> void:
+func request_ping(world_pos: Vector3, team: int, color: Color = Color(0.62, 0.0, 1.0, 1.0)) -> void:
 	if not multiplayer.is_server():
 		return
 	var id: int = _sender_id()
 	var info: Dictionary = players.get(id, {})
 	if info.get("team", -1) != team:
 		return
-	broadcast_ping.rpc(world_pos, team)
+	broadcast_ping.rpc(world_pos, team, color)
 
 # Executed on every peer (call_local) — emit signal so HUD / minimap can react.
 @rpc("authority", "call_local", "reliable")
-func broadcast_ping(world_pos: Vector3, team: int) -> void:
-	ping_received.emit(world_pos, team)
+func broadcast_ping(world_pos: Vector3, team: int, color: Color = Color(0.62, 0.0, 1.0, 1.0)) -> void:
+	ping_received.emit(world_pos, team, color)
+
+# Called from Main.leave_game() to wipe all session state before returning
+# to the start menu. Autoload persists across scene changes so we must clear
+# manually — the incoming session must start completely fresh.
+func reset() -> void:
+	players.clear()
+	game_started = false
+	supporter_claimed = { 0: false, 1: false }
+	player_death_counts.clear()
+	ai_supporter_teams.clear()
+	_dirty = false
+	_roles_pending = 0

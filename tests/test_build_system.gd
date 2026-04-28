@@ -48,9 +48,6 @@ func test_cost_cannon() -> void:
 func test_cost_mortar() -> void:
 	assert_eq(bs.get_item_cost("mortar", ""), 35)
 
-func test_cost_barrier() -> void:
-	assert_eq(bs.get_item_cost("barrier", ""), 10)
-
 func test_cost_machinegun() -> void:
 	assert_eq(bs.get_item_cost("machinegun", ""), 40)
 
@@ -94,11 +91,6 @@ func test_spacing_computed_for_cannon() -> void:
 	# cannon attack_range=30; spacing = 30*0.75 = 22.5
 	assert_eq(def["spacing"], 22.5)
 
-func test_spacing_computed_for_barrier_passive() -> void:
-	var def: Dictionary = bs.PLACEABLE_DEFS["barrier"]
-	# barrier attack_range=0 → SPACING_PASSIVE = 3.0
-	assert_eq(def["spacing"], 3.0)
-
 func test_spacing_computed_for_mortar() -> void:
 	var def: Dictionary = bs.PLACEABLE_DEFS["mortar"]
 	# mortar attack_range=50; spacing = 50*0.75 = 37.5
@@ -108,11 +100,11 @@ func test_spacing_computed_for_mortar() -> void:
 # z > 0 is team 0's half; z < 0 is team 1's half.
 
 func test_team0_cannot_place_on_negative_z() -> void:
-	var result: bool = bs.can_place_item(Vector3(0.0, 5.0, -10.0), 0, "barrier")
+	var result: bool = bs.can_place_item(Vector3(0.0, 5.0, -10.0), 0, "cannon")
 	assert_false(result, "Team 0 must not place in team 1's half (z < 0)")
 
 func test_team1_cannot_place_on_positive_z() -> void:
-	var result: bool = bs.can_place_item(Vector3(0.0, 5.0, 10.0), 1, "barrier")
+	var result: bool = bs.can_place_item(Vector3(0.0, 5.0, 10.0), 1, "cannon")
 	assert_false(result, "Team 1 must not place in team 0's half (z > 0)")
 
 func test_unknown_item_type_always_returns_false() -> void:
@@ -122,14 +114,15 @@ func test_unknown_item_type_always_returns_false() -> void:
 
 func test_spacing_blocks_placement_too_close() -> void:
 	_add_fake_tower(Vector3(0.0, 0.0, 50.0), "cannon")
-	# barrier spacing=3; cannon spacing=22.5; effective=22.5; distance=5 < 22.5 → blocked
-	var result: bool = bs.can_place_item(Vector3(0.0, 0.0, 55.0), 0, "barrier")
+	# slow spacing=13.5; cannon spacing=22.5; effective=22.5; distance=5 < 22.5 → blocked
+	var result: bool = bs.can_place_item(Vector3(0.0, 0.0, 55.0), 0, "slow")
 	assert_false(result, "Placement within existing tower's spacing should be rejected")
 
 func test_spacing_allows_placement_far_enough() -> void:
-	_add_fake_tower(Vector3(0.0, 0.0, 10.0), "cannon")
-	# 50 units away > cannon spacing 22.5 → allowed (headless: no physics/lane checks)
-	var result: bool = bs.can_place_item(Vector3(0.0, 0.0, 60.0), 0, "barrier")
+	# x=40 z=40 is >10 units from all lane curves and on team 0's half.
+	# Place fake cannon at same x but z=10; test pos is 30 units away > cannon spacing 22.5
+	_add_fake_tower(Vector3(40.0, 0.0, 10.0), "cannon")
+	var result: bool = bs.can_place_item(Vector3(40.0, 0.0, 40.0), 0, "slow")
 	assert_true(result, "Placement outside all tower spacings should be allowed (headless)")
 
 func test_drop_spacing_check_uses_supporter_drops_group() -> void:
@@ -168,3 +161,62 @@ func test_all_tower_defs_have_spacing_after_ready() -> void:
 		if def.get("is_tower", false):
 			assert_true(def.has("spacing"),
 				"Tower PLACEABLE_DEFS[%s] missing spacing (not computed in _ready?)" % key)
+
+# ── spawn_item_local — attack_range injection from PLACEABLE_DEFS ─────────────
+#
+# spawn_item_local calls get_tree().root.get_node("Main") to add the tower node.
+# We temporarily reparent a fake Main node under root so the call resolves.
+
+func test_spawn_item_local_pushes_attack_range_from_defs() -> void:
+	# Build a fake Main node at the tree root so spawn_item_local can find it.
+	var fake_main := Node.new()
+	fake_main.name = "Main"
+	get_tree().root.add_child(fake_main)
+
+	TeamData.sync_from_server(200, 200)
+
+	# Spawn a cannon — PLACEABLE_DEFS says attack_range = 30.0,
+	# the .tscn previously had 7.5 (now fixed to 30.0 too).
+	# Either way, spawn_item_local must override the node value with 30.0.
+	var node_name: String = bs.spawn_item_local(Vector3(0.0, 5.0, 55.0), 0, "cannon", "")
+	assert_ne(node_name, "", "spawn_item_local should succeed and return a node name")
+
+	var spawned: Node = fake_main.get_node_or_null(node_name)
+	assert_not_null(spawned, "Spawned node should be a child of fake Main")
+
+	if spawned != null:
+		var actual_range = spawned.get("attack_range")
+		assert_almost_eq(float(actual_range), 30.0, 0.001,
+			"attack_range on spawned cannon must equal PLACEABLE_DEFS value (30.0)")
+
+	# Cleanup — remove fake Main so it doesn't leak into other tests.
+	fake_main.queue_free()
+	await get_tree().process_frame
+
+func test_spawn_item_local_pushes_correct_range_for_mortar() -> void:
+	var fake_main := Node.new()
+	fake_main.name = "Main"
+	get_tree().root.add_child(fake_main)
+
+	TeamData.sync_from_server(200, 200)
+
+	var node_name: String = bs.spawn_item_local(Vector3(0.0, 5.0, 55.0), 0, "mortar", "")
+	assert_ne(node_name, "", "mortar spawn should succeed")
+
+	var spawned: Node = fake_main.get_node_or_null(node_name)
+	if spawned != null:
+		var actual_range = spawned.get("attack_range")
+		assert_almost_eq(float(actual_range), 50.0, 0.001,
+			"attack_range on spawned mortar must equal PLACEABLE_DEFS value (50.0)")
+
+	fake_main.queue_free()
+	await get_tree().process_frame
+
+func test_attack_range_defs_match_documented_values() -> void:
+	# Regression guard: if PLACEABLE_DEFS attack_range values drift from the
+	# documented constants in AGENTS.md, this test catches it immediately.
+	assert_almost_eq(float(bs.PLACEABLE_DEFS["cannon"]["attack_range"]),   30.0, 0.001)
+	assert_almost_eq(float(bs.PLACEABLE_DEFS["mortar"]["attack_range"]),   50.0, 0.001)
+	assert_almost_eq(float(bs.PLACEABLE_DEFS["machinegun"]["attack_range"]), 22.0, 0.001)
+	assert_almost_eq(float(bs.PLACEABLE_DEFS["slow"]["attack_range"]),     18.0, 0.001)
+	assert_almost_eq(float(bs.PLACEABLE_DEFS["launcher_missile"]["attack_range"]), 0.0, 0.001)

@@ -1,10 +1,13 @@
-[gd_scene load_steps=3 format=3 uid="uid://slow_tower"]
+[gd_scene load_steps=8 format=3 uid="uid://slow_tower"]
 
 [ext_resource type="Script" path="res://scripts/towers/SlowTowerAI.gd" id="1"]
-[ext_resource type="PackedScene" path="res://assets/kenney_pirate-kit/Models/GLB format/tower-complete-small.glb" id="2"]
+[ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-round-bottom-b.glb" id="2"]
+[ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-round-middle-a.glb" id="3"]
+[ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-round-top-a.glb" id="4"]
+[ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-round-crystals.glb" id="5"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_1"]
-size = Vector3(3.0, 6.0, 3.0)
+size = Vector3(2.2, 3.7, 2.2)
 
 [node name="SlowTower" type="StaticBody3D"]
 script = ExtResource("1")
@@ -12,11 +15,22 @@ tower_type = "slow"
 max_health = 500.0
 attack_range = 18.0
 attack_interval = 1.0
-fire_point_fallback_height = 1.5
-model_scene = ExtResource("2")
-model_scale = Vector3(0.9, 0.9, 0.9)
-model_offset = Vector3(0, 0, 0)
+fire_point_fallback_height = 4.0
+model_base = ExtResource("2")
+model_base_scale = Vector3(2.353, 2.353, 2.353)
+model_base_offset = Vector3(0, 0, 0)
+model_mid = ExtResource("3")
+model_mid_scale = Vector3(2.353, 2.353, 2.353)
+model_mid_offset = Vector3(0, 1.412, 0)
+model_mid_count = 1
+model_mid_step = Vector3(0, 1.412, 0)
+model_top = ExtResource("4")
+model_top_scale = Vector3(2.353, 2.353, 2.353)
+model_top_offset = Vector3(0, 2.824, 0)
+model_turret = ExtResource("5")
+model_turret_scale = Vector3(1.8, 1.8, 1.8)
+model_turret_offset = Vector3(0, 4.0, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.0, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.85, 0)
 shape = SubResource("BoxShape3D_1")

@@ -4,6 +4,7 @@
 ## Overrides _process (pulse-based, not attack-based).
 ## Overrides _build_visuals to apply permanent cyan tint.
 
+class_name SlowTowerAI
 extends TowerBase
 
 const PULSE_INTERVAL := 2.0
@@ -16,21 +17,27 @@ var _pulse_timer: float = 0.0
 
 func _build_visuals() -> void:
 	super._build_visuals()
-	if _mesh_inst == null or _mesh_inst.mesh == null:
+	if _all_mesh_insts.is_empty():
 		return
 	var tint := StandardMaterial3D.new()
 	tint.albedo_color = Color(0.3, 0.9, 1.0)
 	tint.emission_enabled = true
 	tint.emission = Color(0.3, 0.9, 1.0)
 	tint.emission_energy_multiplier = 0.6
-	for i in _mesh_inst.mesh.get_surface_count():
-		_mesh_inst.set_surface_override_material(i, tint)
-	# Tint is permanent — replace the hit overlay mat so _flash_hit still works
-	_hit_overlay_mat = null  # disable flash for slow tower (tint is always on)
+	for mi in _all_mesh_insts:
+		if mi == null or mi.mesh == null:
+			continue
+		for i in mi.mesh.get_surface_count():
+			mi.set_surface_override_material(i, tint)
+	# Tint is permanent — disable flash so it doesn't clobber the cyan tint
+	_hit_overlay_mat = null
 
 # ── Pulse loop — replaces TowerBase._process ─────────────────────────────────
 
 func _process(delta: float) -> void:
+	# Server-authoritative only — mirrors the guard in TowerBase._process.
+	if NetworkManager._peer != null and not multiplayer.is_server():
+		return
 	if _dead:
 		return
 	_pulse_timer += delta

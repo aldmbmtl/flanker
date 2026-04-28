@@ -1,19 +1,18 @@
 extends CanvasLayer
 ## Supporter HUD — horizontal toolbar for selecting what to place.
-## Hotkeys 1-9 or click to select. Slot 6 = weapon sub-row.
+## Hotkeys 1-8 or click to select. Slot 5 = weapon sub-row.
 
 signal slot_changed(item_type: String, subtype: String)
 
 const SLOT_DEFS := [
 	{ "key": "1", "type": "cannon",           "subtype": "",       "label": "Cannon",    "cost_key": "cannon"           },
 	{ "key": "2", "type": "mortar",           "subtype": "",       "label": "Mortar",    "cost_key": "mortar"           },
-	{ "key": "3", "type": "slow",             "subtype": "",       "label": "Slow",      "cost_key": "slow"             },
-	{ "key": "4", "type": "barrier",          "subtype": "",       "label": "Barrier",   "cost_key": "barrier"          },
+	{ "key": "3", "type": "machinegun",       "subtype": "",       "label": "MachineGun","cost_key": "machinegun"       },
+	{ "key": "4", "type": "slow",             "subtype": "",       "label": "Slow",      "cost_key": "slow"             },
 	{ "key": "5", "type": "weapon",           "subtype": "rifle",  "label": "Weapon▾",  "cost_key": "weapon"           },
 	{ "key": "6", "type": "healthpack",       "subtype": "",       "label": "HealthPack","cost_key": "healthpack"       },
 	{ "key": "7", "type": "healstation",      "subtype": "",       "label": "HealStation","cost_key": "healstation"     },
 	{ "key": "8", "type": "launcher_missile", "subtype": "",       "label": "Launcher",  "cost_key": "launcher_missile" },
-	{ "key": "9", "type": "recon_strike",    "subtype": "",       "label": "Recon",     "cost_key": "recon_strike"     },
 ]
 
 const WEAPON_SUBTYPES := ["pistol", "rifle", "heavy", "rocket_launcher"]
@@ -21,8 +20,8 @@ const WEAPON_COSTS    := { "pistol": 10, "rifle": 20, "heavy": 30, "rocket_launc
 const WEAPON_LABELS   := { "pistol": "Pistol", "rifle": "Rifle", "heavy": "Heavy", "rocket_launcher": "Rocket" }
 const PLACEABLE_COSTS := {
 	"cannon": 25, "mortar": 35,
-	"slow": 30, "barrier": 10, "healthpack": 15, "healstation": 25,
-	"launcher_missile": 50, "recon_strike": 100,
+	"slow": 30, "machinegun": 40, "healthpack": 15, "healstation": 25,
+	"launcher_missile": 50,
 }
 
 var selected_type:    String = ""

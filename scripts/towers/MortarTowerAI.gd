@@ -18,6 +18,7 @@ func _do_attack(target: Node3D) -> void:
 	var shell: Node3D = ShellScene.instantiate()
 	shell.damage = attack_damage
 	shell.shooter_team = team
+	shell.spawner_rid = get_rid()
 	shell.target_pos = aim_pos
 	shell.position = spawn_pos
 	get_tree().root.get_child(0).add_child(shell)

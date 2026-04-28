@@ -21,6 +21,7 @@ func _do_attack(target: Node3D) -> void:
 	ball.damage = attack_damage
 	ball.source = "cannonball"
 	ball.shooter_team = team
+	ball.spawner_rid = get_rid()
 	ball.target_pos = aim_pos
 	# Position set before add_child so Cannonball._ready() computes arc from correct origin
 	ball.position = spawn_pos

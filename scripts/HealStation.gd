@@ -98,7 +98,7 @@ func _process(delta: float) -> void:
 		body.heal(HEAL_RATE * delta)
 	_bodies_in_range = _bodies_in_range.filter(func(b): return is_instance_valid(b))
 
-func take_damage(amount: float, _source: String, _killer_team: int = -1) -> void:
+func take_damage(amount: float, _source: String, _killer_team: int = -1, _shooter_peer_id: int = -1) -> void:
 	if not multiplayer.is_server():
 		return
 	if _dead:

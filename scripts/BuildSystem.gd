@@ -11,7 +11,6 @@ var PLACEABLE_DEFS := {
 	"cannon":           { "cost": 25, "scene": "res://scenes/towers/Tower.tscn",           "attack_range": 30.0, "is_tower": true,  "lane_setback": true  },
 	"mortar":           { "cost": 35, "scene": "res://scenes/towers/MortarTower.tscn",     "attack_range": 50.0, "is_tower": true,  "lane_setback": true  },
 	"slow":             { "cost": 30, "scene": "res://scenes/towers/SlowTower.tscn",       "attack_range": 18.0, "is_tower": true,  "lane_setback": true  },
-	"barrier":          { "cost": 10, "scene": "res://scenes/towers/BarrierTower.tscn",    "attack_range":  0.0, "is_tower": true,  "lane_setback": false },
 	"machinegun":       { "cost": 40, "scene": "res://scenes/towers/MachineGunTower.tscn", "attack_range": 22.0, "is_tower": true,  "lane_setback": true  },
 	"weapon":           { "cost":  0, "scene": "res://scenes/WeaponPickup.tscn",           "spacing":  5.0,      "is_tower": false, "lane_setback": false },
 	"healthpack":       { "cost": 15, "scene": "res://scenes/HealthPackPickup.tscn",       "spacing":  5.0,      "is_tower": false, "lane_setback": false },
@@ -151,7 +150,7 @@ func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype:
 		var sx: int = int(world_pos.x)
 		var sz: int = int(world_pos.z)
 		node.name = "Drop_%s_%d_%d" % [item_type, sx, sz]
-	elif item_type in ["cannon", "mortar", "slow", "barrier", "machinegun"]:
+	elif item_type in ["cannon", "mortar", "slow", "machinegun"]:
 		var sx: int = int(world_pos.x)
 		var sz: int = int(world_pos.z)
 		node.name = "Tower_%s_%d_%d" % [item_type, sx, sz]
@@ -177,6 +176,13 @@ func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype:
 			node.add_to_group("supporter_drops")
 		_:
 			# All towers, launchers, healthpacks, healstations, and future types.
+			# For tower entries that carry attack_range in PLACEABLE_DEFS, push the
+			# authoritative value onto the node BEFORE setup() so TowerBase builds
+			# its detection sphere with the correct radius.  This prevents silent
+			# drift when .tscn export values diverge from PLACEABLE_DEFS.
+			var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
+			if def.has("attack_range") and node.get("attack_range") != null:
+				node.set("attack_range", def["attack_range"])
 			# TowerBase subclasses take setup(team); launcher types take setup(team, type).
 			if LauncherDefs.is_launcher_type(item_type):
 				if node.has_method("setup"):

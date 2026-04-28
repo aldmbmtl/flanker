@@ -94,8 +94,8 @@ func _recalc_size() -> void:
 		# Re-anchor panel: top-right corner, 8px from right edge, 48px from top
 		panel.offset_left   = -(panel.custom_minimum_size.x + 8.0)
 		panel.offset_right  = -8.0
-		panel.offset_top    = 48.0
-		panel.offset_bottom = 48.0 + panel.custom_minimum_size.y
+		panel.offset_top    = -(panel.custom_minimum_size.y + 8.0)
+		panel.offset_bottom = -8.0
 
 	_bake_lane_pixels()
 	_blue_base_px = _world_to_map(Vector2(0.0,  84.0))

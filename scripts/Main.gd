@@ -55,13 +55,16 @@ const LaneBoostHUDScript := preload("res://scripts/ui/LaneBoostHUD.gd")
 const AISupporterControllerScript := preload("res://scripts/roles/supporter/AISupporterController.gd")
 const EntityHUDScript             := preload("res://scripts/hud/EntityHUD.gd")
 const PingHUDScript               := preload("res://scripts/hud/PingHUD.gd")
+const CompassHUDScript            := preload("res://scripts/hud/CompassHUD.gd")
 const LevelUpDialogScene := preload("res://scenes/ui/LevelUpDialog.tscn")
+const WindParticlesScript := preload("res://scripts/WindParticles.gd")
 
 var _supporter_hud: Node = null
 var _launcher_hud: Node = null
 var _lane_boost_hud: Node = null
 var _entity_hud: Control = null
-var _ping_hud: Control = null
+var _ping_hud: Control    = null
+var _compass_hud: Control = null
 var _level_up_dialog: Control = null
 
 @onready var rts_camera:         Camera3D        = $RTSCamera
@@ -85,7 +88,7 @@ var _hit_ring_base_color: Color = Color.WHITE
 var fps_player: CharacterBody3D = null
 
 @onready var game_over_screen:   Control         = $HUD/GameOverScreen
-@onready var wave_info_label:    Label           = $HUD/WaveInfoPanel/WaveInfoLabel
+@onready var wave_info_label:    Label           = $HUD/WaveInfoPanel/WaveVBox/WaveInfoLabel
 @onready var wave_announce_panel: PanelContainer = $HUD/WaveAnnouncePanel
 @onready var wave_announce_label: Label          = $HUD/WaveAnnouncePanel/WaveAnnounceLabel
 @onready var crosshair:          Control         = $HUD/Crosshair
@@ -94,26 +97,26 @@ var fps_player: CharacterBody3D = null
 @onready var hit_ring_left:      ColorRect       = $HUD/Crosshair/HitIndicatorRing/RingLeft
 @onready var hit_ring_right:     ColorRect       = $HUD/Crosshair/HitIndicatorRing/RingRight
 @onready var respawn_label:      Label           = $HUD/RespawnLabel
-@onready var ammo_label:         Label           = $HUD/AmmoPanel/AmmoLabel
+@onready var ammo_label:         Label           = $HUD/VitalsPanel/VitalsBox/AmmoLabel
 @onready var weapon_slot1_row:   Control         = $HUD/VitalsPanel/VitalsBox/WeaponSlots/Slot1Row
 @onready var weapon_slot2_row:   Control         = $HUD/VitalsPanel/VitalsBox/WeaponSlots/Slot2Row
 @onready var weapon_slot1_icon:  TextureRect     = $HUD/VitalsPanel/VitalsBox/WeaponSlots/Slot1Row/Slot1Icon
 @onready var weapon_slot2_icon:  TextureRect     = $HUD/VitalsPanel/VitalsBox/WeaponSlots/Slot2Row/Slot2Icon
 @onready var vitals_panel:       PanelContainer  = $HUD/VitalsPanel
 @onready var reload_prompt:      Label           = $HUD/ReloadPrompt
-@onready var points_label:      Label           = $HUD/PointsPanel/PointsLabel
-@onready var blue_lives_bar:    ProgressBar     = $HUD/LivesBar/LivesHBox/BlueBar
-@onready var red_lives_bar:     ProgressBar     = $HUD/LivesBar/LivesHBox/RedBar
+@onready var points_label:      Label           = $HUD/TopCenterPanel/TopCenterBox/PointsHBox/PointsLabel
+@onready var blue_lives_bar:    ProgressBar     = $HUD/TopCenterPanel/TopCenterBox/LivesHBox/BlueBar
+@onready var red_lives_bar:     ProgressBar     = $HUD/TopCenterPanel/TopCenterBox/LivesHBox/RedBar
 @onready var minimap:            Control         = $HUD/MinimapPanel/Minimap
 @onready var stamina_bar:        ProgressBar     = $HUD/VitalsPanel/VitalsBox/StaminaBar
 @onready var health_bar:         ProgressBar     = $HUD/VitalsPanel/VitalsBox/HealthBar
-@onready var xp_bar:             ProgressBar     = $HUD/XPPanel/XPHBox/XPBar
-@onready var level_label:        Label           = $HUD/XPPanel/XPHBox/LevelLabel
-@onready var pending_button:     Button          = $HUD/XPPanel/XPHBox/PendingButton
+@onready var xp_bar:             ProgressBar     = $HUD/TopCenterPanel/TopCenterBox/XPHBox/XPBar
+@onready var level_label:        Label           = $HUD/TopCenterPanel/TopCenterBox/XPHBox/LevelLabel
+@onready var pending_button:     Button          = $HUD/TopCenterPanel/TopCenterBox/XPHBox/PendingButton
 @onready var audio_mode_switch:  AudioStreamPlayer = $AudioModeSwitch
 @onready var audio_wave:         AudioStreamPlayer = $AudioWave
 @onready var audio_respawn:      AudioStreamPlayer = $AudioRespawn
-@onready var event_feed:         Control            = $HUD/EventFeed
+@onready var event_feed:         Control            = $HUD/WaveInfoPanel/WaveVBox/EventFeed
 
 const WeaponPickupScene := preload("res://scenes/WeaponPickup.tscn")
 const PortalGoalScene   := preload("res://scenes/PortalGoal.tscn")
@@ -128,6 +131,9 @@ var _role_dialog: Control
 
 func _ready() -> void:
 	var _has_network_peer: bool = NetworkManager._peer != null
+	# Pause wave spawning until the world is fully generated.
+	$MinionSpawner.set_process(false)
+	$MinionSpawner.set_physics_process(false)
 	if _has_network_peer:
 		_is_singleplayer = false
 		_setup_multiplayer_game()
@@ -181,8 +187,8 @@ func _spawn_local_player() -> void:
 	fps_player.add_to_group("player")
 	var spawn_z: float = 84.0 if player_start_team == 0 else -84.0
 	fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
-	# Blue base is at +Z, red base is at -Z. Both teams must face map centre (Z=0).
-	fps_player.rotation.y = PI if player_start_team == 0 else 0.0
+	# Blue spawns at +Z, must face -Z (toward red base). Red spawns at -Z, must face +Z (toward blue base).
+	fps_player.rotation.y = 0.0 if player_start_team == 0 else PI
 
 func _start_multiplayer_game() -> void:
 	# Resolve team from lobby
@@ -267,7 +273,11 @@ func _start_multiplayer_game() -> void:
 		ammo_label.visible = false
 		reload_prompt.visible = false
 		$HUD/MinimapPanel.visible = false
-		$HUD/XPPanel.visible = false
+		# Hide XP/level widgets — Supporter doesn't earn XP via kills
+		xp_bar.visible = false
+		level_label.visible = false
+		pending_button.visible = false
+		# PointsLabel and LivesBar remain visible for Supporter
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 		# Spawn SupporterHUD toolbar
 		_supporter_hud = SupporterHUDScene.instantiate()
@@ -298,6 +308,17 @@ func _start_multiplayer_game() -> void:
 
 	# Wire PingHUD — blinking diamond overlay for all roles
 	_setup_ping_hud()
+	# Wire CompassHUD — CoD-style bearing strip (Fighter only)
+	if player_role == Role.FIGHTER:
+		_setup_compass_hud()
+
+	# Spawn ambient wind particles — world-space, bioluminescent, gust-driven.
+	var wind_particles := Node3D.new()
+	wind_particles.set_script(WindParticlesScript)
+	wind_particles.name = "WindParticles"
+	$World.add_child(wind_particles)
+	wind_particles.set("_tree_placer", $World/TreePlacer)
+	wind_particles.set("_player", fps_player)
 
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
@@ -308,6 +329,18 @@ func _setup_ping_hud() -> void:
 	_ping_hud.set_script(PingHUDScript)
 	$HUD.add_child(_ping_hud)
 	_ping_hud.setup(player_start_team)
+
+func _setup_compass_hud() -> void:
+	if fps_player == null:
+		return
+	var cam: Camera3D = fps_player.get_node_or_null("Camera3D")
+	if cam == null:
+		return
+	_compass_hud = Control.new()
+	_compass_hud.name = "CompassHUD"
+	_compass_hud.set_script(CompassHUDScript)
+	$HUD.add_child(_compass_hud)
+	_compass_hud.setup(fps_player, cam, player_start_team)
 
 func _setup_hud_for_player() -> void:
 	if not fps_player:
@@ -413,13 +446,13 @@ const ITEM_DISPLAY_NAMES := {
 	"cannon":      "Cannon Tower",
 	"mortar":      "Mortar Tower",
 	"slow":        "Slow Tower",
-	"barrier":     "Barrier Tower",
+	"machinegun":  "Machine Gun Tower",
 	"weapon":      "Weapon Drop",
 	"healthpack":  "Health Pack",
 	"healstation": "Heal Station",
 }
 
-const TOWER_ITEM_TYPES := ["cannon", "mortar", "slow", "barrier", "healstation"]
+const TOWER_ITEM_TYPES := ["cannon", "mortar", "slow", "machinegun", "healstation"]
 
 func _setup_event_feed() -> void:
 	GameSync.player_died.connect(_on_event_player_died)
@@ -680,14 +713,13 @@ func _on_start_game() -> void:
 	loading_screen.set_status("Building terrain...")
 	loading_screen.set_progress(10.0)
 
-	# Hide the start menu and stop its orbiting camera right away so the
-	# loading screen is the only thing visible during the async build phase.
+	# Tear down the menu simulation before it mutates any more autoload state
+	# (TeamData, LevelSystem, etc.). Free the whole StartMenu subtree — it
+	# won't be needed again; returning to menu uses change_scene_to_file.
 	if _start_menu:
-		_start_menu.visible = false
-		var menu_cam: Node = _start_menu.get_node_or_null("MenuCamera")
-		if menu_cam:
-			menu_cam.set("current", false)
-			menu_cam.visible = false
+		_start_menu.call("_stop_menu_simulation")
+		_start_menu.queue_free()
+		_start_menu = null
 
 	await get_tree().process_frame
 
@@ -705,6 +737,10 @@ func _on_start_game() -> void:
 	loading_screen.set_progress(55.0)
 	if not $World/WallPlacer.generation_done:
 		await $World/WallPlacer.done
+
+	# World is fully generated — start wave timer now.
+	$MinionSpawner.set_process(true)
+	$MinionSpawner.set_physics_process(true)
 
 	loading_screen.set_status("Waiting for role selection...")
 	loading_screen.set_progress(62.0)
@@ -770,8 +806,8 @@ func _on_start_game() -> void:
 		_setup_hud_for_player()
 		var spawn_z: float = 84.0 if player_start_team == 0 else -84.0
 		fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
-		# Face map centre on spawn.
-		fps_player.rotation.y = PI if player_start_team == 0 else 0.0
+		# Blue spawns at +Z faces -Z (toward red base); red spawns at -Z faces +Z (toward blue base).
+		fps_player.rotation.y = 0.0 if player_start_team == 0 else PI
 		_HUD_set_visible(true)
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		_set_mode(true)
@@ -785,7 +821,11 @@ func _on_start_game() -> void:
 		ammo_label.visible = false
 		reload_prompt.visible = false
 		$HUD/MinimapPanel.visible = false
-		$HUD/XPPanel.visible = false
+		# Hide XP/level widgets — Supporter doesn't earn XP via kills
+		xp_bar.visible = false
+		level_label.visible = false
+		pending_button.visible = false
+		# PointsLabel and LivesBar remain visible for Supporter
 		# Spawn SupporterHUD toolbar
 		_supporter_hud = SupporterHUDScene.instantiate()
 		$HUD.add_child(_supporter_hud)
@@ -815,6 +855,9 @@ func _on_start_game() -> void:
 
 	# Wire PingHUD — blinking diamond overlay for all roles
 	_setup_ping_hud()
+	# Wire CompassHUD — CoD-style bearing strip (Fighter only)
+	if player_role == Role.FIGHTER:
+		_setup_compass_hud()
 
 	# Spawn AI Supporters for any uncovered team (singleplayer — always server)
 	_spawn_ai_supporters_singleplayer(player_role, player_start_team)
@@ -830,6 +873,14 @@ func _on_start_game() -> void:
 	loading_screen.set_progress(100.0)
 	await get_tree().process_frame
 
+	# Spawn ambient wind particles — world-space, bioluminescent, gust-driven.
+	var wind_particles := Node3D.new()
+	wind_particles.set_script(WindParticlesScript)
+	wind_particles.name = "WindParticles"
+	$World.add_child(wind_particles)
+	wind_particles.set("_tree_placer", $World/TreePlacer)
+	wind_particles.set("_player", fps_player)
+
 	loading_screen.finish()
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
@@ -841,8 +892,16 @@ func _on_quit_from_menu() -> void:
 	get_tree().quit()
 
 func leave_game() -> void:
-	if not _is_singleplayer and multiplayer.has_multiplayer_peer():
-		multiplayer.multiplayer_peer = null
+	# Always use close_connection() so the ENet socket is properly closed
+	# and the port is freed for re-use (avoids "port in use" on next host).
+	NetworkManager.close_connection()
+	# Reset all autoload state so the start menu simulation and next game
+	# start from a clean slate — no stale healths, pings, points, etc.
+	GameSync.reset()
+	LobbyManager.reset()
+	TeamData.reset()
+	TeamLives.reset()
+	LevelSystem.clear_all()
 	get_tree().change_scene_to_file("res://scenes/ui/StartMenu.tscn")
 
 func toggle_pause(paused: bool) -> void:

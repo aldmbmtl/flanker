@@ -9,6 +9,7 @@ signal back_pressed
 @onready var dof_slider: HSlider = $Card/VBox/DoFSection/DoFVBox/DoFStrengthRow/DoFSlider
 @onready var dof_value_label: Label = $Card/VBox/DoFSection/DoFVBox/DoFStrengthRow/DoFValueLabel
 @onready var shadow_option: OptionButton = $Card/VBox/ShadowSection/ShadowVBox/ShadowRow/ShadowOption
+@onready var tree_shadow_option: OptionButton = $Card/VBox/ShadowSection/ShadowVBox/TreeShadowRow/TreeShadowOption
 @onready var lives_spin: SpinBox = $Card/VBox/GameSection/GameVBox/LivesRow/LivesSpin
 
 var _loading: bool = false
@@ -18,6 +19,9 @@ func _ready() -> void:
 	shadow_option.add_item("Off",  0)
 	shadow_option.add_item("Low",  1)
 	shadow_option.add_item("High", 2)
+	tree_shadow_option.add_item("Off",   0)
+	tree_shadow_option.add_item("Close", 1)
+	tree_shadow_option.add_item("Far",   2)
 	_load_from_settings()
 
 
@@ -34,6 +38,7 @@ func _load_from_settings() -> void:
 	dof_value_label.text = "%.3f" % GraphicsSettings.dof_blur_amount
 
 	shadow_option.selected = GraphicsSettings.shadow_quality
+	tree_shadow_option.selected = GraphicsSettings.tree_shadow_distance
 
 	lives_spin.value = GameSettings.lives_per_team
 	_loading = false
@@ -73,11 +78,18 @@ func _apply() -> void:
 		fog_slider.value,
 		dof_toggle.button_pressed,
 		dof_slider.value,
-		shadow_option.selected
+		shadow_option.selected,
+		tree_shadow_option.selected
 	)
 
 
 func _on_shadow_option_item_selected(_index: int) -> void:
+	if _loading:
+		return
+	_apply()
+
+
+func _on_tree_shadow_option_item_selected(_index: int) -> void:
 	if _loading:
 		return
 	_apply()

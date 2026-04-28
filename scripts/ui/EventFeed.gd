@@ -35,7 +35,7 @@ func add_event(text: String) -> void:
 	lbl.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.85))
 	lbl.add_theme_constant_override("shadow_offset_x", 1)
 	lbl.add_theme_constant_override("shadow_offset_y", 1)
-	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_vbox.add_child(lbl)
 

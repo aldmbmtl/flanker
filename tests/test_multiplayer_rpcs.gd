@@ -728,6 +728,14 @@ func test_broadcast_ping_passes_correct_args() -> void:
 	var params: Array = get_signal_parameters(LobbyManager, "ping_received")
 	assert_eq(params[0], Vector3(7, 0, -3))
 	assert_eq(params[1], 1)
+	assert_eq(params[2], Color(0.62, 0.0, 1.0, 1.0), "Default purple color should be forwarded")
+
+func test_broadcast_ping_passes_custom_color() -> void:
+	watch_signals(LobbyManager)
+	var orange := Color(1.0, 0.55, 0.0, 1.0)
+	LobbyManager.broadcast_ping(Vector3(1, 0, 1), 0, orange)
+	var params: Array = get_signal_parameters(LobbyManager, "ping_received")
+	assert_eq(params[2], orange, "Custom color should be forwarded through signal")
 
 func test_request_ping_rejected_for_wrong_team() -> void:
 	LobbyManager.register_player_local(1, "P1")
@@ -736,6 +744,16 @@ func test_request_ping_rejected_for_wrong_team() -> void:
 	# Request ping for team 1 when player is on team 0 — should be rejected
 	LobbyManager.request_ping(Vector3.ZERO, 1)
 	assert_signal_emit_count(LobbyManager, "ping_received", 0)
+
+func test_item_ping_color_weapon() -> void:
+	## RTSController._get_item_ping_color("weapon") must return orange.
+	const RTSScript := preload("res://scripts/roles/supporter/RTSController.gd")
+	assert_eq(RTSScript.COL_PING_WEAPON, Color(1.0, 0.55, 0.0, 1.0), "Weapon ping color should be orange")
+
+func test_item_ping_color_healthpack() -> void:
+	## RTSController._get_item_ping_color("healthpack") must return green.
+	const RTSScript := preload("res://scripts/roles/supporter/RTSController.gd")
+	assert_eq(RTSScript.COL_PING_HEALTH, Color(0.0, 0.85, 0.25, 1.0), "Healthpack ping color should be green")
 
 # ── §14 Lane boost / recon ────────────────────────────────────────────────────
 

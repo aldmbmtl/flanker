@@ -18,8 +18,6 @@ const RING_RADIUS_MIN := 20.0   # inner ring radius at ping birth
 const RING_RADIUS_MAX := 34.0   # outer ring radius at ping death
 const RING_THICKNESS  := 1.5    # ring stroke width in pixels
 const HOVER_HEIGHT    := 0.8    # world units above terrain the icon floats
-const EDGE_MARGIN     := 30.0   # px from screen edge for the off-screen arrow
-const ARROW_SIZE      := 22.0   # half-size of edge arrow triangle in pixels
 
 const BEAM_HEIGHT     := 80.0   # world units tall
 const BEAM_RADIUS_CORE := 0.08  # inner white cylinder radius
@@ -31,7 +29,7 @@ const COL_WHITE := Color(1.0,  1.0, 1.0, 1.0)   # beam core
 # ── State ─────────────────────────────────────────────────────────────────────
 
 var _player_team: int = 0
-var _active_pings: Array = []   # each entry: {world_pos: Vector3, age: float}
+var _active_pings: Array = []   # each entry: {world_pos: Vector3, age: float, color: Color}
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -71,7 +69,8 @@ func _draw() -> void:
 
 		var blink: float = (sin(age * TAU * BLINK_FREQ) + 1.0) * 0.5
 		var alpha: float = fade * lerp(0.35, 1.0, blink)
-		var col: Color   = Color(COL_PING.r, COL_PING.g, COL_PING.b, alpha)
+		var c: Color     = ping["color"] as Color
+		var col: Color   = Color(c.r, c.g, c.b, alpha)
 
 		var is_behind: bool   = camera.is_position_behind(world_pos)
 		var screen_pos: Vector2 = camera.unproject_position(world_pos)
@@ -83,8 +82,8 @@ func _draw() -> void:
 
 		var on_screen: bool = (
 			not is_behind and
-			screen_pos.x >= EDGE_MARGIN and screen_pos.x <= vp_size.x - EDGE_MARGIN and
-			screen_pos.y >= EDGE_MARGIN and screen_pos.y <= vp_size.y - EDGE_MARGIN
+			screen_pos.x >= 0.0 and screen_pos.x <= vp_size.x and
+			screen_pos.y >= 0.0 and screen_pos.y <= vp_size.y
 		)
 
 		if on_screen:
@@ -99,61 +98,21 @@ func _draw() -> void:
 
 			# ── Expanding pulse ring ──────────────────────────────────────
 			var ring_r: float   = lerp(RING_RADIUS_MIN, RING_RADIUS_MAX, t)
-			var ring_col: Color = Color(COL_PING.r, COL_PING.g, COL_PING.b, fade * 0.55)
+			var ring_col: Color = Color(c.r, c.g, c.b, fade * 0.55)
 			draw_arc(screen_pos, ring_r, 0.0, TAU, 48, ring_col, RING_THICKNESS)
-		else:
-			# ── Edge arrow ────────────────────────────────────────────────
-			var dir: Vector2  = (screen_pos - center).normalized()
-			var edge: Vector2 = _clamp_to_screen_edge(center, dir, vp_size, EDGE_MARGIN)
-
-			# Tip points toward the off-screen ping; base is two perpendicular points.
-			var perp: Vector2  = Vector2(-dir.y, dir.x)
-			var tip: Vector2   = edge + dir * ARROW_SIZE
-			var base_l: Vector2 = edge - perp * ARROW_SIZE * 0.6
-			var base_r: Vector2 = edge + perp * ARROW_SIZE * 0.6
-
-			var arrow: PackedVector2Array = PackedVector2Array([tip, base_l, base_r])
-			draw_colored_polygon(arrow, col)
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-## Returns the point along `center + dir * t` that first reaches a screen edge,
-## inset by `margin` pixels on all sides.
-func _clamp_to_screen_edge(center: Vector2, dir: Vector2, vp_size: Vector2, margin: float) -> Vector2:
-	var min_x: float = margin
-	var max_x: float = vp_size.x - margin
-	var min_y: float = margin
-	var max_y: float = vp_size.y - margin
-
-	var t_vals: Array = []
-	if dir.x > 0.0001:
-		t_vals.append((max_x - center.x) / dir.x)
-	elif dir.x < -0.0001:
-		t_vals.append((min_x - center.x) / dir.x)
-	if dir.y > 0.0001:
-		t_vals.append((max_y - center.y) / dir.y)
-	elif dir.y < -0.0001:
-		t_vals.append((min_y - center.y) / dir.y)
-
-	var best_t: float = 1e9
-	for tv in t_vals:
-		var fv: float = tv as float
-		if fv > 0.0 and fv < best_t:
-			best_t = fv
-
-	return center + dir * best_t
+		# Off-screen pings: no edge arrow — indicator shown on compass strip instead.
 
 # ── Signal handler ────────────────────────────────────────────────────────────
 
-func _on_ping_received(world_pos: Vector3, team: int) -> void:
+func _on_ping_received(world_pos: Vector3, team: int, color: Color = COL_PING) -> void:
 	if team != _player_team:
 		return
-	_active_pings.append({"world_pos": world_pos, "age": 0.0})
-	_spawn_ping_beam(world_pos)
+	_active_pings.append({"world_pos": world_pos, "age": 0.0, "color": color})
+	_spawn_ping_beam(world_pos, color)
 
 # ── 3D beam ───────────────────────────────────────────────────────────────────
 
-func _spawn_ping_beam(world_pos: Vector3) -> void:
+func _spawn_ping_beam(world_pos: Vector3, color: Color = COL_PING) -> void:
 	var scene_root: Node = get_tree().root.get_child(0)
 
 	# Root node for the whole beam — add to tree first, then set position
@@ -189,9 +148,9 @@ func _spawn_ping_beam(world_pos: Vector3) -> void:
 	glow_mesh.height        = BEAM_HEIGHT
 
 	var glow_mat: StandardMaterial3D = StandardMaterial3D.new()
-	glow_mat.albedo_color        = Color(COL_PING.r, COL_PING.g, COL_PING.b, 0.35)
+	glow_mat.albedo_color        = Color(color.r, color.g, color.b, 0.35)
 	glow_mat.emission_enabled    = true
-	glow_mat.emission            = COL_PING
+	glow_mat.emission            = color
 	glow_mat.emission_energy_multiplier = 2.0
 	glow_mat.shading_mode        = BaseMaterial3D.SHADING_MODE_UNSHADED
 	glow_mat.transparency        = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -207,7 +166,7 @@ func _spawn_ping_beam(world_pos: Vector3) -> void:
 	# ── OmniLight at base ─────────────────────────────────────────────────────
 	var light: OmniLight3D = OmniLight3D.new()
 	light.position       = Vector3(0.0, -BEAM_HEIGHT * 0.5 + 1.0, 0.0)
-	light.light_color    = COL_PING
+	light.light_color    = color
 	light.light_energy   = 3.0
 	light.omni_range     = 14.0
 	light.shadow_enabled = false
@@ -222,7 +181,7 @@ func _spawn_ping_beam(world_pos: Vector3) -> void:
 	# Alpha fade on the glow layer
 	tw.tween_method(
 		func(a: float) -> void:
-			glow_mat.albedo_color = Color(COL_PING.r, COL_PING.g, COL_PING.b, a),
+			glow_mat.albedo_color = Color(color.r, color.g, color.b, a),
 		0.35, 0.0, PING_DURATION
 	)
 	tw.set_parallel(false)

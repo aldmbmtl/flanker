@@ -19,6 +19,9 @@ var dof_blur_amount: float = 0.07  # 0.0–0.2
 # Shadow quality: 0 = Off, 1 = Low (ORTHOGONAL 60m), 2 = High (PSSM4 100m)
 var shadow_quality: int = 1
 
+# Tree shadow render distance: 0 = Off, 1 = Close (near band only), 2 = Far (both bands)
+var tree_shadow_distance: int = 1
+
 
 func _ready() -> void:
 	load_settings()
@@ -34,6 +37,7 @@ func load_settings() -> void:
 	dof_enabled = cfg.get_value("dof", "enabled", true) as bool
 	dof_blur_amount = cfg.get_value("dof", "blur_amount", 0.07) as float
 	shadow_quality = cfg.get_value("shadow", "quality", 1) as int
+	tree_shadow_distance = cfg.get_value("shadow", "tree_shadow_distance", 1) as int
 
 
 func save_settings() -> void:
@@ -43,23 +47,25 @@ func save_settings() -> void:
 	cfg.set_value("dof", "enabled", dof_enabled)
 	cfg.set_value("dof", "blur_amount", dof_blur_amount)
 	cfg.set_value("shadow", "quality", shadow_quality)
+	cfg.set_value("shadow", "tree_shadow_distance", tree_shadow_distance)
 	var err: int = cfg.save(SAVE_PATH)
 	if err != OK:
 		push_warning("GraphicsSettings: failed to save to %s (error %d)" % [SAVE_PATH, err])
 
 
-func apply(fog_on: bool, density_mult: float, dof_on: bool, blur_amt: float, shad_quality: int = shadow_quality) -> void:
+func apply(fog_on: bool, density_mult: float, dof_on: bool, blur_amt: float, shad_quality: int = shadow_quality, tree_shad_dist: int = tree_shadow_distance) -> void:
 	fog_enabled = fog_on
 	fog_density_multiplier = density_mult
 	dof_enabled = dof_on
 	dof_blur_amount = blur_amt
 	shadow_quality = shad_quality
+	tree_shadow_distance = tree_shad_dist
 	save_settings()
 	settings_changed.emit()
 
 
 func restore_defaults() -> void:
-	apply(true, 1.0, true, 0.07, 1)
+	apply(true, 1.0, true, 0.07, 1, 1)
 
 
 func get_fog_density(time_seed: int) -> float:
