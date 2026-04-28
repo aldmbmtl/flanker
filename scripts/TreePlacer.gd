@@ -2,12 +2,15 @@ extends Node3D
 
 signal done
 
-const TREE_PATHS := [
-	"res://assets/kenney_fantasy-town-kit/Models/GLB format/tree.glb",
-	"res://assets/kenney_fantasy-town-kit/Models/GLB format/tree-crooked.glb",
-	"res://assets/kenney_fantasy-town-kit/Models/GLB format/tree-high.glb",
-	"res://assets/kenney_fantasy-town-kit/Models/GLB format/tree-high-crooked.glb",
-	"res://assets/kenney_fantasy-town-kit/Models/GLB format/tree-high-round.glb",
+const WIND_SHADER := preload("res://assets/tree_wind.gdshader")
+
+# Preload tree GLBs so disk I/O does not block the main thread during placement.
+const TREE_SCENES: Array[PackedScene] = [
+	preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/tree.glb"),
+	preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/tree-crooked.glb"),
+	preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/tree-high.glb"),
+	preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/tree-high-crooked.glb"),
+	preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/tree-high-round.glb"),
 ]
 
 const GRID_SIZE := 200
@@ -38,17 +41,40 @@ const SECRET_PATH_CLEAR_WIDTH := 5.0
 const BAND_NEAR_MAX := 55.0
 const BAND_FAR_MIN  := 55.0
 
+# How many grid rows to process before yielding a frame.
+# Lower = smoother loading screen, higher = fewer frame drops but longer perceived stall.
+const ROWS_PER_FRAME := 20
+
 var _random_clearing_centers: Array[Vector2] = []
 var _random_clearing_radii: Array[float] = []
 
 # Set to a value > 0 before add_child to override TREE_DENSITY (e.g. menu background)
 var menu_density: float = -1.0
 
+var generation_done: bool = false
+
+# ── Wind configuration ────────────────────────────────────────────────────────
+# Base sway amplitude and the extra amplitude added at peak gust.
+@export var wind_strength_base: float   = 0.03
+@export var wind_strength_gust: float   = 0.04
+# How fast the gust cycle oscillates (full period ≈ 2π / gust_cycle_speed seconds)
+@export var wind_gust_cycle_speed: float = 0.25
+@export var wind_speed: float           = 0.9
+@export var wind_direction: Vector2     = Vector2(1.0, 0.3)
+# Spatial frequency of the travelling wave: smaller = longer wavelength (more natural).
+@export var wave_scale: float           = 0.05
+
+# All live MMIs that have a wind ShaderMaterial applied — updated each _process.
+var _wind_mmis: Array[MultiMeshInstance3D] = []
+
 @onready var terrain_body: StaticBody3D = null
 
 # Per-variant, per-band transform accumulation
 # _band_transforms[variant_idx][band_idx] = Array[Transform3D]
 var _band_transforms: Array = []
+
+# Precomputed O(1) exclusion mask: flat array indexed by [gz * GRID_STEPS + gx]
+var _exclusion_mask: Array = []
 
 func _ready() -> void:
 	var gen_seed: int = GameSync.game_seed
@@ -57,9 +83,29 @@ func _ready() -> void:
 	seed(gen_seed)
 	await get_tree().process_frame
 	await get_tree().process_frame
+
+	# Ensure terrain mesh and collision are fully built before raycasting.
+	var terrain_node: Node = _get_terrain_node()
+	if terrain_node and not terrain_node.get_child_count():
+		# Terrain thread still running — wait for its done signal.
+		await terrain_node.done
+
 	terrain_body = _find_terrain()
 	_generate_random_clearings()
-	_place_trees()
+	await _place_trees()
+
+func _process(_delta: float) -> void:
+	if _wind_mmis.is_empty():
+		return
+	# Slow sine oscillation creates the feel of gusts building and fading.
+	var t: float = Time.get_ticks_msec() / 1000.0
+	var gust_factor: float = sin(t * wind_gust_cycle_speed) * 0.5 + 0.5
+	var current_strength: float = wind_strength_base + wind_strength_gust * gust_factor
+	for mmi in _wind_mmis:
+		if is_instance_valid(mmi):
+			var mat: ShaderMaterial = mmi.material_override as ShaderMaterial
+			if mat:
+				mat.set_shader_parameter("wind_strength", current_strength)
 
 func _find_terrain() -> StaticBody3D:
 	if has_node("/root/Main/World/Terrain"):
@@ -83,45 +129,102 @@ func _generate_random_clearings() -> void:
 		_random_clearing_centers.append(pos)
 		_random_clearing_radii.append(radius)
 
-func _place_trees() -> void:
-	var tree_scenes: Array[PackedScene] = []
-	for path in TREE_PATHS:
-		var scn: PackedScene = load(path)
-		if scn:
-			tree_scenes.append(scn)
+# Build a flat boolean mask once so each grid cell lookup is O(1).
+func _build_exclusion_mask() -> void:
+	_exclusion_mask.resize(GRID_STEPS * GRID_STEPS)
+	var mountain_peaks: Array = _get_mountain_peaks()
+	for gz in range(GRID_STEPS):
+		for gx in range(GRID_STEPS):
+			var wx: float = (float(gx) / float(GRID_STEPS) - 0.5) * GRID_SIZE
+			var wz: float = (float(gz) / float(GRID_STEPS) - 0.5) * GRID_SIZE
+			var pos3 := Vector3(wx, 0.0, wz)
+			var pos2 := Vector2(wx, wz)
 
-	if tree_scenes.is_empty():
+			var excluded := false
+
+			# Lane check
+			if not excluded:
+				for lane_i in range(3):
+					var pts: Array = LaneData.get_lane_points(lane_i)
+					for pt in pts:
+						if pos2.distance_to(pt) < LANE_CLEAR_WIDTH:
+							excluded = true
+							break
+					if excluded:
+						break
+
+			# Mountain/peak check
+			if not excluded:
+				for peak in mountain_peaks:
+					if pos3.distance_to(peak) < MOUNTAIN_CLEAR_RADIUS:
+						excluded = true
+						break
+
+			# Base check
+			if not excluded:
+				if pos3.distance_to(BLUE_BASE_CENTER) < BASE_CLEAR_RADIUS:
+					excluded = true
+				elif pos3.distance_to(RED_BASE_CENTER) < BASE_CLEAR_RADIUS:
+					excluded = true
+
+			# Random clearing check
+			if not excluded:
+				for i in range(_random_clearing_centers.size()):
+					if pos2.distance_to(_random_clearing_centers[i]) < _random_clearing_radii[i]:
+						excluded = true
+						break
+
+			# Secret path check
+			if not excluded:
+				excluded = _is_on_secret_path(pos2)
+
+			_exclusion_mask[gz * GRID_STEPS + gx] = excluded
+
+func _place_trees() -> void:
+	if TREE_SCENES.is_empty():
+		generation_done = true
 		done.emit()
 		return
 
+	# Build the exclusion mask before iterating (still fast — no raycasts)
+	_build_exclusion_mask()
+
 	# Initialise per-variant, per-band (2 bands: near / far) accumulator
 	_band_transforms.clear()
-	for _vi in tree_scenes.size():
+	for _vi in TREE_SCENES.size():
 		_band_transforms.append([[], []])  # [near_transforms, far_transforms]
 
-	var placed: int = 0
 	var density: float = menu_density if menu_density > 0.0 else TREE_DENSITY
-	for gx in range(GRID_STEPS):
-		for gz in range(GRID_STEPS):
+
+	# Collect candidate positions first (fast — uses precomputed mask, no raycasts)
+	var candidates: Array[Vector3] = []
+	for gz in range(GRID_STEPS):
+		for gx in range(GRID_STEPS):
 			if randf() > density:
 				continue
-
+			if _exclusion_mask[gz * GRID_STEPS + gx]:
+				continue
 			var wx: float = (float(gx) / float(GRID_STEPS) - 0.5) * GRID_SIZE
 			var wz: float = (float(gz) / float(GRID_STEPS) - 0.5) * GRID_SIZE
-			var pos := Vector3(wx, 0.0, wz)
+			candidates.append(Vector3(wx, 0.0, wz))
 
-			if _is_in_lane(pos) or _is_on_mountain(pos) or _is_in_base(pos) or _is_in_random_clearing(pos) or _is_on_secret_path(Vector2(pos.x, pos.z)):
-				continue
-
-			_accumulate_tree(pos, tree_scenes)
-			placed += 1
-			_add_tree_collision(pos, randf_range(TREE_SCALE_MIN, TREE_SCALE_MAX))
+	# Process candidates in batches, yielding between batches so the loading
+	# screen can update and the OS does not kill the process as frozen.
+	var batch: int = 0
+	for pos in candidates:
+		_accumulate_tree(pos, TREE_SCENES)
+		_add_tree_collision(pos, randf_range(TREE_SCALE_MIN, TREE_SCALE_MAX))
+		batch += 1
+		if batch >= 50:
+			batch = 0
+			await get_tree().process_frame
 
 	# Build MultiMeshInstance3D nodes for each variant × band
-	_commit_multimeshes(tree_scenes)
+	_commit_multimeshes(TREE_SCENES)
 
 	if menu_density < 0.0:
 		LoadingState.report("Placing trees...", 45.0)
+	generation_done = true
 	done.emit()
 
 func _accumulate_tree(pos: Vector3, tree_scenes: Array[PackedScene]) -> void:
@@ -149,10 +252,11 @@ func _commit_multimeshes(tree_scenes: Array[PackedScene]) -> void:
 	const BAND_VIS_END: Array = [200.0, 260.0]
 
 	for vi in tree_scenes.size():
-		# Extract a mesh from the scene to use in MultiMesh
+		# Extract a mesh and its albedo texture from the scene to use in MultiMesh
 		var mesh: Mesh = _extract_first_mesh(tree_scenes[vi])
 		if mesh == null:
 			continue
+		var albedo_tex: Texture2D = _extract_albedo_texture(tree_scenes[vi])
 
 		for band in 2:
 			var transforms: Array = _band_transforms[vi][band]
@@ -173,12 +277,47 @@ func _commit_multimeshes(tree_scenes: Array[PackedScene]) -> void:
 			mmi.visibility_range_end_margin = 10.0
 			add_child(mmi)
 
+			# Apply wind shader material so trees sway with the wind.
+			var mat := ShaderMaterial.new()
+			mat.shader = WIND_SHADER
+			mat.set_shader_parameter("wind_strength", wind_strength_base)
+			mat.set_shader_parameter("wind_speed", wind_speed)
+			mat.set_shader_parameter("wind_direction", wind_direction)
+			mat.set_shader_parameter("wave_scale", wave_scale)
+			if albedo_tex != null:
+				mat.set_shader_parameter("albedo_texture", albedo_tex)
+			mmi.material_override = mat
+			_wind_mmis.append(mmi)
+
 func _extract_first_mesh(scene: PackedScene) -> Mesh:
 	# Instantiate temporarily to find the first MeshInstance3D
 	var inst: Node = scene.instantiate()
 	var mesh: Mesh = _find_mesh_recursive(inst)
 	inst.queue_free()
 	return mesh
+
+func _extract_albedo_texture(scene: PackedScene) -> Texture2D:
+	# Instantiate temporarily to read the albedo texture from the first surface.
+	# Returns null if the material has no albedo texture (solid colour is fine).
+	var inst: Node = scene.instantiate()
+	var tex: Texture2D = _find_albedo_recursive(inst)
+	inst.queue_free()
+	return tex
+
+func _find_albedo_recursive(node: Node) -> Texture2D:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		for si in mi.mesh.get_surface_count():
+			var mat: Material = mi.get_active_material(si)
+			if mat is BaseMaterial3D:
+				var bm: BaseMaterial3D = mat as BaseMaterial3D
+				if bm.albedo_texture != null:
+					return bm.albedo_texture
+	for child in node.get_children():
+		var t: Texture2D = _find_albedo_recursive(child)
+		if t != null:
+			return t
+	return null
 
 func _find_mesh_recursive(node: Node) -> Mesh:
 	if node is MeshInstance3D:

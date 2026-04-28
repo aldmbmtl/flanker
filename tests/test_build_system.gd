@@ -91,8 +91,8 @@ func test_get_tower_cost_equals_cannon_cost() -> void:
 func test_spacing_computed_for_cannon() -> void:
 	var def: Dictionary = bs.PLACEABLE_DEFS["cannon"]
 	assert_true(def.has("spacing"), "cannon def should have 'spacing' key after _ready()")
-	# cannon attack_range=30; spacing = max(10, 30*1.4) = 42
-	assert_eq(def["spacing"], 42.0)
+	# cannon attack_range=30; spacing = 30*0.75 = 22.5
+	assert_eq(def["spacing"], 22.5)
 
 func test_spacing_computed_for_barrier_passive() -> void:
 	var def: Dictionary = bs.PLACEABLE_DEFS["barrier"]
@@ -101,8 +101,8 @@ func test_spacing_computed_for_barrier_passive() -> void:
 
 func test_spacing_computed_for_mortar() -> void:
 	var def: Dictionary = bs.PLACEABLE_DEFS["mortar"]
-	# mortar attack_range=50; spacing = max(10, 50*1.4) = 70
-	assert_eq(def["spacing"], 70.0)
+	# mortar attack_range=50; spacing = 50*0.75 = 37.5
+	assert_eq(def["spacing"], 37.5)
 
 # ── can_place_item — team half guard ──────────────────────────────────────────
 # z > 0 is team 0's half; z < 0 is team 1's half.
@@ -122,13 +122,13 @@ func test_unknown_item_type_always_returns_false() -> void:
 
 func test_spacing_blocks_placement_too_close() -> void:
 	_add_fake_tower(Vector3(0.0, 0.0, 50.0), "cannon")
-	# barrier spacing=3; cannon spacing=42; effective=42; distance=5 < 42 → blocked
+	# barrier spacing=3; cannon spacing=22.5; effective=22.5; distance=5 < 22.5 → blocked
 	var result: bool = bs.can_place_item(Vector3(0.0, 0.0, 55.0), 0, "barrier")
 	assert_false(result, "Placement within existing tower's spacing should be rejected")
 
 func test_spacing_allows_placement_far_enough() -> void:
 	_add_fake_tower(Vector3(0.0, 0.0, 10.0), "cannon")
-	# 50 units away > cannon spacing 42 → allowed (headless: no physics/lane checks)
+	# 50 units away > cannon spacing 22.5 → allowed (headless: no physics/lane checks)
 	var result: bool = bs.can_place_item(Vector3(0.0, 0.0, 60.0), 0, "barrier")
 	assert_true(result, "Placement outside all tower spacings should be allowed (headless)")
 

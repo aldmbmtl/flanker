@@ -1,5 +1,7 @@
 extends StaticBody3D
 
+signal done
+
 const GRID_SIZE       := 200
 const GRID_STEPS      := 200
 const MAX_HEIGHT      := 4.0
@@ -27,6 +29,18 @@ const SNOW_LINE   := 15.0
 const BIOME_BLEND_X := 10.0
 
 var secret_paths_cache: Array = []
+var generation_done: bool = false
+
+var _thread: Thread = null
+
+func _notification(what: int) -> void:
+	# If the node is freed while the terrain thread is still running (e.g. scene
+	# change mid-load), join the thread first so Godot does not crash with
+	# "Thread destroyed without wait_to_finish()" / signal 11.
+	if what == NOTIFICATION_PREDELETE:
+		if _thread != null and _thread.is_started():
+			_thread.wait_to_finish()
+			_thread = null
 
 func _ready() -> void:
 	var seed_val: int = GameSync.game_seed
@@ -34,6 +48,27 @@ func _ready() -> void:
 		if multiplayer.has_multiplayer_peer():
 			push_error("TerrainGenerator: game_seed is 0 in multiplayer — seed RPC missed! Terrain will diverge.")
 		seed_val = randi()
+
+	# Snapshot lane data for the thread (must not call autoloads from a thread)
+	var lane_polylines: Array = []
+	for i in range(3):
+		lane_polylines.append(LaneData.get_lane_points(i))
+
+	var secret_paths: Array = _gen_secret_paths(seed_val)
+	secret_paths_cache = secret_paths
+	var plateaus: Array     = _gen_plateaus(seed_val, lane_polylines)
+	var peaks: Array        = _gen_peaks(seed_val, lane_polylines)
+
+	LoadingState.report("Building terrain...", 10.0)
+
+	# Run the heavy CPU math on a background thread.
+	# All data accessed inside the thread is plain Arrays/primitives — no Node calls.
+	_thread = Thread.new()
+	_thread.start(_build_terrain_data.bind(seed_val, lane_polylines, secret_paths, plateaus, peaks))
+
+
+func _build_terrain_data(seed_val: int, lane_polylines: Array, secret_paths: Array,
+		plateaus: Array, peaks: Array) -> void:
 	var noise := FastNoiseLite.new()
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	noise.seed = seed_val
@@ -52,16 +87,7 @@ func _ready() -> void:
 	var half := GRID_SIZE / 2.0
 	var step := float(GRID_SIZE) / float(GRID_STEPS)
 
-	var lane_polylines: Array = []
-	for i in range(3):
-		lane_polylines.append(LaneData.get_lane_points(i))
-
-	var secret_paths: Array = _gen_secret_paths(seed_val)
-	secret_paths_cache = secret_paths
-	var plateaus: Array     = _gen_plateaus(seed_val, lane_polylines)
-	var peaks: Array        = _gen_peaks(seed_val, lane_polylines)
-
-	# Biome orientation — flips each run
+	# Biome orientation
 	var grass_left: bool = (seed_val % 2 == 0)
 
 	# ── Build height map ───────────────────────────────────────────────────────
@@ -152,7 +178,7 @@ func _ready() -> void:
 			lane_blends[zi * verts_per_side + xi] = lane_blend
 			snow_ts[zi * verts_per_side + xi] = smoothstep(SNOW_LINE, PEAK_HEIGHT, h)
 
-	# ── Build ArrayMesh ────────────────────────────────────────────────────────
+	# ── Build ArrayMesh arrays ─────────────────────────────────────────────────
 	var verts   := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colors  := PackedColorArray()
@@ -216,7 +242,7 @@ func _ready() -> void:
 	for i in range(normals.size()):
 		normals[i] = normal_accum[i].normalized()
 
-	# ── Bump perturbation — perturb smooth normals with high-freq noise ─────────
+	# ── Bump perturbation ──────────────────────────────────────────────────────
 	for zi in range(verts_per_side):
 		for xi in range(verts_per_side):
 			var idx := zi * verts_per_side + xi
@@ -224,7 +250,6 @@ func _ready() -> void:
 			var wz := -half + zi * step
 			var lb: float = lane_blends[idx]
 			var st: float = snow_ts[idx]
-			# Suppress on lanes and snow caps; moderate strength elsewhere
 			var bump_str: float = lb * (1.0 - st) * 0.6
 			if bump_str < 0.001:
 				continue
@@ -233,43 +258,68 @@ func _ready() -> void:
 			var dh_z: float = noise_bump.get_noise_2d(wx, wz + eps) - noise_bump.get_noise_2d(wx, wz - eps)
 			normals[idx] = (normals[idx] + Vector3(dh_x, 0.0, dh_z) * bump_str).normalized()
 
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_COLOR]  = colors
-	arrays[Mesh.ARRAY_TEX_UV] = uvs
-	arrays[Mesh.ARRAY_INDEX]  = indices
-
-	var arr_mesh := ArrayMesh.new()
-	arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.roughness = 0.9
-	arr_mesh.surface_set_material(0, mat)
-
-	var mesh_inst := MeshInstance3D.new()
-	mesh_inst.mesh = arr_mesh
-	add_child(mesh_inst)
-
-	# HeightMapShape3D collision
-	var hmap := HeightMapShape3D.new()
-	hmap.map_width = verts_per_side
-	hmap.map_depth = verts_per_side
+	# Pack heightmap data
 	var hmap_data := PackedFloat32Array()
 	hmap_data.resize(verts_per_side * verts_per_side)
 	for zi in range(verts_per_side):
 		for xi in range(verts_per_side):
 			hmap_data[zi * verts_per_side + xi] = heights[zi * verts_per_side + xi]
-	hmap.map_data = hmap_data
-	var col_shape := CollisionShape3D.new()
-	col_shape.shape = hmap
-	col_shape.scale = Vector3(step, 1.0, step)
-	add_child(col_shape)
+
+	# Hand results back to main thread
+	call_deferred("_apply_terrain_data", verts, normals, colors, uvs, indices,
+			hmap_data, verts_per_side, step, seed_val, plateaus.size(), peaks.size(),
+			secret_paths.size(), grass_left)
+
+
+func _apply_terrain_data(verts: PackedVector3Array, normals: PackedVector3Array,
+		colors: PackedColorArray, uvs: PackedVector2Array, indices: PackedInt32Array,
+		hmap_data: PackedFloat32Array, verts_per_side: int, step: float,
+		seed_val: int, plateau_count: int, peak_count: int,
+		secret_path_count: int, grass_left: bool) -> void:
+
+	# Must be called on the main thread — joins the worker thread first.
+	if _thread != null and _thread.is_started():
+		_thread.wait_to_finish()
+		_thread = null
+
+	# Skip mesh and collision construction when no geometry was produced
+	# (e.g. in unit tests that pass empty arrays via a FastTerrain subclass).
+	if verts.size() > 0:
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = verts
+		arrays[Mesh.ARRAY_NORMAL] = normals
+		arrays[Mesh.ARRAY_COLOR]  = colors
+		arrays[Mesh.ARRAY_TEX_UV] = uvs
+		arrays[Mesh.ARRAY_INDEX]  = indices
+
+		var arr_mesh := ArrayMesh.new()
+		arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		var mat := StandardMaterial3D.new()
+		mat.vertex_color_use_as_albedo = true
+		mat.roughness = 0.9
+		arr_mesh.surface_set_material(0, mat)
+
+		var mesh_inst := MeshInstance3D.new()
+		mesh_inst.mesh = arr_mesh
+		add_child(mesh_inst)
+
+	# HeightMapShape3D collision — only build when map data is present.
+	if hmap_data.size() > 0:
+		var hmap := HeightMapShape3D.new()
+		hmap.map_width = verts_per_side
+		hmap.map_depth = verts_per_side
+		hmap.map_data = hmap_data
+		var col_shape := CollisionShape3D.new()
+		col_shape.shape = hmap
+		col_shape.scale = Vector3(step, 1.0, step)
+		add_child(col_shape)
 
 	print("Terrain: verts=%d seed=%d plateaus=%d peaks=%d secret_paths=%d grass_left=%s" \
-		% [verts.size(), seed_val, plateaus.size(), peaks.size(), secret_paths.size(), str(grass_left)])
+		% [verts.size(), seed_val, plateau_count, peak_count, secret_path_count, str(grass_left)])
 	LoadingState.report("Building terrain...", 25.0)
+	generation_done = true
+	done.emit()
 
 # ── Secret path generation ─────────────────────────────────────────────────────
 func _gen_secret_paths(seed_val: int) -> Array:

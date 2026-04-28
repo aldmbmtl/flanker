@@ -64,6 +64,13 @@ func _process(delta: float) -> void:
 func _build_visuals() -> void:
 	var color: Color = BLUE_COLOR if team == 0 else RED_COLOR
 
+	# ── Shared quad material ───────────────────────────────────────────────
+	# Billboard so quads always face the camera regardless of viewing angle.
+	# Unshaded + vertex_color_use_as_albedo so ParticleProcessMaterial color
+	# tinting is applied correctly. Alpha transparency for soft particle edges.
+	# Without this every QuadMesh uses the default StandardMaterial3D which
+	# has cull_back enabled and no billboard — the back hemisphere is invisible.
+
 	# ── Swirl — main vortex, orbit Y-axis around sphere surface ───────────
 	_swirl_pm = ParticleProcessMaterial.new()
 	_swirl_pm.emission_shape         = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
@@ -80,7 +87,8 @@ func _build_visuals() -> void:
 	_swirl_pm.color                  = color
 
 	var swirl_quad := QuadMesh.new()
-	swirl_quad.size = Vector2(0.06, 0.5)
+	swirl_quad.size     = Vector2(0.06, 0.5)
+	swirl_quad.material = _make_particle_mat()
 
 	_swirl = GPUParticles3D.new()
 	_swirl.amount           = 200
@@ -109,7 +117,8 @@ func _build_visuals() -> void:
 	_inner_pm.color                  = color
 
 	var inner_quad := QuadMesh.new()
-	inner_quad.size = Vector2(0.3, 0.3)
+	inner_quad.size     = Vector2(0.3, 0.3)
+	inner_quad.material = _make_particle_mat()
 
 	_inner = GPUParticles3D.new()
 	_inner.amount           = 60
@@ -138,7 +147,8 @@ func _build_visuals() -> void:
 	_sparks_pm.color                  = color
 
 	var sparks_quad := QuadMesh.new()
-	sparks_quad.size = Vector2(0.06, 0.06)
+	sparks_quad.size     = Vector2(0.06, 0.06)
+	sparks_quad.material = _make_particle_mat()
 
 	_sparks = GPUParticles3D.new()
 	_sparks.amount           = 70
@@ -167,7 +177,8 @@ func _build_visuals() -> void:
 	_tendrils_pm.color                  = color
 
 	var tendril_quad := QuadMesh.new()
-	tendril_quad.size = Vector2(0.07, 0.6)
+	tendril_quad.size     = Vector2(0.07, 0.6)
+	tendril_quad.material = _make_particle_mat()
 
 	_tendrils = GPUParticles3D.new()
 	_tendrils.amount           = 45
@@ -200,6 +211,15 @@ func _build_visuals() -> void:
 	_shaft.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
 	_shaft.position         = Vector3(0.0, SPHERE_Y + 0.2, 0.0)
 	add_child(_shaft)
+
+func _make_particle_mat() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.transparency              = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode              = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.billboard_mode            = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.cull_mode                 = BaseMaterial3D.CULL_DISABLED
+	return mat
 
 func _apply_team_color() -> void:
 	var color: Color = BLUE_COLOR if team == 0 else RED_COLOR

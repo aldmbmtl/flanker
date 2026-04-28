@@ -4,9 +4,10 @@ LOG        := /tmp/flankers.log
 HOST_LOG   := /tmp/flankers_host.log
 CLIENT_LOG := /tmp/flankers_client.log
 
-TEST_LOG   := /tmp/flankers_tests.log
+TEST_LOG      := /tmp/flankers_tests.log
+COVERAGE_LOG  := /tmp/flankers_coverage.txt
 
-.PHONY: run stop restart logs host client hlogs clogs clean-symlink clean build test
+.PHONY: run stop restart logs host client hlogs clogs clean-symlink clean build test coverage
 
 .DEFAULT_GOAL := restart
 
@@ -53,3 +54,10 @@ clean:
 test:
 	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1
 	$(GODOT) --headless -s addons/gut/gut_cmdln.gd --path $(PROJECT) -gconfig=.gutconfig.json 2>&1 | tee $(TEST_LOG)
+
+coverage:
+	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1
+	$(GODOT) --headless -s addons/gut/gut_cmdln.gd --path $(PROJECT) -gconfig=.gutconfig.coverage.json 2>&1 | tee $(TEST_LOG)
+	@echo ""
+	@echo "Coverage report: $(COVERAGE_LOG)"
+	@cat $(COVERAGE_LOG)

@@ -11,12 +11,18 @@ func _ready() -> void:
 	mat.roughness = 0.85
 	mat.metallic = 0.0
 
+	# Yield every 20 segments so the loading screen can update between batches.
+	var batch: int = 0
 	for lane_i in range(3):
 		var pts: Array = LaneData.get_lane_points(lane_i)
 		for i in range(pts.size() - 1):
 			var a: Vector2 = pts[i]
 			var b: Vector2 = pts[i + 1]
 			_place_segment(a, b, mat)
+			batch += 1
+			if batch >= 20:
+				batch = 0
+				await get_tree().process_frame
 
 func _place_segment(a: Vector2, b: Vector2, mat: StandardMaterial3D) -> void:
 	var seg := b - a

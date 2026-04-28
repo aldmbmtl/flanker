@@ -3,7 +3,7 @@ extends Node
 # ── Placeable definitions ─────────────────────────────────────────────────────
 # Each entry: { cost, scene, attack_range, is_tower, lane_setback, [spacing] }
 # Towers: spacing is computed in _ready() from attack_range (see SPACING_* constants).
-#   Attacking towers: spacing = max(SPACING_FLOOR, attack_range * SPACING_FACTOR)
+#   Attacking towers: spacing = attack_range * SPACING_FACTOR (75% of range)
 #   Passive towers (attack_range 0): spacing = SPACING_PASSIVE
 # Non-tower drops: spacing is set explicitly here and left unchanged.
 # "weapon" cost is 0 — actual cost comes from WEAPON_COSTS keyed by subtype.
@@ -30,8 +30,7 @@ const SLOPE_THRESHOLD := 0.85
 const MIN_TOWER_SPACING := 20.0
 
 # Spacing formula constants for attacking towers
-const SPACING_FACTOR  := 1.4   # multiplied by attack_range
-const SPACING_FLOOR   := 10.0  # minimum spacing for attacking towers
+const SPACING_FACTOR  := 0.75  # multiplied by attack_range (75% of range)
 const SPACING_PASSIVE := 3.0   # spacing for passive towers (attack_range == 0)
 
 var _loaded_scenes: Dictionary = {}
@@ -43,7 +42,7 @@ func _ready() -> void:
 		if not def.get("is_tower", false):
 			continue
 		var r: float = def.get("attack_range", 0.0)
-		def["spacing"] = SPACING_PASSIVE if r == 0.0 else maxf(SPACING_FLOOR, r * SPACING_FACTOR)
+		def["spacing"] = SPACING_PASSIVE if r == 0.0 else r * SPACING_FACTOR
 	for key in PLACEABLE_DEFS:
 		var path: String = PLACEABLE_DEFS[key]["scene"]
 		_loaded_scenes[key] = load(path)

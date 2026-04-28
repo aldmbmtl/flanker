@@ -181,6 +181,8 @@ func _spawn_local_player() -> void:
 	fps_player.add_to_group("player")
 	var spawn_z: float = 84.0 if player_start_team == 0 else -84.0
 	fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
+	# Blue base is at +Z, red base is at -Z. Both teams must face map centre (Z=0).
+	fps_player.rotation.y = PI if player_start_team == 0 else 0.0
 
 func _start_multiplayer_game() -> void:
 	# Resolve team from lobby
@@ -672,29 +674,37 @@ func _input(event: InputEvent) -> void:
 				return
 
 func _on_start_game() -> void:
-	# Show loading screen immediately — TreePlacer/WallPlacer are still pending
-	# (they await 2 process frames before running)
+	# Show loading screen immediately — terrain, trees, and walls all run async.
 	var loading_screen = LoadingScreenScene.instantiate()
 	add_child(loading_screen)
 	loading_screen.set_status("Building terrain...")
-	loading_screen.set_progress(20.0)
+	loading_screen.set_progress(10.0)
+
+	# Hide the start menu and stop its orbiting camera right away so the
+	# loading screen is the only thing visible during the async build phase.
+	if _start_menu:
+		_start_menu.visible = false
+		var menu_cam: Node = _start_menu.get_node_or_null("MenuCamera")
+		if menu_cam:
+			menu_cam.set("current", false)
+			menu_cam.visible = false
+
 	await get_tree().process_frame
 
-	# Terrain is already built (synchronous _ready). Trees + walls are deferred.
+	# Wait for terrain thread to finish and apply mesh + collision shape.
+	# TreePlacer raycasts against terrain collision, so terrain must be ready first.
+	if not $World/Terrain.generation_done:
+		await $World/Terrain.done
+
 	loading_screen.set_status("Placing trees...")
 	loading_screen.set_progress(35.0)
-	await $World/TreePlacer.done
+	if not $World/TreePlacer.generation_done:
+		await $World/TreePlacer.done
 
 	loading_screen.set_status("Placing cover objects...")
 	loading_screen.set_progress(55.0)
-	await $World/WallPlacer.done
-
-	# Hide start menu and disable its camera
-	_start_menu.visible = false
-	var menu_cam: Node = _start_menu.get_node_or_null("MenuCamera")
-	if menu_cam:
-		menu_cam.set("current", false)
-		menu_cam.visible = false
+	if not $World/WallPlacer.generation_done:
+		await $World/WallPlacer.done
 
 	loading_screen.set_status("Waiting for role selection...")
 	loading_screen.set_progress(62.0)
@@ -760,6 +770,8 @@ func _on_start_game() -> void:
 		_setup_hud_for_player()
 		var spawn_z: float = 84.0 if player_start_team == 0 else -84.0
 		fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
+		# Face map centre on spawn.
+		fps_player.rotation.y = PI if player_start_team == 0 else 0.0
 		_HUD_set_visible(true)
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 		_set_mode(true)
@@ -974,7 +986,6 @@ func _do_respawn() -> void:
 	if fps_player:
 		var spawn_pos: Vector3 = BLUE_SPAWN if fps_player.player_team == 0 else RED_SPAWN
 		fps_player.respawn(spawn_pos)
-	audio_respawn.play()
 	_set_mode(true)
 
 func _spawn_weapon_pickups() -> void:

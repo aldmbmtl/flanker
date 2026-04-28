@@ -1,6 +1,7 @@
 extends Node3D
 
-const FENCE_PATH := "res://assets/kenney_fantasy-town-kit/Models/GLB format/fence.glb"
+# Preload fence GLB so no synchronous disk I/O occurs during placement.
+const FENCE_SCENE: PackedScene = preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/fence.glb")
 
 const LANE_WIDTH := 6.0
 const FENCE_OFFSET := 3.3        # half-lane + small gap from dirt ribbon edge
@@ -31,21 +32,31 @@ func _ready() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	seed(GameSync.game_seed)
+
+	# Ensure terrain collision is ready before placement (FencePlacer doesn't
+	# raycast, but consistent ordering avoids race conditions).
+	if has_node("/root/Main/World/Terrain"):
+		var terrain_node: Node = $/root/Main/World/Terrain
+		if terrain_node.get_child_count() == 0:
+			await terrain_node.done
+
 	_terrain_body = _find_terrain()
 
-	var fence_scene: PackedScene = load(FENCE_PATH)
-	if fence_scene == null:
-		push_error("FencePlacer: failed to load " + FENCE_PATH)
+	# Extract mesh from the preloaded GLB for MultiMesh use
+	_fence_mesh = _extract_first_mesh(FENCE_SCENE)
+	if _fence_mesh == null:
+		push_error("FencePlacer: failed to extract mesh from fence scene")
 		return
 
-	# Extract mesh from the GLB for MultiMesh use
-	_fence_mesh = _extract_first_mesh(fence_scene)
+	await _place_all_fences()
+	_commit_fence_multimesh()
 
+func _place_all_fences() -> void:
+	# Spread across frames: yield after each lane side (~78 segments each).
 	for lane_i in range(3):
 		var pts: Array = LaneData.get_lane_points(lane_i)
 		_place_lane_fences(pts, lane_i)
-
-	_commit_fence_multimesh()
+		await get_tree().process_frame
 
 func _extract_first_mesh(scene: PackedScene) -> Mesh:
 	var inst: Node = scene.instantiate()

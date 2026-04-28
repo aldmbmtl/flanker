@@ -363,6 +363,9 @@ func respawn(spawn_pos: Vector3) -> void:
 	var max_hp: float = _get_max_hp()
 	hp           = max_hp
 	global_position = spawn_pos
+	# Face map centre: blue (z>0) looks toward -Z, red (z<0) looks toward +Z.
+	rotation.y      = PI if player_team == 0 else 0.0
+	camera.rotation.x = 0.0
 	velocity     = Vector3.ZERO
 	_reloading    = false
 	_reload_timer = 0.0
