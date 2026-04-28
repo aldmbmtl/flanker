@@ -5,6 +5,7 @@
 extends TowerBase
 
 const ShellScene := preload("res://scenes/projectiles/MortarShell.tscn")
+const SND_FIRE := "res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_004.ogg"
 
 var attack_damage: float = 80.0
 
@@ -20,5 +21,6 @@ func _do_attack(target: Node3D) -> void:
 	shell.target_pos = aim_pos
 	shell.position = spawn_pos
 	get_tree().root.get_child(0).add_child(shell)
+	SoundManager.play_3d(SND_FIRE, get_fire_position(), 1.0, randf_range(0.88, 1.0))
 	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
 		LobbyManager.spawn_mortar_visuals.rpc(spawn_pos, aim_pos, attack_damage, team)

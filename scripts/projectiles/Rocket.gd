@@ -1,14 +1,31 @@
 extends ProjectileBase
 
-const INITIAL_SPEED        := 0.1
-const ACCELERATION         := 120.0
 const MAX_SPEED            := 49.0
+const MIN_SPEED  : float   = 3.0   # forward floor — keeps rocket clear of terrain while swirling
+const RAMP_TIME  : float   = 1.2   # seconds to reach full speed
+const RAMP_POWER : float   = 4.0   # quartic curve — near-zero for most of ramp, then snaps hard
 const SPLASH_RADIUS        := 8.0
 const SPLASH_DAMAGE        := 80.0
 const TREE_DESTROY_RADIUS  := 8.0
 
+# ── Swirl constants ───────────────────────────────────────────────────────────
+const SWIRL_AMP   : float = 10.0  # peak lateral speed (m/s) — wild chaotic launch
+const SWIRL_HZ    : float = 1.0   # full rotations per second (~1 spiral visible)
+const SWIRL_DECAY : float = 2.5   # e-fold damping rate — locks on quickly
+const SWIRL_START_DIST : float = 3.0   # units of straight flight before spiral begins
+
+const SND_LAUNCH    := "res://assets/kenney_sci-fi-sounds/Audio/thrusterFire_000.ogg"
+const SND_EXPLOSION := "res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_003.ogg"
+
 var _fire_trail: GPUParticles3D  = null
 var _smoke_trail: GPUParticles3D = null
+
+# ── Swirl state ───────────────────────────────────────────────────────────────
+var _initial_dir    : Vector3 = Vector3.ZERO
+var _swirl_axis1    : Vector3 = Vector3.ZERO
+var _swirl_axis2    : Vector3 = Vector3.ZERO
+var _forward_dist   : float   = 0.0    # cumulative forward distance traveled
+var _swirl_start_age: float   = -1.0   # age when swirl activated; -1 = not yet
 
 func _ready() -> void:
 	gravity      = 0.0
@@ -16,17 +33,71 @@ func _ready() -> void:
 	source       = "rocket"
 	_spawn_fire_trail()
 	_spawn_smoke_trail()
+	SoundManager.play_3d(SND_LAUNCH, global_position, -2.0, randf_range(0.92, 1.05))
+
+	# Cache swirl axes perpendicular to the initial aim direction.
+	# No random phase — axis1 is always the consistent rightward cross product,
+	# so the spiral always begins with the same directional kick from the barrel.
+	# axis2 uses the reversed cross (axis1 × dir) so it points UPWARD — the spiral
+	# goes right → up → left → (barely) down, preventing ground collision early on.
+	if velocity.length() > 0.0:
+		_initial_dir = velocity.normalized()
+		var up: Vector3 = Vector3.UP if abs(_initial_dir.dot(Vector3.UP)) < 0.9 else Vector3.RIGHT
+		_swirl_axis1 = _initial_dir.cross(up).normalized()
+		_swirl_axis2 = _swirl_axis1.cross(_initial_dir).normalized()
+
+# ── Core loop override ────────────────────────────────────────────────────────
+# Identical to ProjectileBase._process except collision_mask excludes layer 2
+# (fences and torches) so the rocket passes through them without detonating.
+
+func _process(delta: float) -> void:
+	_age += delta
+	if _age >= max_lifetime:
+		_on_expire()
+		queue_free()
+		return
+
+	var prev_pos: Vector3 = global_position
+	var new_pos: Vector3  = prev_pos + velocity * delta
+
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(prev_pos, new_pos)
+	query.collision_mask = 0xFFFFFFFD   # all layers except layer 2 (fences / torches)
+	var result: Dictionary = space.intersect_ray(query)
+
+	if not result.is_empty():
+		_on_hit(result.position, result.collider)
+		queue_free()
+		return
+
+	global_position = new_pos
+	_after_move()
 
 # ── Hooks ─────────────────────────────────────────────────────────────────────
 
 func _after_move() -> void:
-	# Accelerate along current direction
-	var speed: float = velocity.length()
-	if speed > 0.0:
-		var dir: Vector3 = velocity / speed
-		speed = min(speed + ACCELERATION * get_process_delta_time(), MAX_SPEED)
-		velocity = dir * speed
-	if speed > 0.1:
+	# Quartic power curve: stays near-zero for ~0.6 s then snaps hard to MAX_SPEED.
+	# MIN_SPEED floor ensures the rocket always clears terrain while swirling.
+	var t: float = clamp(_age / RAMP_TIME, 0.0, 1.0)
+	var fwd_speed: float = max(MAX_SPEED * pow(t, RAMP_POWER), MIN_SPEED)
+
+	# Accumulate forward distance. Swirl is gated until SWIRL_START_DIST is covered,
+	# so the rocket flies straight from the barrel before the spiral begins.
+	# _swirl_start_age is latched once so decay and rotation are anchored to swirl-start.
+	_forward_dist += fwd_speed * get_process_delta_time()
+
+	var swirl: Vector3 = Vector3.ZERO
+	if _forward_dist >= SWIRL_START_DIST:
+		if _swirl_start_age < 0.0:
+			_swirl_start_age = _age
+		var swirl_age: float = _age - _swirl_start_age
+		var swirl_amp: float = SWIRL_AMP * exp(-swirl_age * SWIRL_DECAY)
+		var angle: float     = swirl_age * SWIRL_HZ * TAU
+		swirl = (_swirl_axis1 * cos(angle) + _swirl_axis2 * sin(angle)) * swirl_amp
+
+	velocity = _initial_dir * fwd_speed + swirl
+
+	if velocity.length() > 0.1:
 		look_at(global_position + velocity.normalized(), Vector3.UP)
 
 func _on_hit(pos: Vector3, collider: Object) -> void:
@@ -38,7 +109,7 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 		return
 
 	if CombatUtils.should_damage(collider, shooter_team):
-		collider.take_damage(damage, source, shooter_team)
+		collider.take_damage(damage, source, shooter_team, shooter_peer_id)
 
 	_apply_splash(pos, SPLASH_RADIUS, SPLASH_DAMAGE, "rocket_splash", collider)
 	_request_destroy_trees(pos)
@@ -279,3 +350,4 @@ func _spawn_explosion(pos: Vector3) -> void:
 	var tw: Tween = flash.create_tween()
 	tw.tween_property(flash, "light_energy", 0.0, 0.6)
 	tw.tween_callback(flash.queue_free)
+	SoundManager.play_3d(SND_EXPLOSION, pos, 2.0, randf_range(0.88, 1.0))

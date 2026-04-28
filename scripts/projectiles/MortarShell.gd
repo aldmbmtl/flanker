@@ -5,6 +5,8 @@ const FLIGHT_TIME       := 3.5
 const SPLASH_RADIUS     := 6.0
 const SPLASH_DAMAGE_MULT := 0.5
 
+const SND_EXPLOSION := "res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_002.ogg"
+
 var target_pos: Vector3 = Vector3.ZERO
 
 var _trail_timer: float = 0.0
@@ -52,6 +54,7 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 			collider.take_damage(damage, source, shooter_team)
 		_apply_splash(pos, SPLASH_RADIUS, damage * SPLASH_DAMAGE_MULT, "mortar_splash", collider)
 	_spawn_impact(pos)
+	SoundManager.play_3d(SND_EXPLOSION, pos, 2.0, randf_range(0.85, 1.0))
 
 # ── Trail + orientation ───────────────────────────────────────────────────────
 

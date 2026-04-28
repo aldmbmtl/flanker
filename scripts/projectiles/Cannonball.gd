@@ -4,6 +4,9 @@ const FLIGHT_TIME        := 2.5
 const SPLASH_RADIUS      := 3.0
 const SPLASH_DAMAGE_MULT := 0.5
 
+const SND_EXPLOSION := "res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_000.ogg"
+const SND_WOOD      := "res://assets/kenney_impact-sounds/Audio/impactWood_heavy_000.ogg"
+
 var target_pos: Vector3 = Vector3.ZERO
 
 var _light: OmniLight3D = null
@@ -28,6 +31,7 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 	if collider != null and collider.has_meta("tree_trunk_height"):
 		_spawn_tree_impact(pos)
 		_request_destroy_tree(pos)
+		SoundManager.play_3d(SND_WOOD, pos, 0.0, randf_range(0.9, 1.1))
 		return
 
 	var is_server: bool = not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
@@ -46,6 +50,7 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 			collider.take_damage(damage, "cannonball", shooter_team)
 		_apply_splash(pos, SPLASH_RADIUS, damage * SPLASH_DAMAGE_MULT, "cannonball_splash", collider)
 	_spawn_impact(pos)
+	SoundManager.play_3d(SND_EXPLOSION, pos, 0.0, randf_range(0.88, 1.05))
 
 # ── Trail flicker ─────────────────────────────────────────────────────────────
 

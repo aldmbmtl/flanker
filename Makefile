@@ -4,7 +4,9 @@ LOG        := /tmp/flankers.log
 HOST_LOG   := /tmp/flankers_host.log
 CLIENT_LOG := /tmp/flankers_client.log
 
-.PHONY: run stop restart logs host client hlogs clogs clean-symlink clean build
+TEST_LOG   := /tmp/flankers_tests.log
+
+.PHONY: run stop restart logs host client hlogs clogs clean-symlink clean build test
 
 .DEFAULT_GOAL := restart
 
@@ -47,3 +49,7 @@ clean-symlink:
 
 clean:
 	find $(PROJECT)/scripts -name "*.uid" -delete
+
+test:
+	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1
+	$(GODOT) --headless -s addons/gut/gut_cmdln.gd --path $(PROJECT) -gconfig=.gutconfig.json 2>&1 | tee $(TEST_LOG)

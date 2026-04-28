@@ -56,7 +56,18 @@ const CAP_H_CROUCH := 0.9
 
 const MAX_HP := 100.0
 
-const DEFAULT_WEAPON_PATH := "res://assets/weapons/weapon_pistol.tres"
+const DEFAULT_WEAPON_PATH    := "res://assets/weapons/weapon_pistol.tres"
+const DEFAULT_SECONDARY_PATH := "res://assets/weapons/weapon_rocket_launcher.tres"
+
+const FOOTSTEP_SOUNDS: Array = [
+	"res://assets/kenney_impact-sounds/Audio/footstep_grass_000.ogg",
+	"res://assets/kenney_impact-sounds/Audio/footstep_grass_001.ogg",
+	"res://assets/kenney_impact-sounds/Audio/footstep_grass_002.ogg",
+	"res://assets/kenney_impact-sounds/Audio/footstep_grass_003.ogg",
+	"res://assets/kenney_impact-sounds/Audio/footstep_grass_004.ogg",
+]
+const FOOTSTEP_INTERVAL_WALK   := 0.375
+const FOOTSTEP_INTERVAL_SPRINT := 0.24
 
 var active    := true
 var hp: float  = MAX_HP
@@ -96,6 +107,7 @@ const BOB_LERP    := 10.0
 var _slow_timer: float = 0.0
 var _slow_mult:  float = 1.0
 var _slow_trail: GPUParticles3D = null
+var _step_timer: float = 0.0
 
 # 2-slot weapon inventory; slot 0 = default pistol, slot 1 = empty initially
 var weapons: Array = [null, null]
@@ -331,6 +343,10 @@ func _load_default_weapon() -> void:
 	if default_weapon:
 		weapons[0] = default_weapon
 		_slot_ammo[0] = [default_weapon.magazine_size, default_weapon.reserve_ammo]
+	var secondary_weapon: WeaponData = load(DEFAULT_SECONDARY_PATH)
+	if secondary_weapon:
+		weapons[1] = secondary_weapon
+		_slot_ammo[1] = [secondary_weapon.magazine_size, secondary_weapon.reserve_ammo]
 
 func _apply_role_stats() -> void:
 	if player_role.is_empty():
@@ -516,6 +532,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_select_slot(0)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			_select_slot(1)
+	if event.is_action_pressed("ping"):
+		_fire_ping()
 
 func _select_slot(slot: int) -> void:
 	if slot == active_slot:
@@ -671,6 +689,18 @@ func _physics_process(delta: float) -> void:
 	velocity.z = dir.z * cur_speed
 	move_and_slide()
 
+	# Footsteps — play only for the local player when grounded and moving
+	var horiz_sq: float = Vector2(velocity.x, velocity.z).length_squared()
+	if is_on_floor() and horiz_sq > 0.5:
+		_step_timer -= delta
+		if _step_timer <= 0.0:
+			var is_sprinting: bool = want_sprint and _stamina > 0.0 and not _stamina_exhausted
+			_step_timer = FOOTSTEP_INTERVAL_SPRINT if is_sprinting else FOOTSTEP_INTERVAL_WALK
+			var snd: String = FOOTSTEP_SOUNDS[randi() % FOOTSTEP_SOUNDS.size()]
+			SoundManager.play_3d(snd, global_position, -8.0, randf_range(0.9, 1.1))
+	else:
+		_step_timer = 0.0
+
 	# Drive avatar walk/idle animation from actual velocity
 	if _avatar_anim != null and _avatar_anim.is_inside_tree():
 		var horiz_speed_sq: float = Vector2(velocity.x, velocity.z).length_squared()
@@ -679,7 +709,7 @@ func _physics_process(delta: float) -> void:
 			_avatar_anim.play(want_anim)
 
 	# Broadcast transform to host every N frames (local player only)
-	if multiplayer.has_multiplayer_peer() and _is_local and _peer_id == multiplayer.get_unique_id():
+	if NetworkManager._peer != null and _is_local:
 		_sync_frame += 1
 		if _sync_frame >= PLAYER_SYNC_INTERVAL:
 			_sync_frame = 0
@@ -690,8 +720,10 @@ func _physics_process(delta: float) -> void:
 				_last_sent_pos = global_position
 				_last_sent_rot = cam_rot
 				if multiplayer.is_server():
-					# Host broadcasts directly (can't rpc_id to self)
-					LobbyManager.report_player_transform(global_position, cam_rot, player_team)
+					# Host calls broadcast directly — report_player_transform is call_remote and won't run locally
+					var my_id: int = multiplayer.get_unique_id()
+					LobbyManager.broadcast_player_transform(my_id, global_position, cam_rot, player_team)
+					LobbyManager.broadcast_player_transform.rpc(my_id, global_position, cam_rot, player_team)
 				else:
 					LobbyManager.report_player_transform.rpc_id(1, global_position, cam_rot, player_team)
 
@@ -744,12 +776,11 @@ func _shoot() -> void:
 		rocket.global_position = shoot_from.global_position
 		# Multiplayer: server broadcasts rocket spawn to all clients
 		if multiplayer.has_multiplayer_peer():
-			var rocket_hit_info: Dictionary = {}
 			if multiplayer.is_server():
 				LobbyManager.spawn_bullet_visuals.rpc(shoot_from.global_position, dir, w.damage, player_team, _peer_id, "rocket")
 			else:
-				rocket_hit_info = _local_raycast_hit(shoot_from.global_position, dir)
-			LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, _peer_id, rocket_hit_info, "rocket")
+				var rocket_hit_info: Dictionary = _local_raycast_hit(shoot_from.global_position, dir)
+				LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, _peer_id, rocket_hit_info, "rocket")
 	else:
 		var bullet: Node3D = BulletScene.instantiate()
 		bullet.damage        = w.damage * player_damage_mult * _get_level_damage_mult()
@@ -946,3 +977,23 @@ func _on_game_sync_respawned(peer_id: int, spawn_pos: Vector3) -> void:
 	if peer_id != _peer_id:
 		return
 	respawn(spawn_pos)
+
+func _fire_ping() -> void:
+	print("[PING-FPS] _fire_ping called, player_team=%d" % player_team)
+	# Raycast from camera forward to get world position for ping.
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	var origin: Vector3 = shoot_from.global_position
+	var dir: Vector3 = -shoot_from.global_transform.basis.z
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + dir * 500.0)
+	query.collision_mask = 1
+	var result: Dictionary = space.intersect_ray(query)
+	var world_pos: Vector3 = result.get("position", origin + dir * 100.0) as Vector3
+	if NetworkManager._peer != null:
+		print("[PING-FPS] has_multiplayer_peer=true, is_server=%s" % str(multiplayer.is_server()))
+		if multiplayer.is_server():
+			LobbyManager.request_ping(world_pos, player_team)
+		else:
+			LobbyManager.request_ping.rpc_id(1, world_pos, player_team)
+	else:
+		print("[PING-FPS] singleplayer path — emitting directly, world_pos=%s team=%d" % [str(world_pos), player_team])
+		LobbyManager.ping_received.emit(world_pos, player_team)

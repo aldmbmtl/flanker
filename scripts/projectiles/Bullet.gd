@@ -9,6 +9,10 @@ static var _mat_building: StandardMaterial3D = null
 static var _spark_mesh: QuadMesh = null
 static var _spark_pmat: ParticleProcessMaterial = null
 
+const SND_HIT_GROUND    := "res://assets/kenney_impact-sounds/Audio/impactPlate_medium_000.ogg"
+const SND_HIT_UNIT      := "res://assets/kenney_impact-sounds/Audio/impactPunch_medium_001.ogg"
+const SND_HIT_BUILDING  := "res://assets/kenney_impact-sounds/Audio/impactMetal_medium_000.ogg"
+
 func _ready() -> void:
 	var mi: MeshInstance3D = $MeshInstance3D
 	mi.material_override = CombatUtils.make_team_tracer_material(shooter_team)
@@ -31,12 +35,14 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 					LobbyManager.notify_player_died.rpc(target_peer)
 		hit_something.emit("player")
 		_spawn_sparks(pos, collider)
+		_play_hit_sound(pos, collider)
 		return
 
 	if CombatUtils.should_damage(collider, shooter_team):
 		hit_something.emit(_get_hit_type(collider))
 		collider.take_damage(damage, source, shooter_team, shooter_peer_id)
 	_spawn_sparks(pos, collider)
+	_play_hit_sound(pos, collider)
 
 # ── Orientation ───────────────────────────────────────────────────────────────
 
@@ -59,6 +65,17 @@ func _get_hit_type(hit: Object) -> String:
 		if hit_team >= 0:
 			return "minion"
 	return "building"
+
+func _play_hit_sound(pos: Vector3, hit: Object) -> void:
+	var snd: String = SND_HIT_GROUND
+	if hit is StaticBody3D and hit.has_meta("ghost_peer_id"):
+		snd = SND_HIT_UNIT
+	elif hit.has_method("take_damage"):
+		if hit is StaticBody3D:
+			snd = SND_HIT_BUILDING
+		else:
+			snd = SND_HIT_UNIT
+	SoundManager.play_3d(snd, pos, -4.0, randf_range(0.9, 1.1))
 
 func _spawn_sparks(pos: Vector3, hit: Object) -> void:
 	var spark_type := "ground"

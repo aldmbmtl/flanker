@@ -27,7 +27,7 @@ func _ready() -> void:
 	_minion_counter = 0
 
 func _physics_process(_delta: float) -> void:
-	if not multiplayer.is_server():
+	if NetworkManager._peer != null and not multiplayer.is_server():
 		return
 	_sync_frame += 1
 	if _sync_frame >= SYNC_INTERVAL:
@@ -71,7 +71,7 @@ func _broadcast_minion_states() -> void:
 		offset = end
 
 func _process(delta: float) -> void:
-	if not multiplayer.is_server():
+	if NetworkManager._peer != null and not multiplayer.is_server():
 		return
 	wave_timer += delta
 	# Update countdown label

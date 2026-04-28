@@ -83,7 +83,7 @@ func award_xp(peer_id: int, amount: int) -> void:
 		_points[peer_id] = _points[peer_id] + pts
 		level_up.emit(peer_id, _level[peer_id])
 		# In MP: send to owning client via RPC
-		if multiplayer.has_multiplayer_peer() and multiplayer.is_server() and peer_id != multiplayer.get_unique_id():
+		if multiplayer.has_multiplayer_peer() and multiplayer.is_server() and peer_id != multiplayer.get_unique_id() and multiplayer.get_peers().has(peer_id):
 			_sync_level_state_to_peer(peer_id)
 			notify_level_up.rpc_id(peer_id, _level[peer_id], pts)
 		elif multiplayer.has_multiplayer_peer() and multiplayer.is_server() and peer_id == multiplayer.get_unique_id():
@@ -166,6 +166,8 @@ func _sync_level_state_to_peer(peer_id: int) -> void:
 		return
 	if peer_id == multiplayer.get_unique_id():
 		return  # Don't RPC to self
+	if not multiplayer.get_peers().has(peer_id):
+		return  # Peer not connected (e.g. offline/test context)
 	var xp_val: int = _xp.get(peer_id, 0)
 	var lvl: int    = _level.get(peer_id, 1)
 	var pts: int    = _points.get(peer_id, 0)

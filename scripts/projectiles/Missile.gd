@@ -6,6 +6,8 @@ extends ProjectileBase
 
 const GRAVITY: float = 18.0
 
+const SND_EXPLOSION := "res://assets/kenney_sci-fi-sounds/Audio/lowFrequency_explosion_000.ogg"
+
 # Configured before add_child via configure()
 var target_pos: Vector3  = Vector3.ZERO
 var fire_pos: Vector3    = Vector3.ZERO
@@ -22,14 +24,15 @@ var _trail_light: OmniLight3D = null
 
 # ── Configure (call BEFORE add_child so _ready() sees values) ─────────────────
 
-func configure(def: Dictionary, p_team: int, p_fire: Vector3, p_target: Vector3, p_type: String) -> void:
-	shooter_team  = p_team
-	fire_pos      = p_fire
-	target_pos    = p_target
-	launcher_type = p_type
-	blast_radius  = float(def.get("blast_radius", 12.0))
-	blast_damage  = float(def.get("blast_damage", 400.0))
-	flight_time   = float(def.get("flight_time", 4.0))
+func configure(def: Dictionary, p_team: int, p_fire: Vector3, p_target: Vector3, p_type: String, p_shooter_peer_id: int = -1) -> void:
+	shooter_team     = p_team
+	shooter_peer_id  = p_shooter_peer_id
+	fire_pos         = p_fire
+	target_pos       = p_target
+	launcher_type    = p_type
+	blast_radius     = float(def.get("blast_radius", 12.0))
+	blast_damage     = float(def.get("blast_damage", 400.0))
+	flight_time      = float(def.get("flight_time", 4.0))
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -135,10 +138,9 @@ func _process(delta: float) -> void:
 	if _trail_light:
 		_trail_light.light_energy = randf_range(2.5, 4.0)
 
-	# Terrain / collision raycast
+	# Collision raycast — all layers so players, towers, and terrain all trigger impact
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(prev_pos, new_pos)
-	query.collision_mask = 1  # terrain only — stops on ground
 	var result: Dictionary = space.intersect_ray(query)
 
 	if not result.is_empty():
@@ -183,15 +185,20 @@ func _apply_blast_damage(pos: Vector3) -> void:
 		var body: Object = overlap.get("collider")
 		if body == null:
 			continue
-		if not body.has_method("take_damage"):
+		# Ghost hitbox — remote player in multiplayer; route via GameSync like Bullet/Cannonball do
+		if body is StaticBody3D and body.has_meta("ghost_peer_id"):
+			var target_peer: int = body.get_meta("ghost_peer_id") as int
+			if not GameSync.player_dead.get(target_peer, false):
+				var ghost_team: int = GameSync.get_player_team(target_peer)
+				if ghost_team != shooter_team:
+					var new_hp: float = GameSync.damage_player(target_peer, blast_damage, shooter_team, -1)
+					LobbyManager.apply_player_damage.rpc(target_peer, new_hp)
+					if new_hp <= 0.0:
+						LobbyManager.notify_player_died.rpc(target_peer)
 			continue
-		# Friendly fire off
-		var body_team: int = body.get("team") if body.get("team") != null else -999
-		if shooter_team != -1 and body_team == shooter_team:
-			continue
-		if shooter_team == -1 and body_team == -1:
-			continue
-		body.take_damage(blast_damage, "missile", shooter_team)
+		# All other damageable bodies — CombatUtils handles player_team fallback + friendly-fire guard
+		if CombatUtils.should_damage(body, shooter_team):
+			body.take_damage(blast_damage, "missile", shooter_team, shooter_peer_id)
 
 	# Destroy trees in blast radius
 	_request_destroy_trees_in_radius(pos)
@@ -447,6 +454,7 @@ func _spawn_explosion(pos: Vector3) -> void:
 
 	# ── Screen shake — broadcast to any local cameras ──────────────────────────
 	_do_screen_shake(pos)
+	SoundManager.play_3d(SND_EXPLOSION, pos, 4.0, randf_range(0.85, 1.0))
 
 func _spawn_secondary_fireball(pos: Vector3) -> void:
 	var root: Node = get_tree().root

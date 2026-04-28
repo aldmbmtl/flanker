@@ -358,3 +358,54 @@ flanker/
 - **Seed sync**: `LobbyManager.start_game` broadcasts a non-zero seed to all peers before scene change. Never allow seed=0 — `TerrainGenerator` falls back to `randi()` causing client/server map divergence
 - The project was developed against Godot **4.6.2** (system install). No `.NET` / Mono required
 - No external dependencies beyond Godot 4.6.2 engine
+
+---
+
+## Testing
+
+**Run `make test` after every single code change — no exceptions.**
+
+```bash
+make test
+```
+
+This runs the GUT headless suite. The suite must exit with zero failing tests. A change that introduces any new failure is not acceptable, even if the feature works at runtime.
+
+Current baseline: **268 passing, 23 pending/risky** (all 23 are intentional — documented known bugs or no-assert smoke tests). Any run dropping below 268 passing is a regression.
+
+### What the tests cover
+
+The tests verify **data plumbing** across all major systems:
+
+| Area | What is tested |
+|---|---|
+| `TeamData` | Points add/spend/sync/guards |
+| `LevelSystem` | XP, level-up, carry-over, attribute spend, bonus stats |
+| `GameSync` | Health, damage, death, respawn, teams, ammo |
+| `LobbyManager` | Registration, team balance, role slots, death counts, respawn timers |
+| `TowerBase` | Setup, take_damage, friendly fire, death, XP, fire position, team detection |
+| `MinionBase` | Setup, damage, death, slow debuff, puppet state, waypoints |
+| `ProjectileBase` | Lifetime/expire, gravity, hit callbacks, friendly fire guard |
+| `BuildSystem` | Item costs, spacing formula, team-half guard, placement validation |
+| `Multiplayer RPCs` | Full RPC surface of `LobbyManager` — registration, shots, transforms, minion sync, tower sync, pings, level/XP |
+| `Position/Visibility Sync` | Player transform broadcast, ghost creation/update, fog overlay sources, minimap fog |
+| ENet loopback | Real connection, peer detection, seed broadcast, role accept/reject |
+
+### What the tests do NOT cover
+
+- Visual rendering on a real second Godot client
+- GLB assets, animations, or particle effects displaying correctly
+- Smooth lerp/interpolation of remote player ghosts on screen
+- Audio playback
+
+### Known active bugs (tracked as `pending()` in tests)
+
+These are confirmed broken in the current codebase. Tests document them but do not fail on them:
+
+1. **`_roles_pending` never decrements on early disconnect** — `LobbyManager.gd:236-244`
+2. **Respawn ignores level bonus HP** — `LobbyManager.gd:452-455` broadcasts flat `PLAYER_MAX_HP` instead of `PLAYER_MAX_HP + bonus`
+3. **`request_destroy_tree` is `call_remote`** — host-fired bullets never destroy trees on the host side — `LobbyManager.gd:694-705`
+4. **`broadcast_player_transform` double-emits on server** — `remote_player_updated` fires twice on the host — `LobbyManager.gd:370-371`
+5. **Host never sees cannon/mortar projectile VFX** — `spawn_cannonball_visuals` / `spawn_mortar_visuals` are `call_remote` with no host-side compensating call
+6. **Remote players invisible on minimap** — `RemotePlayerGhost` is in group `"remote_players"` but `Minimap` only queries group `"player"` — `Minimap.gd`
+7. **Minimap fog ignores allied remote player positions** — fog only clears around the local player — `Minimap.gd`

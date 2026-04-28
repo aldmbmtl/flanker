@@ -128,6 +128,7 @@ func _draw() -> void:
 	var all_minions: Array = get_tree().get_nodes_in_group("minions")
 	var all_towers: Array  = get_tree().get_nodes_in_group("towers")
 	var fps_players: Array = get_tree().get_nodes_in_group("player")
+	var remote_players: Array = get_tree().get_nodes_in_group("remote_players")  # Bug 6 fix
 	var player_team: int   = _main.get("player_start_team") if _main != null and _main.get("player_start_team") != null else 0
 
 	# ── Background / terrain ──────────────────────────────────────────────────
@@ -147,7 +148,7 @@ func _draw() -> void:
 	draw_rect(Rect2(_red_base_px  - base_half, base_half * 2.0), COL_RED_BASE)
 
 	# ── Fog of war overlay ────────────────────────────────────────────────────
-	_draw_fog_overlay(fps_players, all_minions, all_towers, player_team)
+	_draw_fog_overlay(fps_players, remote_players, all_minions, all_towers, player_team)
 
 	# ── Pickup icons ──────────────────────────────────────────────────────────
 	# Weapon pickups — yellow diamond
@@ -220,13 +221,28 @@ func _draw() -> void:
 			var angle: float = atan2(fwd3.x, fwd3.z)  # rotation in XZ plane
 			_draw_arrow(px, angle, 10.0, COL_PLAYER)
 
+	# ── Remote player dots (Bug 6 fix) ───────────────────────────────────────
+	# RemotePlayerGhost nodes are in group "remote_players", not "player".
+	for rp in remote_players:
+		if not is_instance_valid(rp):
+			continue
+		var rp_team: int = rp.get("team") if rp.get("team") != null else -1
+		var rp_pos: Vector3 = (rp as Node3D).global_position
+		if _is_fogged(rp_pos, rp_team, player_team, fps_players, all_minions):
+			continue
+		var rp_px: Vector2 = _world_to_map(Vector2(rp_pos.x, rp_pos.z))
+		if _in_bounds(rp_px):
+			var rp_col: Color = COL_BLUE_TOWER if rp_team == 0 else COL_RED_TOWER
+			draw_circle(rp_px, 4.0, rp_col)
+			draw_arc(rp_px, 5.0, 0.0, TAU, 16, Color(1.0, 1.0, 1.0, 0.6), 1.0)
+
 	# ── Border ────────────────────────────────────────────────────────────────
 	draw_rect(r, COL_BORDER, false, 1.5)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-func _draw_fog_overlay(fps_players: Array, all_minions: Array, all_towers: Array, player_team: int) -> void:
+func _draw_fog_overlay(fps_players: Array, remote_players: Array, all_minions: Array, all_towers: Array, player_team: int) -> void:
 	if _main == null or _fog_tex == null:
 		return
 
@@ -239,6 +255,16 @@ func _draw_fog_overlay(fps_players: Array, all_minions: Array, all_towers: Array
 		if is_instance_valid(p):
 			var gp: Vector3 = (p as Node3D).global_position
 			sources.append([gp.x, gp.z, 35.0 * 35.0])
+
+	# Bug 7 fix: allied remote players also clear fog for their positions.
+	for rp in remote_players:
+		if not is_instance_valid(rp):
+			continue
+		var rp_team: int = rp.get("team") if rp.get("team") != null else -1
+		if rp_team != player_team:
+			continue
+		var gp: Vector3 = (rp as Node3D).global_position
+		sources.append([gp.x, gp.z, 35.0 * 35.0])
 
 	for minion in all_minions:
 		if not is_instance_valid(minion):
@@ -354,6 +380,15 @@ func _is_fogged(world_pos: Vector3, node_team: int, player_team: int, fps_player
 		if is_instance_valid(p):
 			if world_pos.distance_squared_to((p as Node3D).global_position) <= 35.0 * 35.0:
 				return false
+
+	# Bug 7 fix: allied remote player positions also reveal fog
+	for rp in get_tree().get_nodes_in_group("remote_players"):
+		if not is_instance_valid(rp):
+			continue
+		if rp.get("team") != player_team:
+			continue
+		if world_pos.distance_squared_to((rp as Node3D).global_position) <= 35.0 * 35.0:
+			return false
 
 	# Check friendly minion vision
 	for minion in all_minions:

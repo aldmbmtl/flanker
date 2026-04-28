@@ -7,6 +7,7 @@
 extends TowerBase
 
 const BulletScene := preload("res://scenes/projectiles/Cannonball.tscn")
+const SND_FIRE := "res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_001.ogg"
 
 var attack_damage: float = 50.0
 
@@ -24,5 +25,6 @@ func _do_attack(target: Node3D) -> void:
 	# Position set before add_child so Cannonball._ready() computes arc from correct origin
 	ball.position = spawn_pos
 	get_tree().root.get_child(0).add_child(ball)
+	SoundManager.play_3d(SND_FIRE, get_fire_position(), 0.0, randf_range(0.9, 1.05))
 	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
 		LobbyManager.spawn_cannonball_visuals.rpc(spawn_pos, aim_pos, attack_damage, team)

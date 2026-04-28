@@ -6,13 +6,14 @@ var _ghosts: Dictionary = {}
 var _local_peer_id: int = 1
 
 func _ready() -> void:
-	_local_peer_id = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	_local_peer_id = multiplayer.get_unique_id() if NetworkManager._peer != null else 1
 	GameSync.remote_player_updated.connect(_on_remote_player_updated)
 	LobbyManager.player_left.connect(remove_ghost)
 	GameSync.player_died.connect(_on_player_died)
 	GameSync.player_respawned.connect(_on_player_respawned)
 
 func _on_remote_player_updated(peer_id: int, pos: Vector3, rot: Vector3, _team: int) -> void:
+	print("[RPM] peer_id=", peer_id, " _local_peer_id=", _local_peer_id, " has_ghost=", _ghosts.has(peer_id), " pos=", pos)
 	# Don't create ghost for local player
 	if peer_id == _local_peer_id:
 		return

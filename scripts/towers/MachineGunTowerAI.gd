@@ -4,6 +4,8 @@
 
 extends TowerBase
 
+const SND_FIRE := "res://assets/kenney_sci-fi-sounds/Audio/laserSmall_002.ogg"
+
 var attack_damage: float = 12.0
 
 # ── Raycast attack — overrides TowerBase._do_attack() ────────────────────────
@@ -27,6 +29,7 @@ func _do_attack(target: Node3D) -> void:
 			hit_unit = true
 	_spawn_hit_impact(hit_pos, hit_normal, hit_unit)
 	_spawn_muzzle_flash(from)
+	SoundManager.play_3d(SND_FIRE, from, -3.0, randf_range(0.92, 1.08))
 
 # ── VFX ───────────────────────────────────────────────────────────────────────
 

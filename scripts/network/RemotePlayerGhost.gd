@@ -27,9 +27,11 @@ func _on_lobby_updated() -> void:
 
 func _try_load_avatar() -> bool:
 	if peer_id <= 0:
+		print("[GHOST-AVATAR] peer_id<=0, skipping")
 		return false
 	var info: Dictionary = LobbyManager.players.get(peer_id, {})
 	var char: String = info.get("avatar_char", "") as String
+	print("[GHOST-AVATAR] peer_id=", peer_id, " char='", char, "' players_keys=", LobbyManager.players.keys())
 	if char.is_empty():
 		return false
 	_load_model(char)

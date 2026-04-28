@@ -146,7 +146,7 @@ func _build_detection_area() -> void:
 # ── Attack loop ───────────────────────────────────────────────────────────────
 
 func _process(delta: float) -> void:
-	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+	if NetworkManager._peer != null and not multiplayer.is_server():
 		return
 	if _dead or _area == null:
 		return
@@ -239,7 +239,7 @@ func _has_line_of_sight(target: Node3D) -> bool:
 	for _attempt in range(4):
 		var query := PhysicsRayQueryParameters3D.create(from, to)
 		query.exclude = excluded
-		query.collision_mask = 0b11
+		query.collision_mask = 0b01   # layer 1 (terrain) only — fences/walls (layer 2) must not block tower LOS
 		var result: Dictionary = space.intersect_ray(query)
 		if result.is_empty():
 			return true

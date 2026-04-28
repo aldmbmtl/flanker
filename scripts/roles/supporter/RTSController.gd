@@ -509,6 +509,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if player_role == 1:
 			_try_place_item(event.position)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
+		_fire_ping(event.position)
 
 func _try_place_item(_screen_pos: Vector2) -> void:
 	# Direct-cast strikes are handled via LauncherHUD targeting, not placement
@@ -694,3 +696,22 @@ func _is_visible_to_sources(world_pos: Vector3, allied_player_positions: Array, 
 			return true
 
 	return false
+
+func _fire_ping(screen_pos: Vector2) -> void:
+	print("[PING-RTS] _fire_ping called, _player_team=%d screen_pos=%s" % [_player_team, str(screen_pos)])
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	var from: Vector3 = project_ray_origin(screen_pos)
+	var dir: Vector3  = project_ray_normal(screen_pos)
+	var query := PhysicsRayQueryParameters3D.create(from, from + dir * 500.0)
+	query.collision_mask = 1
+	var result: Dictionary = space.intersect_ray(query)
+	if result.is_empty():
+		return
+	var world_pos: Vector3 = result.position as Vector3
+	if NetworkManager._peer != null:
+		if multiplayer.is_server():
+			LobbyManager.request_ping(world_pos, _player_team)
+		else:
+			LobbyManager.request_ping.rpc_id(1, world_pos, _player_team)
+	else:
+		LobbyManager.ping_received.emit(world_pos, _player_team)

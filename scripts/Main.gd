@@ -54,12 +54,14 @@ const LauncherHUDScript := preload("res://scripts/ui/LauncherHUD.gd")
 const LaneBoostHUDScript := preload("res://scripts/ui/LaneBoostHUD.gd")
 const AISupporterControllerScript := preload("res://scripts/roles/supporter/AISupporterController.gd")
 const EntityHUDScript             := preload("res://scripts/hud/EntityHUD.gd")
+const PingHUDScript               := preload("res://scripts/hud/PingHUD.gd")
 const LevelUpDialogScene := preload("res://scenes/ui/LevelUpDialog.tscn")
 
 var _supporter_hud: Node = null
 var _launcher_hud: Node = null
 var _lane_boost_hud: Node = null
 var _entity_hud: Control = null
+var _ping_hud: Control = null
 var _level_up_dialog: Control = null
 
 @onready var rts_camera:         Camera3D        = $RTSCamera
@@ -292,8 +294,18 @@ func _start_multiplayer_game() -> void:
 		_entity_hud.set_script(EntityHUDScript)
 		_entity_hud.setup(player_start_team)
 
+	# Wire PingHUD — blinking diamond overlay for all roles
+	_setup_ping_hud()
+
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
+
+func _setup_ping_hud() -> void:
+	_ping_hud = Control.new()
+	_ping_hud.name = "PingHUD"
+	_ping_hud.set_script(PingHUDScript)
+	$HUD.add_child(_ping_hud)
+	_ping_hud.setup(player_start_team)
 
 func _setup_hud_for_player() -> void:
 	if not fps_player:
@@ -788,6 +800,9 @@ func _on_start_game() -> void:
 		_entity_hud = $HUD/HUDOverlay
 		_entity_hud.set_script(EntityHUDScript)
 		_entity_hud.setup(player_start_team)
+
+	# Wire PingHUD — blinking diamond overlay for all roles
+	_setup_ping_hud()
 
 	# Spawn AI Supporters for any uncovered team (singleplayer — always server)
 	_spawn_ai_supporters_singleplayer(player_role, player_start_team)

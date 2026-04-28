@@ -237,7 +237,7 @@ func _on_peer_disconnected(id: int) -> void:
 	# decrement so the server doesn't wait forever.
 	if game_started and _roles_pending > 0:
 		var info: Dictionary = players.get(id, {})
-		if not info.has("role") or info.get("role", "") == "":
+		if not info.has("role") or info.get("role", -1) == -1:
 			_roles_pending -= 1
 			if _roles_pending <= 0:
 				_roles_pending = 0
@@ -296,7 +296,7 @@ func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_tea
 	if main.has_method("_on_bullet_hit_something") and shooter_peer_id == multiplayer.get_unique_id():
 		bullet.hit_something.connect(main._on_bullet_hit_something)
 
-@rpc("authority", "call_remote", "unreliable_ordered")
+@rpc("authority", "call_local", "unreliable_ordered")
 func spawn_cannonball_visuals(pos: Vector3, target: Vector3, damage: float, team: int) -> void:
 	if _cannonball_scene == null:
 		_cannonball_scene = preload("res://scenes/projectiles/Cannonball.tscn")
@@ -308,7 +308,7 @@ func spawn_cannonball_visuals(pos: Vector3, target: Vector3, damage: float, team
 	ball.position     = pos
 	get_tree().root.get_child(0).add_child(ball)
 
-@rpc("authority", "call_remote", "unreliable_ordered")
+@rpc("authority", "call_local", "unreliable_ordered")
 func spawn_mortar_visuals(pos: Vector3, target: Vector3, damage: float, team: int) -> void:
 	if _mortar_scene == null:
 		_mortar_scene = preload("res://scenes/projectiles/MortarShell.tscn")
@@ -366,13 +366,12 @@ func report_avatar_char(char: String) -> void:
 @rpc("any_peer", "call_remote", "unreliable_ordered")
 func report_player_transform(pos: Vector3, rot: Vector3, team: int) -> void:
 	var sender: int = _sender_id()
-	# Do NOT set_player_team here — team is authoritative from spawn (FPSController._ready)
-	# and must not be overwritten by per-frame transform broadcasts which can carry stale values.
 	if multiplayer.is_server():
 		broadcast_player_transform.rpc(sender, pos, rot, team)
 
 @rpc("authority", "call_local", "unreliable_ordered")
 func broadcast_player_transform(peer_id: int, pos: Vector3, rot: Vector3, team: int) -> void:
+	print("[BCAST] peer_id=", peer_id, " is_server=", multiplayer.is_server(), " my_id=", multiplayer.get_unique_id(), " pos=", pos)
 	GameSync.remote_player_updated.emit(peer_id, pos, rot, team)
 
 @rpc("any_peer", "reliable")
@@ -450,7 +449,7 @@ func notify_player_died(peer_id: int) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func notify_player_respawned(peer_id: int, spawn_pos: Vector3) -> void:
-	GameSync.player_healths[peer_id] = GameSync.PLAYER_MAX_HP
+	GameSync.player_healths[peer_id] = GameSync.PLAYER_MAX_HP + LevelSystem.get_bonus_hp(peer_id)
 	GameSync.player_dead[peer_id] = false
 	GameSync.player_respawned.emit(peer_id, spawn_pos)
 
@@ -691,7 +690,7 @@ func sync_wave_announcement(wave_num: int) -> void:
 const TREE_DESTROY_RADIUS := 2.5
 
 # Called by any peer when a cannonball hits a tree — server validates + fans out.
-@rpc("any_peer", "call_remote", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func request_destroy_tree(pos: Vector3) -> void:
 	if not multiplayer.is_server():
 		return
@@ -783,3 +782,24 @@ func _on_team_lives_game_over(winner_team: int) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _rpc_game_over(winner_team: int) -> void:
 	TeamLives.game_over.emit(winner_team)
+
+# ── Ping system ───────────────────────────────────────────────────────────────
+
+signal ping_received(world_pos: Vector3, team: int)
+
+# Any peer calls this on the server with their world position and team.
+# Server validates team membership then broadcasts to all peers.
+@rpc("any_peer", "reliable")
+func request_ping(world_pos: Vector3, team: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var id: int = _sender_id()
+	var info: Dictionary = players.get(id, {})
+	if info.get("team", -1) != team:
+		return
+	broadcast_ping.rpc(world_pos, team)
+
+# Executed on every peer (call_local) — emit signal so HUD / minimap can react.
+@rpc("authority", "call_local", "reliable")
+func broadcast_ping(world_pos: Vector3, team: int) -> void:
+	ping_received.emit(world_pos, team)

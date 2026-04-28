@@ -60,7 +60,7 @@ func damage_player(peer_id: int, amount: float, source_team: int, killer_peer_id
 	return hp
 
 func _process(delta: float) -> void:
-	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+	if NetworkManager._peer != null and not multiplayer.is_server():
 		return
 	for peer_id in player_dead.keys():
 		if player_dead.get(peer_id, false):
