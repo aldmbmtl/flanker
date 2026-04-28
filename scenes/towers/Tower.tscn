@@ -30,6 +30,7 @@ model_top_offset = Vector3(0, 2.667, 0)
 model_turret = ExtResource("5")
 model_turret_scale = Vector3(2.0, 2.0, 2.0)
 model_turret_offset = Vector3(0, 4.0, 0)
+model_turret_rotation_deg = Vector3(0, 180, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.85, 0)

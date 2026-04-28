@@ -73,6 +73,9 @@ extends StaticBody3D
 @export var model_turret_scale: Vector3 = Vector3.ONE
 ## World-space Y height at which the turret pivot sits (relative to tower origin).
 @export var model_turret_offset: Vector3 = Vector3(0.0, 3.0, 0.0)
+## Euler rotation (degrees) applied to the turret model node inside the pivot.
+## Use Vector3(0, 180, 0) to flip a cannon that faces the wrong way in its GLB.
+@export var model_turret_rotation_deg: Vector3 = Vector3.ZERO
 
 ## Optional attachment (barrel, scope, flag). Co-parented to _turret_pivot — rotates with turret.
 @export var model_attachment: PackedScene = null
@@ -178,6 +181,7 @@ func _build_visuals() -> void:
 		if turret != null:
 			turret.scale    = model_turret_scale
 			turret.position = Vector3.ZERO
+			turret.rotation_degrees = model_turret_rotation_deg
 			_turret_pivot.add_child(turret)
 			_collect_meshes(turret)
 
