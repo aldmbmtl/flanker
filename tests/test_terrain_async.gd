@@ -108,7 +108,7 @@ func test_terrain_thread_joined_on_predelete_no_crash() -> void:
 	# Free immediately — thread may not have finished yet.
 	t.queue_free()
 	# Pump frames so the deferred free executes.
-	await wait_frames(5)
+	await wait_physics_frames(5)
 	# Reaching here without a crash means NOTIFICATION_PREDELETE joined the thread.
 	assert_true(true, "Node freed mid-thread without crashing")
 
@@ -149,14 +149,14 @@ func test_tree_placer_done_signal_fires() -> void:
 	watch_signals(tp)
 	add_child_autofree(tp)
 	# _ready awaits 2 process frames then calls _place_trees.
-	await wait_frames(5)
+	await wait_physics_frames(5)
 	assert_signal_emitted(tp, "done", "TreePlacer should emit done")
 
 func test_tree_placer_generation_done_set_after_done() -> void:
 	GameSync.game_seed = 1
 	var tp := FastTreePlacer.new()
 	add_child_autofree(tp)
-	await wait_frames(5)
+	await wait_physics_frames(5)
 	assert_true(tp.generation_done,
 		"TreePlacer.generation_done should be true after done fires")
 
@@ -184,14 +184,14 @@ func test_wall_placer_done_signal_fires() -> void:
 	var wp := FastWallPlacer.new()
 	watch_signals(wp)
 	add_child_autofree(wp)
-	await wait_frames(5)
+	await wait_physics_frames(5)
 	assert_signal_emitted(wp, "done", "WallPlacer should emit done")
 
 func test_wall_placer_generation_done_set_after_done() -> void:
 	GameSync.game_seed = 1
 	var wp := FastWallPlacer.new()
 	add_child_autofree(wp)
-	await wait_frames(5)
+	await wait_physics_frames(5)
 	assert_true(wp.generation_done,
 		"WallPlacer.generation_done should be true after done fires")
 

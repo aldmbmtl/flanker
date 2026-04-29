@@ -239,9 +239,10 @@ func test_notify_player_respawned_includes_bonus_hp() -> void:
 	LevelSystem.register_peer(1)
 	LevelSystem.award_xp(1, 9999)
 	LevelSystem.spend_point_local(1, "hp")
-	var expected: int = GameSync.PLAYER_MAX_HP + LevelSystem.get_bonus_hp(1)
+	var expected: float = float(GameSync.PLAYER_MAX_HP) + float(LevelSystem.get_bonus_hp(1))
 	LobbyManager.notify_player_respawned(1, Vector3.ZERO)
-	assert_eq(GameSync.player_healths.get(1, -1), expected)
+	var actual: float = float(GameSync.player_healths.get(1, -1.0))
+	assert_eq(actual, expected)
 
 # ── known bug: request_destroy_tree call_remote drops host-fired hits ─────────
 

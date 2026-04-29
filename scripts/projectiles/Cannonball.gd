@@ -62,16 +62,7 @@ func _after_move() -> void:
 			_light.light_energy = randf_range(1.6, 2.4)
 
 # ── Tree clearing ─────────────────────────────────────────────────────────────
-
-func _request_destroy_tree(pos: Vector3) -> void:
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		LobbyManager.sync_destroy_tree.rpc(pos)
-	elif multiplayer.has_multiplayer_peer():
-		LobbyManager.request_destroy_tree.rpc_id(1, pos)
-	else:
-		var tp: Node = get_tree().root.get_node_or_null("Main/World/TreePlacer")
-		if tp != null:
-			tp.clear_trees_at(pos, LobbyManager.TREE_DESTROY_RADIUS)
+# _request_destroy_tree is inherited from ProjectileBase.
 
 # ── VFX ───────────────────────────────────────────────────────────────────────
 

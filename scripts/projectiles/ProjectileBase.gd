@@ -90,6 +90,21 @@ func _after_move() -> void:
 func _on_expire() -> void:
 	pass
 
+# ── Tree clearing helper ──────────────────────────────────────────────────────
+
+## Shared tree-clearing helper used by Bullet, Cannonball, and MortarShell.
+## In multiplayer: server fans out sync_destroy_tree to all peers.
+## In singleplayer: calls clear_trees_at directly on TreePlacer.
+func _request_destroy_tree(pos: Vector3) -> void:
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		LobbyManager.sync_destroy_tree.rpc(pos)
+	elif multiplayer.has_multiplayer_peer():
+		LobbyManager.request_destroy_tree.rpc_id(1, pos)
+	else:
+		var tp: Node = get_tree().root.get_node_or_null("Main/World/TreePlacer")
+		if tp != null:
+			tp.clear_trees_at(pos, LobbyManager.TREE_DESTROY_RADIUS)
+
 # ── Splash helper ─────────────────────────────────────────────────────────────
 
 ## Sphere-overlap splash damage. Skips exclude_body (the direct-hit collider).

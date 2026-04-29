@@ -95,6 +95,14 @@ var _band_transforms: Array = []
 # Precomputed O(1) exclusion mask: flat array indexed by [gz * GRID_STEPS + gx]
 var _exclusion_mask: Array = []
 
+# Flat list of per-tree records used for visual clearing.
+# Each entry is a Dictionary: { "xz": Vector2, "vi": int, "band": int }
+# Parallel to _band_transforms — one entry per tree placed.
+var _tree_records: Array = []
+
+# MMI lookup table: _mmis[vi * 2 + band] = MultiMeshInstance3D (or null before commit)
+var _mmis: Array = []
+
 func _ready() -> void:
 	var gen_seed: int = GameSync.game_seed
 	if gen_seed == 0:
@@ -234,6 +242,9 @@ func _place_trees() -> void:
 
 	# Initialise per-variant, per-band (2 bands: near / far) accumulator
 	_band_transforms.clear()
+	_tree_records.clear()
+	_mmis.clear()
+	_mmis.resize(TREE_SCENES.size() * 2)  # vi * 2 + band
 	for _vi in TREE_SCENES.size():
 		_band_transforms.append([[], []])  # [near_transforms, far_transforms]
 
@@ -288,6 +299,9 @@ func _accumulate_tree(pos: Vector3, tree_scenes: Array[PackedScene]) -> void:
 	var band: int = 0 if dist_from_center <= BAND_NEAR_MAX else 1
 	_band_transforms[vi][band].append(t)
 
+	# Record this tree for visual clearing support
+	_tree_records.append({"xz": Vector2(pos.x, pos.z), "vi": vi, "band": band})
+
 func _commit_multimeshes(tree_scenes: Array[PackedScene]) -> void:
 	# Visibility range distances for each band (camera-to-MMI-origin proxy)
 	# Band 0 (near/center): always visible, clip at 200
@@ -326,6 +340,8 @@ func _commit_multimeshes(tree_scenes: Array[PackedScene]) -> void:
 			mmi.visibility_range_end = BAND_VIS_END[band]
 			mmi.visibility_range_end_margin = 10.0
 			add_child(mmi)
+			# Store in lookup table so clear_trees_at can find and rebuild this MMI
+			_mmis[vi * 2 + band] = mmi
 
 			# Apply wind shader material so trees sway with the wind.
 			var mat := ShaderMaterial.new()
@@ -497,13 +513,79 @@ func _is_in_random_clearing(pos: Vector3) -> bool:
 	return false
 
 # Remove all tree collision nodes within radius of world_pos (XZ).
-# MultiMesh instances cannot be removed individually — they are purely visual.
-# Collision StaticBody3D trunks are still individual children and can be freed.
+# Also removes the corresponding visual transforms from _band_transforms and
+# rebuilds the affected MultiMeshInstance3D nodes so trees visually disappear.
 func clear_trees_at(world_pos: Vector3, radius: float) -> void:
 	var center := Vector2(world_pos.x, world_pos.z)
+
+	# --- Collision: free StaticBody3D trunks ---
 	for child in get_children():
 		if child is MultiMeshInstance3D:
-			continue  # visual — skip
+			continue  # visual — handled below
 		var child_pos := Vector2(child.position.x, child.position.z)
 		if child_pos.distance_to(center) <= radius:
 			child.queue_free()
+
+	# --- Visuals: remove transforms from _band_transforms and rebuild MMIs ---
+	if _tree_records.is_empty():
+		return
+
+	# Collect indices of records to remove, and track which (vi, band) pairs need rebuild
+	var to_remove: Array[int] = []
+	var dirty_keys: Dictionary = {}  # "vi_band" -> true
+	for i in _tree_records.size():
+		var rec: Dictionary = _tree_records[i]
+		var xz: Vector2 = rec["xz"]
+		if xz.distance_to(center) <= radius:
+			to_remove.append(i)
+			dirty_keys[str(rec["vi"]) + "_" + str(rec["band"])] = true
+
+	if to_remove.is_empty():
+		return
+
+	# Build a set of removed XZ positions for fast transform matching
+	var removed_xz: Array[Vector2] = []
+	for i in to_remove:
+		removed_xz.append(_tree_records[i]["xz"])
+
+	# Remove transforms from _band_transforms for affected (vi, band) pairs
+	for key in dirty_keys.keys():
+		var parts: Array = key.split("_")
+		var vi: int = int(parts[0])
+		var band: int = int(parts[1])
+		var old_transforms: Array = _band_transforms[vi][band]
+		var new_transforms: Array = []
+		for t in old_transforms:
+			var t_xz := Vector2((t as Transform3D).origin.x, (t as Transform3D).origin.z)
+			var keep := true
+			for rxz in removed_xz:
+				if t_xz.distance_to(rxz) < 0.01:
+					keep = false
+					break
+			if keep:
+				new_transforms.append(t)
+		_band_transforms[vi][band] = new_transforms
+		_rebuild_mmi(vi, band)
+
+	# Remove records (iterate in reverse to preserve indices)
+	for i in range(to_remove.size() - 1, -1, -1):
+		_tree_records.remove_at(to_remove[i])
+
+# Rebuild the MultiMeshInstance3D for (vi, band) from the current _band_transforms.
+# Preserves the existing wind ShaderMaterial.
+func _rebuild_mmi(vi: int, band: int) -> void:
+	var idx: int = vi * 2 + band
+	if idx >= _mmis.size():
+		return
+	var mmi: MultiMeshInstance3D = _mmis[idx] as MultiMeshInstance3D
+	if mmi == null or not is_instance_valid(mmi):
+		return
+
+	var transforms: Array = _band_transforms[vi][band]
+	var mm: MultiMesh = mmi.multimesh
+	if mm == null:
+		return
+
+	mm.instance_count = transforms.size()
+	for i in transforms.size():
+		mm.set_instance_transform(i, transforms[i] as Transform3D)

@@ -51,6 +51,7 @@ const MinionAI := preload("res://scripts/minions/MinionAI.gd")
 const RoleSelectDialogScene := preload("res://scenes/ui/RoleSelectDialog.tscn")
 const SupporterHUDScene := preload("res://scenes/ui/SupporterHUD.tscn")
 const LauncherHUDScript := preload("res://scripts/ui/LauncherHUD.gd")
+const SkillTreeOverlayScene := preload("res://scenes/ui/SkillTreeOverlay.tscn")
 const LaneBoostHUDScript := preload("res://scripts/ui/LaneBoostHUD.gd")
 const AISupporterControllerScript := preload("res://scripts/roles/supporter/AISupporterController.gd")
 const EntityHUDScript             := preload("res://scripts/hud/EntityHUD.gd")
@@ -128,6 +129,7 @@ const LoadingScreenScene := preload("res://scenes/ui/LoadingScreen.tscn")
 var _start_menu: Control
 var _pause_menu: Control
 var _role_dialog: Control
+var _skill_overlay: Control
 
 func _ready() -> void:
 	var _has_network_peer: bool = NetworkManager._peer != null
@@ -251,6 +253,7 @@ func _start_multiplayer_game() -> void:
 	_death_count = 0
 	game_state = GameState.PLAYING
 	_setup_event_feed()
+	_register_skill_tree_peer(multiplayer.get_unique_id(), player_role)
 
 	# Spawn AI Supporters for any team without a human Supporter (server only).
 	# Done asynchronously so role selection doesn't block the server player's own
@@ -458,6 +461,24 @@ func _setup_event_feed() -> void:
 	GameSync.player_died.connect(_on_event_player_died)
 	LobbyManager.item_spawned.connect(_on_event_item_spawned)
 	LobbyManager.tower_despawned.connect(_on_event_tower_despawned)
+
+func _register_skill_tree_peer(peer_id: int, role: Role) -> void:
+	var role_str: String = "fighter" if role == Role.FIGHTER else "supporter"
+	SkillTree.register_peer(peer_id, role_str)
+	# Build and attach the overlay to HUD (Fighter only has FPS mode, both can use T)
+	if _skill_overlay == null:
+		_skill_overlay = SkillTreeOverlayScene.instantiate()
+		$HUD.add_child(_skill_overlay)
+		_skill_overlay.setup(peer_id, multiplayer.has_multiplayer_peer())
+	# Connect SP badge notification on the pending_button (reuse existing button)
+	if not SkillTree.skill_pts_changed.is_connected(_on_skill_pts_changed):
+		SkillTree.skill_pts_changed.connect(_on_skill_pts_changed)
+
+func _on_skill_pts_changed(peer_id: int, pts: int) -> void:
+	if peer_id != multiplayer.get_unique_id():
+		return
+	if pending_button != null:
+		pending_button.visible = pts > 0
 
 func _team_name(team: int) -> String:
 	return "Blue" if team == 0 else "Red"
@@ -760,6 +781,7 @@ func _on_start_game() -> void:
 	rts_camera.player_role = player_role
 	_role_slots[player_role] = true
 	_role_dialog.visible = false
+	_register_skill_tree_peer(1, player_role)
 
 	# Bring loading screen back for remaining setup
 	loading_screen.visible = true
@@ -1045,6 +1067,7 @@ func _do_respawn() -> void:
 	if fps_player:
 		var spawn_pos: Vector3 = BLUE_SPAWN if fps_player.player_team == 0 else RED_SPAWN
 		fps_player.respawn(spawn_pos)
+	SkillTree.reset_per_life(multiplayer.get_unique_id())
 	_set_mode(true)
 
 func _spawn_weapon_pickups() -> void:

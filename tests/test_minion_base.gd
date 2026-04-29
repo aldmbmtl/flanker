@@ -4,7 +4,7 @@
 # so the tests run cleanly without GLB files or AudioStreamPlayer children.
 extends GutTest
 
-class TestMinion extends MinionBase:
+class FakeMinion extends MinionBase:
 	var death_hook_called := false
 	var fire_at_calls: int = 0
 
@@ -34,10 +34,10 @@ class TestMinion extends MinionBase:
 		add_to_group("minion_units")
 		# Do NOT call _init_visuals or _cache_static_refs; we have no scene tree deps
 
-var minion: TestMinion
+var minion: FakeMinion
 
 func before_each() -> void:
-	minion = TestMinion.new()
+	minion = FakeMinion.new()
 	minion.max_health     = 80.0
 	minion.attack_damage  = 10.0
 	minion.detect_range   = 12.0

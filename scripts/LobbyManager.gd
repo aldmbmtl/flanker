@@ -176,7 +176,10 @@ func increment_death_count(peer_id: int) -> int:
 func get_respawn_time(peer_id: int) -> float:
 	var deaths: int = player_death_counts.get(peer_id, 0)
 	var t: float = RESPAWN_BASE + (deaths * RESPAWN_INCREMENT)
-	return min(t, RESPAWN_CAP)
+	t = min(t, RESPAWN_CAP)
+	# Supporter skill: s_fast_respawn passive reduces respawn time
+	var reduction: float = SkillTree.get_passive_bonus(peer_id, "respawn_reduction")
+	return maxf(1.0, t - reduction)
 
 @rpc("authority", "reliable")
 func sync_death_count(peer_id: int, count: int) -> void:
@@ -411,6 +414,7 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 					apply_player_damage.rpc(target_peer, new_hp)
 					if new_hp <= 0.0:
 						notify_player_died.rpc(target_peer)
+						_apply_point_surge(shooter_peer, shooter_team)
 		spawn_bullet_visuals.rpc(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
 		# call_remote skips the server itself — spawn locally for the host
 		if projectile_type == "rocket":
@@ -426,6 +430,7 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 		apply_player_damage.rpc(target_peer, new_hp)
 		if new_hp <= 0.0:
 			notify_player_died.rpc(target_peer)
+			_apply_point_surge(shooter_peer, shooter_team)
 	elif hit_result.has("minion_path"):
 		var main: Node = get_tree().root.get_node("Main")
 		if main != null:
@@ -687,7 +692,7 @@ func sync_wave_announcement(wave_num: int) -> void:
 
 # ── Tree destruction sync ──────────────────────────────────────────────────────
 
-const TREE_DESTROY_RADIUS := 2.5
+const TREE_DESTROY_RADIUS := 3.0
 
 # Called by any peer when a cannonball hits a tree — server validates + fans out.
 @rpc("any_peer", "call_local", "reliable")
@@ -818,3 +823,8 @@ func reset() -> void:
 	ai_supporter_teams.clear()
 	_dirty = false
 	_roles_pending = 0
+
+func _apply_point_surge(shooter_peer: int, shooter_team: int) -> void:
+	var surge: float = SkillTree.get_passive_bonus(shooter_peer, "point_surge")
+	if surge > 0.0:
+		TeamData.add_points(shooter_team, int(surge))

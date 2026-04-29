@@ -298,6 +298,29 @@ func _get_level_speed_mult() -> float:
 func _get_level_damage_mult() -> float:
 	return 1.0 + LevelSystem.get_bonus_damage_mult(_peer_id)
 
+# ── Skill tree passive helpers ─────────────────────────────────────────────────
+
+func _get_skill_damage_reduction() -> float:
+	return SkillTree.get_passive_bonus(_peer_id, "damage_reduction")
+
+func _get_skill_reload_mult() -> float:
+	# Returns a multiplier < 1.0 (e.g. 0.75 when f_reload is unlocked)
+	return 1.0 - SkillTree.get_passive_bonus(_peer_id, "reload_speed")
+
+func _get_skill_sprint_mult() -> float:
+	return 1.0 + SkillTree.get_passive_bonus(_peer_id, "sprint_mult")
+
+func _get_skill_stamina_drain_mult() -> float:
+	return 1.0 - SkillTree.get_passive_bonus(_peer_id, "stamina_drain_reduction")
+
+func _get_skill_headshot_mult() -> float:
+	return 1.0 + SkillTree.get_passive_bonus(_peer_id, "headshot_mult")
+
+func _get_rally_speed_bonus() -> float:
+	if not has_meta("rally_speed_bonus"):
+		return 0.0
+	return float(get_meta("rally_speed_bonus"))
+
 func set_active(is_active: bool) -> void:
 	active = is_active
 	if not _dead:
@@ -306,12 +329,20 @@ func set_active(is_active: bool) -> void:
 func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_peer_id: int = -1) -> void:
 	if _dead:
 		return
-	hp = max(0.0, hp - amount)
+	# Apply armor passive (flat damage reduction)
+	var reduction: float = _get_skill_damage_reduction()
+	var actual: float = maxf(0.0, amount - reduction)
+	hp = max(0.0, hp - actual)
 	camera_shake_time = 0.35
 	var _main := get_tree().current_scene
 	if _main != null and _main.has_method("flash_damage"):
 		_main.flash_damage()
 	_update_health_bar()
+	# second_wind: auto-heal to 30 HP once per life when below 10
+	if hp > 0.0 and hp < 10.0 and SkillTree.is_unlocked(_peer_id, "f_second_wind") and not SkillTree.is_second_wind_used(_peer_id):
+		SkillTree.consume_second_wind(_peer_id)
+		hp = minf(30.0, _get_max_hp())
+		_update_health_bar()
 	if hp <= 0.0:
 		_on_death()
 		var awarding_team: int = _killer_team if _killer_team >= 0 else 1
@@ -320,6 +351,15 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_
 		# Singleplayer: award XP to killer
 		if killer_peer_id > 0 and not multiplayer.has_multiplayer_peer():
 			LevelSystem.award_xp(killer_peer_id, LevelSystem.XP_PLAYER)
+			# point_surge: check if killer has the Supporter skill
+			if SkillTree.get_passive_bonus(killer_peer_id, "point_surge") > 0.0:
+				TeamData.add_points(awarding_team, int(SkillTree.get_passive_bonus(killer_peer_id, "point_surge")))
+			# killstreak_heal: heal killer
+			var heal_amt: float = SkillTree.get_passive_bonus(killer_peer_id, "killstreak_heal")
+			if heal_amt > 0.0:
+				var killer_node: Node = get_tree().root.get_node_or_null("Main/FPSPlayer_%d" % killer_peer_id)
+				if killer_node != null and killer_node.has_method("heal"):
+					killer_node.heal(heal_amt)
 
 func _get_max_hp() -> float:
 	return (DEFAULT_HP * player_health_mult) + LevelSystem.get_bonus_hp(_peer_id)
@@ -537,6 +577,18 @@ func _unhandled_input(event: InputEvent) -> void:
 			_select_slot(1)
 	if event.is_action_pressed("ping"):
 		_fire_ping()
+	if event.is_action_pressed("skill_active_1"):
+		_use_skill_active(0)
+	if event.is_action_pressed("skill_active_2"):
+		_use_skill_active(1)
+
+func _use_skill_active(slot: int) -> void:
+	if not _is_local:
+		return
+	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+		SkillTree.request_use_active.rpc_id(1, slot)
+	else:
+		SkillTree.use_active_local(_peer_id, slot)
 
 func _select_slot(slot: int) -> void:
 	if slot == active_slot:
@@ -656,8 +708,9 @@ func _physics_process(delta: float) -> void:
 
 	# Stamina
 	var want_sprint: bool = Input.is_action_pressed("sprint")
+	var drain_rate: float = STAMINA_DRAIN_RATE * _get_skill_stamina_drain_mult()
 	if want_sprint and _stamina > 0.0:
-		_stamina = max(0.0, _stamina - STAMINA_DRAIN_RATE * delta)
+		_stamina = max(0.0, _stamina - drain_rate * delta)
 		_stamina_exhausted = false
 		_exhaust_timer = 0.0
 	elif not want_sprint and _stamina < MAX_STAMINA:
@@ -870,7 +923,7 @@ func _start_reload() -> void:
 	if mag >= w.magazine_size or reserve <= 0:
 		return
 	_reloading    = true
-	_reload_timer = w.reload_time
+	_reload_timer = w.reload_time * _get_skill_reload_mult()
 	if reload_prompt != null:
 		reload_prompt.visible = false
 	_update_reload_bar()

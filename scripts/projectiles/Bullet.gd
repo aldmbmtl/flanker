@@ -21,6 +21,11 @@ func _ready() -> void:
 # ── Hit handling ──────────────────────────────────────────────────────────────
 
 func _on_hit(pos: Vector3, collider: Object) -> void:
+	# Tree trunk — clear the tree, bullet is consumed. No sparks, no combat damage.
+	if collider != null and collider.has_meta("tree_trunk_height"):
+		_request_destroy_tree(pos)
+		return
+
 	# Ghost hitbox — remote player represented by a StaticBody3D with ghost_peer_id meta.
 	# Damage is server-authoritative: routed via GameSync RPC, not take_damage().
 	if collider is StaticBody3D and collider.has_meta("ghost_peer_id"):

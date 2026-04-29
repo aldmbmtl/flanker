@@ -49,10 +49,32 @@ func _ready() -> void:
 # ── Placement validation ──────────────────────────────────────────────────────
 
 func get_item_cost(item_type: String, subtype: String) -> int:
+	var base: int
 	if item_type == "weapon":
-		return WEAPON_COSTS.get(subtype, 0)
-	var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
-	return def.get("cost", 0)
+		base = WEAPON_COSTS.get(subtype, 0)
+		# f_explosive: rocket launcher costs 30 less for an unlocked Fighter
+		if subtype == "rocket_launcher":
+			var discount: int = _get_skill_build_discount(0)  # team 0 as fallback; actual discount checked per-placer
+			base = max(0, base - 30) if _any_team_has_explosive() else base
+	else:
+		var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
+		base = def.get("cost", 0)
+	return base
+
+func _any_team_has_explosive() -> bool:
+	# Check if any registered peer has f_explosive unlocked
+	for peer_id in SkillTree.get_all_peers():
+		if SkillTree.is_unlocked(peer_id, "f_explosive"):
+			return true
+	return false
+
+func _get_skill_build_discount(team: int) -> int:
+	# Sum build_discount passive from all peers on that team
+	var total: int = 0
+	for peer_id in SkillTree.get_all_peers():
+		if SkillTree.get_role(peer_id) == "supporter":
+			total += int(SkillTree.get_passive_bonus(peer_id, "build_discount"))
+	return total
 
 func can_place_item(world_pos: Vector3, team: int, item_type: String) -> bool:
 	var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
@@ -189,11 +211,13 @@ func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype:
 					node.setup(team, item_type)
 			elif node.has_method("setup"):
 				node.setup(team)
+			# Apply Supporter skill tree tower HP bonuses (server/singleplayer only)
+			_apply_tower_hp_bonuses(node, item_type, team)
 
 	# Clear nearby trees for all placements
 	var tree_placer: Node = main.get_node_or_null("World/TreePlacer")
 	if tree_placer and tree_placer.has_method("clear_trees_at"):
-		tree_placer.clear_trees_at(world_pos, 5.0)
+		tree_placer.clear_trees_at(world_pos, 8.0)
 
 	return node.name
 
@@ -205,3 +229,22 @@ func spawn_tower_local(world_pos: Vector3, team: int) -> void:
 
 func get_tower_cost() -> int:
 	return TOWER_COST
+
+func _apply_tower_hp_bonuses(node: Node, item_type: String, team: int) -> void:
+	# Sum tower_hp_bonus and barrier_hp_mult from all Supporter peers on this team
+	var hp_bonus_pct: float = 0.0
+	var barrier_mult: float = 1.0
+	for peer_id in SkillTree.get_all_peers():
+		if SkillTree.get_role(peer_id) != "supporter":
+			continue
+		hp_bonus_pct += SkillTree.get_passive_bonus(peer_id, "tower_hp_bonus")
+		if item_type == "barrier":
+			barrier_mult = maxf(barrier_mult, 1.0 + SkillTree.get_passive_bonus(peer_id, "barrier_hp_mult"))
+	if hp_bonus_pct == 0.0 and barrier_mult == 1.0:
+		return
+	var current_hp: float = node.get("_health") if node.get("_health") != null else 0.0
+	if current_hp <= 0.0:
+		return
+	var new_hp: float = current_hp * (1.0 + hp_bonus_pct) * barrier_mult
+	node.set("_health", new_hp)
+	node.set("max_health", new_hp)

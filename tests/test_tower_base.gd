@@ -6,14 +6,14 @@ extends GutTest
 
 # Minimal TowerBase subclass with no visuals — safe to instantiate in tests.
 # Overrides _build_visuals() to do nothing (no model_scene in test context).
-class TestTower extends TowerBase:
+class FakeTower extends TowerBase:
 	func _build_visuals() -> void:
 		pass  # skip GLB loading in headless tests
 
-var tower: TestTower
+var tower: FakeTower
 
 func before_each() -> void:
-	tower = TestTower.new()
+	tower = FakeTower.new()
 	tower.max_health     = 100.0
 	tower.attack_range   = 0.0   # passive — no Area3D built, avoids physics queries
 	tower.attack_interval = 3.0
@@ -129,7 +129,7 @@ func test_get_body_team_returns_minus_one_for_unknown() -> void:
 func test_detection_area_sphere_radius_matches_attack_range() -> void:
 	# Build an attacking tower (attack_range > 0) and confirm the Area3D sphere
 	# radius equals attack_range exactly — this is what TowerBase._build_detection_area builds.
-	var t := TestTower.new()
+	var t := FakeTower.new()
 	t.max_health     = 100.0
 	t.attack_range   = 30.0
 	t.attack_interval = 1.0
@@ -147,7 +147,7 @@ func test_detection_area_sphere_radius_matches_attack_range() -> void:
 
 func test_no_detection_area_when_attack_range_zero() -> void:
 	# Passive towers must not build an Area3D.
-	var t := TestTower.new()
+	var t := FakeTower.new()
 	t.max_health     = 500.0
 	t.attack_range   = 0.0
 	t.attack_interval = 1.0
@@ -159,7 +159,7 @@ func test_no_detection_area_when_attack_range_zero() -> void:
 
 # ── SlowTowerAI server-authority guard ───────────────────────────────────────
 
-class TestSlowTower extends SlowTowerAI:
+class FakeSlowTower extends SlowTowerAI:
 	func _build_visuals() -> void:
 		pass  # skip GLB loading in headless tests
 
@@ -170,7 +170,7 @@ class TestSlowTower extends SlowTowerAI:
 # after manually injecting fake PackedScene-equivalent nodes via _ready().
 #
 # Strategy: we cannot hand PackedScene instances real GLB data in headless tests,
-# so we use a TestTower subclass that overrides _build_visuals() to call the
+# so we use a FakeTower subclass that overrides _build_visuals() to call the
 # TowerBase assembly logic directly with fake Node3D subtrees.
 
 # A tower that manually calls the TowerBase component assembly steps using
@@ -319,7 +319,7 @@ func test_backward_compat_model_scene_used_when_model_base_null() -> void:
 	# We can't load a real GLB in headless — verify the fallback path
 	# is reached by using a ComponentTower with no fake_base but checking
 	# _mesh_inst stays null (no GLB = nothing instantiated) without crashing.
-	var t := TestTower.new()  # TestTower has no-op _build_visuals
+	var t := FakeTower.new()  # FakeTower has no-op _build_visuals
 	t.attack_range = 0.0
 	t.tower_type = "cannon"
 	# model_base stays null, model_scene stays null — should not crash
@@ -427,7 +427,7 @@ func test_slow_tower_pulse_does_not_fire_on_client() -> void:
 	# actually flip the flag at runtime — instead we assert the guard is present
 	# by confirming the timer DOES advance in the normal (server) test context,
 	# which proves the guard branch is the only reason it would not advance.
-	var t := TestSlowTower.new()
+	var t := FakeSlowTower.new()
 	t.max_health     = 500.0
 	t.attack_range   = 0.0   # passive — no Area3D
 	t.attack_interval = 1.0

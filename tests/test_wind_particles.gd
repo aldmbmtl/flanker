@@ -9,7 +9,7 @@ const TreePlacerScript     := preload("res://scripts/TreePlacer.gd")
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 # Minimal WindParticles node — just runs _ready() to build emitters.
-class TestWindParticles extends Node3D:
+class FakeWindParticles extends Node3D:
 	var _tree_placer: Node = null
 	var _motes:   GPUParticles3D = null
 	var _streaks: GPUParticles3D = null
@@ -25,7 +25,7 @@ func _make_wind_particles() -> Node3D:
 	return wp
 
 # Minimal TreePlacer — skip all terrain/placement work, just expose wind vars.
-class TestTreePlacer extends Node3D:
+class FakeTreePlacer extends Node3D:
 	var wind_strength_base: float    = 0.03
 	var wind_strength_gust: float    = 0.04
 	var wind_gust_cycle_speed: float = 0.25
@@ -121,7 +121,7 @@ func test_process_with_null_tree_placer_uses_fallback_ratio() -> void:
 
 func test_process_with_high_intensity_maxes_streaks() -> void:
 	var wp := _make_wind_particles()
-	var tp := TestTreePlacer.new()
+	var tp := FakeTreePlacer.new()
 	tp._gust_spike = 1.0  # full spike → get_wind_intensity near 1.0
 	add_child_autofree(tp)
 	wp.set("_tree_placer", tp)
@@ -131,7 +131,7 @@ func test_process_with_high_intensity_maxes_streaks() -> void:
 
 func test_process_with_low_intensity_minimises_streaks() -> void:
 	var wp := _make_wind_particles()
-	var tp := TestTreePlacer.new()
+	var tp := FakeTreePlacer.new()
 	tp._gust_spike = 0.0  # no spike, sine base ~0.5 → intensity ~0.2
 	add_child_autofree(tp)
 	wp.set("_tree_placer", tp)
@@ -142,12 +142,12 @@ func test_process_with_low_intensity_minimises_streaks() -> void:
 # ── TreePlacer: gust spike logic ──────────────────────────────────────────────
 
 func test_gust_spike_starts_at_zero() -> void:
-	var tp := TestTreePlacer.new()
+	var tp := FakeTreePlacer.new()
 	add_child_autofree(tp)
 	assert_eq(tp._gust_spike, 0.0, "_gust_spike should initialise to 0")
 
 func test_gust_spike_fires_when_next_spike_time_reached() -> void:
-	var tp := TestTreePlacer.new()
+	var tp := FakeTreePlacer.new()
 	add_child_autofree(tp)
 	tp._next_spike_time = 0.0  # force immediate trigger
 	tp._process(0.016)
@@ -157,7 +157,7 @@ func test_gust_spike_fires_when_next_spike_time_reached() -> void:
 	assert_lte(tp._gust_spike, 1.0, "_gust_spike must not exceed 1.0")
 
 func test_gust_spike_reaches_target_after_full_attack() -> void:
-	var tp := TestTreePlacer.new()
+	var tp := FakeTreePlacer.new()
 	add_child_autofree(tp)
 	tp._next_spike_time = 0.0
 	# Simulate enough frames to fully ramp up (1.0 / attack_rate seconds worth).
@@ -166,7 +166,7 @@ func test_gust_spike_reaches_target_after_full_attack() -> void:
 	assert_almost_eq(tp._gust_spike, 1.0, 0.001, "_gust_spike should reach 1.0 after full attack ramp")
 
 func test_gust_spike_decays_over_time() -> void:
-	var tp := TestTreePlacer.new()
+	var tp := FakeTreePlacer.new()
 	add_child_autofree(tp)
 	# Simulate spike already fully ramped — target and spike both at 1.0.
 	tp._gust_spike  = 1.0
@@ -177,7 +177,7 @@ func test_gust_spike_decays_over_time() -> void:
 	assert_almost_eq(tp._gust_spike, 0.0, 0.001, "_gust_spike should reach 0 after one decay period")
 
 func test_gust_spike_does_not_go_below_zero() -> void:
-	var tp := TestTreePlacer.new()
+	var tp := FakeTreePlacer.new()
 	add_child_autofree(tp)
 	tp._gust_spike  = 0.1
 	tp._gust_target = 0.1
@@ -186,7 +186,7 @@ func test_gust_spike_does_not_go_below_zero() -> void:
 	assert_eq(tp._gust_spike, 0.0, "_gust_spike must not go negative")
 
 func test_get_wind_intensity_returns_clamped_range() -> void:
-	var tp := TestTreePlacer.new()
+	var tp := FakeTreePlacer.new()
 	add_child_autofree(tp)
 	# Test at spike = 0 and spike = 1, both should be within [0, 1].
 	tp._gust_spike = 0.0
@@ -199,7 +199,7 @@ func test_get_wind_intensity_returns_clamped_range() -> void:
 	assert_lte(high, 1.0, "Intensity must be <= 1 at full spike")
 
 func test_get_wind_intensity_higher_during_spike() -> void:
-	var tp := TestTreePlacer.new()
+	var tp := FakeTreePlacer.new()
 	add_child_autofree(tp)
 	tp._gust_spike = 0.0
 	var calm: float = tp.get_wind_intensity()

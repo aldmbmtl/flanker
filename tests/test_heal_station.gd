@@ -45,5 +45,5 @@ func test_take_damage_kills_at_zero() -> void:
 	var hs: StaticBody3D = _make_station()
 	# Singleplayer path calls queue_free — just confirm _dead is set before free.
 	hs.take_damage(HealStationScript.MAX_HEALTH + 1.0, "rocket", 1, -1)
-	# If we got here without a crash the die path ran (queue_free is deferred).
-	pass
+	# _die() sets _dead = true synchronously before queue_free (which is deferred).
+	assert_true(hs.get("_dead"), "HealStation should be marked dead after lethal damage")

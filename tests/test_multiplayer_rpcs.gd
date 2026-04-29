@@ -406,7 +406,8 @@ func test_notify_player_respawned_includes_bonus_hp() -> void:
 	LevelSystem.spend_point_local(1, "hp")
 	var expected: float = float(GameSync.PLAYER_MAX_HP) + float(LevelSystem.get_bonus_hp(1))
 	LobbyManager.notify_player_respawned(1, Vector3.ZERO)
-	assert_eq(GameSync.player_healths.get(1, -1.0), expected, "Respawn HP must include level bonus")
+	var actual: float = float(GameSync.player_healths.get(1, -1.0))
+	assert_eq(actual, expected, "Respawn HP must include level bonus")
 
 func test_sync_death_count_updates_dict() -> void:
 	LobbyManager.sync_death_count(10, 3)

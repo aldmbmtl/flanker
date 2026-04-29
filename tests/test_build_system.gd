@@ -220,3 +220,61 @@ func test_attack_range_defs_match_documented_values() -> void:
 	assert_almost_eq(float(bs.PLACEABLE_DEFS["machinegun"]["attack_range"]), 22.0, 0.001)
 	assert_almost_eq(float(bs.PLACEABLE_DEFS["slow"]["attack_range"]),     18.0, 0.001)
 	assert_almost_eq(float(bs.PLACEABLE_DEFS["launcher_missile"]["attack_range"]), 0.0, 0.001)
+
+# ── Tree clearing on spawn ─────────────────────────────────────────────────────
+#
+# spawn_item_local must call tree_placer.clear_trees_at with radius 8.0 so that
+# both collision trunks and visual meshes are removed in the area under the tower.
+
+func test_spawn_item_local_clears_trees_with_radius_8() -> void:
+	var fake_main := Node.new()
+	fake_main.name = "Main"
+	get_tree().root.add_child(fake_main)
+
+	# Attach a StubTreePlacer under World/TreePlacer so spawn_item_local finds it.
+	var world_node := Node.new()
+	world_node.name = "World"
+	fake_main.add_child(world_node)
+	var stub_tp := StubTreePlacer.new()
+	stub_tp.name = "TreePlacer"
+	world_node.add_child(stub_tp)
+
+	TeamData.sync_from_server(200, 200)
+	var place_pos := Vector3(0.0, 5.0, 55.0)
+	var _node_name: String = bs.spawn_item_local(place_pos, 0, "cannon", "")
+
+	assert_eq(stub_tp.clear_calls.size(), 1,
+		"spawn_item_local must call clear_trees_at exactly once")
+	if stub_tp.clear_calls.size() > 0:
+		var call: Dictionary = stub_tp.clear_calls[0]
+		assert_almost_eq(float(call["radius"]), 8.0, 0.001,
+			"clear_trees_at must be called with radius 8.0")
+
+	fake_main.queue_free()
+	await get_tree().process_frame
+
+func test_spawn_item_local_clears_trees_at_correct_position() -> void:
+	var fake_main := Node.new()
+	fake_main.name = "Main"
+	get_tree().root.add_child(fake_main)
+
+	var world_node := Node.new()
+	world_node.name = "World"
+	fake_main.add_child(world_node)
+	var stub_tp := StubTreePlacer.new()
+	stub_tp.name = "TreePlacer"
+	world_node.add_child(stub_tp)
+
+	TeamData.sync_from_server(200, 200)
+	var place_pos := Vector3(10.0, 5.0, 55.0)
+	var _node_name: String = bs.spawn_item_local(place_pos, 0, "cannon", "")
+
+	if stub_tp.clear_calls.size() > 0:
+		var call_pos: Vector3 = stub_tp.clear_calls[0]["pos"]
+		assert_almost_eq(call_pos.x, place_pos.x, 0.001,
+			"clear_trees_at pos.x must match placement x")
+		assert_almost_eq(call_pos.z, place_pos.z, 0.001,
+			"clear_trees_at pos.z must match placement z")
+
+	fake_main.queue_free()
+	await get_tree().process_frame

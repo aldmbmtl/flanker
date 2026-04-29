@@ -11,7 +11,7 @@ extends GutTest
 const MachineGunTowerAIScript := preload("res://scripts/towers/MachineGunTowerAI.gd")
 const SupporterHUDScript      := preload("res://scripts/ui/SupporterHUD.gd")
 
-class TestMachineGunTower extends TowerBase:
+class FakeMachineGunTower extends TowerBase:
 	func _build_visuals() -> void:
 		pass  # skip GLB loading in headless tests
 	# Mirror the attack_damage var from MachineGunTowerAI
@@ -41,10 +41,10 @@ class FakeFriendly extends Node3D:
 	func take_damage(_amount: float, _source: String, _source_team: int = -1, _shooter_peer_id: int = -1) -> void:
 		damage_count += 1
 
-var tower: TestMachineGunTower
+var tower: FakeMachineGunTower
 
 func before_each() -> void:
-	tower = TestMachineGunTower.new()
+	tower = FakeMachineGunTower.new()
 	tower.max_health      = 600.0
 	tower.attack_range    = 0.0    # passive in tests — no Area3D, avoids physics queries
 	tower.attack_interval = 0.15
@@ -127,7 +127,7 @@ func test_tower_dies_at_zero_hp() -> void:
 # ── detection sphere ──────────────────────────────────────────────────────────
 
 func test_detection_sphere_radius_matches_attack_range() -> void:
-	var t := TestMachineGunTower.new()
+	var t := FakeMachineGunTower.new()
 	t.max_health      = 600.0
 	t.attack_range    = 22.0
 	t.attack_interval = 0.15
