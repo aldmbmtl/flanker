@@ -4,6 +4,13 @@
 # so the tests run cleanly without GLB files or AudioStreamPlayer children.
 extends GutTest
 
+# Minimal player stand-in: has player_team property so _get_body_team() and
+# _find_target() can duck-type it, and can be added to the "players" group.
+class FakePlayer extends Node3D:
+	var player_team: int = 0
+	func take_damage(_a, _b, _c, _d) -> void:
+		pass
+
 class FakeMinion extends MinionBase:
 	var death_hook_called := false
 	var fire_at_calls: int = 0
@@ -189,3 +196,35 @@ func test_force_die_marks_dead() -> void:
 func test_force_die_calls_on_death_hook() -> void:
 	minion.force_die()
 	assert_true(minion.death_hook_called)
+
+# ── _find_target: player group detection ─────────────────────────────────────
+# Regression guard for the "player" vs "players" group name bug.
+# MinionBase._find_target() must query the "players" group (plural).
+# If it queries "player" (singular) it will never find FPS players and
+# minions will march past without shooting.
+
+func test_find_target_detects_enemy_player_in_range() -> void:
+	minion._cached_towers = []
+	minion._cached_bases = []
+	MinionBase._shared_minion_cache = []
+	var fake: FakePlayer = FakePlayer.new()
+	fake.player_team = 1  # enemy of minion team 0
+	add_child_autofree(fake)
+	fake.add_to_group("players")
+	fake.global_position = Vector3(0.0, 0.0, 5.0)  # within detect_range=12
+	minion.global_position = Vector3.ZERO
+	var target: Node3D = minion._find_target()
+	assert_eq(target, fake, "Minion must target an enemy player in the 'players' group")
+
+func test_find_target_ignores_friendly_player() -> void:
+	minion._cached_towers = []
+	minion._cached_bases = []
+	MinionBase._shared_minion_cache = []
+	var fake: FakePlayer = FakePlayer.new()
+	fake.player_team = 0  # same team as minion
+	add_child_autofree(fake)
+	fake.add_to_group("players")
+	fake.global_position = Vector3(0.0, 0.0, 5.0)
+	minion.global_position = Vector3.ZERO
+	var target: Node3D = minion._find_target()
+	assert_null(target, "Minion must not target a friendly player")

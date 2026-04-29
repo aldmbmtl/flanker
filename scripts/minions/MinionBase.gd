@@ -448,7 +448,7 @@ func _find_target() -> Node3D:
 		if d < detect_range and d < best_dist:
 			best_dist = d
 			best = m
-	for player in get_tree().get_nodes_in_group("player"):
+	for player in get_tree().get_nodes_in_group("players"):
 		if not player.has_method("get"):
 			continue
 		var p_team: int = player.get("player_team") if player.get("player_team") != null else -1
