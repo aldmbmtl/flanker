@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/WeaponData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+weapon_name = "Rocket Launcher"
+damage = 150.0
+bullet_speed = 0.1
+fire_rate = 0.5
+reload_time = 10.0
+magazine_size = 2
+reserve_ammo = 2
+mesh_path = "res://assets/kenney_blaster-kit/Models/GLB format/blaster-i.glb"
+fire_sound_path = "res://assets/kenney_sci-fi-sounds/Audio/laserRetro_000.ogg"
+glow_color = Color(1.0, 0.4, 0.0, 1.0)

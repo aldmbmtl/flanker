@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/WeaponData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+weapon_name = "Pistol"
+damage = 20.0
+bullet_speed = 210.0
+fire_rate = 0.25
+reload_time = 1.2
+magazine_size = 10
+reserve_ammo = 50
+mesh_path = "res://assets/kenney_blaster-kit/Models/GLB format/blaster-a.glb"
+fire_sound_path = "res://assets/kenney_sci-fi-sounds/Audio/laserSmall_000.ogg"
+glow_color = Color(0.0, 1.0, 1.0, 1.0)

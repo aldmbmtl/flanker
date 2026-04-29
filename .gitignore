@@ -1,0 +1,8 @@
+build/
+*.x86_64
+.idea
+.ai
+.godot
+*.import
+*.uid
+addons

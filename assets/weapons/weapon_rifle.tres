@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="WeaponData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/WeaponData.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+weapon_name = "Rifle"
+damage = 45.0
+bullet_speed = 266.0
+fire_rate = 0.12
+reload_time = 2.0
+magazine_size = 20
+reserve_ammo = 80
+mesh_path = "res://assets/kenney_blaster-kit/Models/GLB format/blaster-f.glb"
+fire_sound_path = "res://assets/kenney_sci-fi-sounds/Audio/laserLarge_000.ogg"
+glow_color = Color(0.0, 1.0, 0.4, 1.0)

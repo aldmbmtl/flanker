@@ -1,0 +1,50 @@
+[gd_resource type="Environment" format=3]
+
+[ext_resource type="Material" path="res://assets/skybox/day_sky_material.tres" id="DaySkyMat"]
+
+[sub_resource type="Sky" id="Sky_day"]
+sky_material = ExtResource("DaySkyMat")
+process_mode = 2
+
+[resource]
+background_mode = 2
+sky = SubResource("Sky_day")
+ambient_light_source = 3
+ambient_light_color = Color(0.7, 0.7, 0.7, 1)
+ambient_light_energy = 0.8
+sdfgi_enabled = true
+sdfgi_use_occlusion = true
+sdfgi_read_sky_light = true
+sdfgi_energy = 1.0
+sdfgi_normal_bias = 1.1
+sdfgi_probe_bias = 1.1
+fog_enabled = true
+fog_light_color = Color(0.7, 0.7, 0.7, 1)
+fog_light_energy = 0.3
+fog_density = 0.001
+fog_aerial_perspective = 0.5
+volumetric_fog_enabled = true
+volumetric_fog_density = 0.035
+volumetric_fog_anisotropy = 0.7
+volumetric_fog_length = 64.0
+volumetric_fog_detail_spread = 2.0
+volumetric_fog_gi_inject = 1.0
+volumetric_fog_ambient_inject = 0.4
+ssr_enabled = true
+ssr_max_steps = 32
+ssr_fade_in = 0.15
+ssr_fade_out = 2.0
+ssr_depth_tolerance = 0.2
+glow_enabled = true
+glow_levels/1 = true
+glow_levels/2 = true
+glow_levels/3 = true
+glow_levels/4 = false
+glow_levels/5 = false
+glow_levels/6 = false
+glow_levels/7 = false
+glow_normalized = true
+glow_intensity = 0.4
+glow_strength = 1.1
+glow_bloom = 0.12
+glow_blend_mode = 2

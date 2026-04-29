@@ -1,0 +1,19 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://assets/skybox/sky_cubemap.gdshader" id="1"]
+[ext_resource type="Texture2D" path="res://assets/skybox/jettelly_no_moon_FRONT.png" id="2"]
+[ext_resource type="Texture2D" path="res://assets/skybox/jettelly_no_moon_BACK.png" id="3"]
+[ext_resource type="Texture2D" path="res://assets/skybox/jettelly_no_moon_LEFT.png" id="4"]
+[ext_resource type="Texture2D" path="res://assets/skybox/jettelly_no_moon_RIGHT.png" id="5"]
+[ext_resource type="Texture2D" path="res://assets/skybox/jettelly_no_moon_UP.png" id="6"]
+[ext_resource type="Texture2D" path="res://assets/skybox/jettelly_no_moon_DOWN.png" id="7"]
+
+[resource]
+shader = ExtResource("1")
+shader_parameter/face_front = ExtResource("2")
+shader_parameter/face_back = ExtResource("3")
+shader_parameter/face_left = ExtResource("4")
+shader_parameter/face_right = ExtResource("5")
+shader_parameter/face_up = ExtResource("6")
+shader_parameter/face_down = ExtResource("7")
+shader_parameter/brightness = 0.06
