@@ -85,6 +85,7 @@ var _killer_peer_id: int = -1
 # Animation / visuals
 var _active_char: Node3D     = null
 var _anim: AnimationPlayer   = null
+var _attack_anim_timer: float = 0.0  # >0 while attack animation is playing
 
 # Throttle counters
 const TARGET_INTERVAL     := 15
@@ -100,22 +101,19 @@ static var _shared_cache_frame: int     = -1
 
 # ─── Static model character selection ────────────────────────────────────────
 
-static var _blue_model_char: String     = "e"
-static var _red_model_char: String      = "b"
 static var _blue_scene_cache: PackedScene = null
 static var _red_scene_cache: PackedScene  = null
 
-static func set_model_characters(blue_char: String, red_char: String) -> void:
-	_blue_model_char  = blue_char
-	_red_model_char   = red_char
+## No-op kept for API compatibility — goblin GLBs are fixed, not character-letter based.
+static func set_model_characters(_blue_char: String, _red_char: String) -> void:
 	_blue_scene_cache = null
 	_red_scene_cache  = null
 
 static func get_blue_model_path() -> String:
-	return "res://assets/kenney_blocky-characters/Models/GLB format/character-%s.glb" % _blue_model_char
+	return "res://assets/goblin/goblin_blue.glb"
 
 static func get_red_model_path() -> String:
-	return "res://assets/kenney_blocky-characters/Models/GLB format/character-%s.glb" % _red_model_char
+	return "res://assets/goblin/goblin_red.glb"
 
 # ─── Projectile scene (default Bullet; subclasses may override _fire_at) ─────
 
@@ -166,6 +164,10 @@ func _fire_at(target: Node3D) -> void:
 	if multiplayer.is_server():
 		LobbyManager.spawn_bullet_visuals.rpc(bullet.global_position, dir, attack_damage, team)
 
+	_play_anim("attack")
+	# Attack animation is 30 frames at 24fps ≈ 1.25s; cap at cooldown so it doesn't outlast next shot
+	_attack_anim_timer = min(1.25, attack_cooldown)
+
 	shoot_audio.play()
 
 ## Override to build custom visuals when kenney blocky-character GLBs are not desired.
@@ -182,15 +184,13 @@ func _build_visuals() -> void:
 	if char_blue and _blue_scene_cache:
 		var blue_model: Node = _blue_scene_cache.instantiate()
 		char_blue.add_child(blue_model)
-		blue_model.scale = Vector3(0.667, 0.667, 0.667)
-		blue_model.rotate_y(PI)
+		blue_model.scale = Vector3(1.0, 1.0, 1.0)
 		_disable_shadows(blue_model)
 
 	if char_red and _red_scene_cache:
 		var red_model: Node = _red_scene_cache.instantiate()
 		char_red.add_child(red_model)
-		red_model.scale = Vector3(0.667, 0.667, 0.667)
-		red_model.rotate_y(PI)
+		red_model.scale = Vector3(1.0, 1.0, 1.0)
 		_disable_shadows(red_model)
 
 	if char_blue:
@@ -266,6 +266,9 @@ func _find_anim_player(root: Node) -> AnimationPlayer:
 func _play_anim(anim_name: String) -> void:
 	if _anim == null:
 		return
+	# Don't interrupt attack animation until it finishes
+	if _attack_anim_timer > 0.0 and anim_name != "attack":
+		return
 	if _anim.has_animation(anim_name):
 		if _anim.current_animation != anim_name:
 			_anim.play(anim_name)
@@ -282,6 +285,10 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_time += delta
+
+	# Attack animation countdown
+	if _attack_anim_timer > 0.0:
+		_attack_anim_timer -= delta
 
 	# Slow debuff tick
 	if _slow_timer > 0.0:

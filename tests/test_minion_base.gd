@@ -159,9 +159,12 @@ func test_apply_puppet_state_does_not_rediie() -> void:
 # ── static model helpers ──────────────────────────────────────────────────────
 
 func test_set_model_characters_updates_paths() -> void:
+	# Goblin GLBs are fixed — set_model_characters is a no-op for paths now.
 	MinionBase.set_model_characters("x", "z")
-	assert_true(MinionBase.get_blue_model_path().ends_with("character-x.glb"))
-	assert_true(MinionBase.get_red_model_path().ends_with("character-z.glb"))
+	assert_true(MinionBase.get_blue_model_path().ends_with("goblin_blue.glb"),
+		"Blue model path should point to goblin_blue.glb")
+	assert_true(MinionBase.get_red_model_path().ends_with("goblin_red.glb"),
+		"Red model path should point to goblin_red.glb")
 
 func test_set_model_characters_clears_cache() -> void:
 	MinionBase._blue_scene_cache = PackedScene.new()  # simulate cached value
