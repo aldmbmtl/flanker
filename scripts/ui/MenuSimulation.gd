@@ -22,6 +22,10 @@ var _trickle_timer: float = 0.0
 
 func start(world: Node3D) -> void:
 	_world = world
+	# Defer one frame so the physics space is initialised before raycasts run.
+	call_deferred("_start_deferred")
+
+func _start_deferred() -> void:
 	_spawn_towers()
 	_spawn_all_minions()
 

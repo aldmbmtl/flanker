@@ -51,13 +51,12 @@ const MinionAI := preload("res://scripts/minions/MinionAI.gd")
 const RoleSelectDialogScene := preload("res://scenes/ui/RoleSelectDialog.tscn")
 const SupporterHUDScene := preload("res://scenes/ui/SupporterHUD.tscn")
 const LauncherHUDScript := preload("res://scripts/ui/LauncherHUD.gd")
-const SkillTreeOverlayScene := preload("res://scenes/ui/SkillTreeOverlay.tscn")
+const CharacterScreenScene := preload("res://scenes/ui/CharacterScreen.tscn")
 const LaneBoostHUDScript := preload("res://scripts/ui/LaneBoostHUD.gd")
 const AISupporterControllerScript := preload("res://scripts/roles/supporter/AISupporterController.gd")
 const EntityHUDScript             := preload("res://scripts/hud/EntityHUD.gd")
 const PingHUDScript               := preload("res://scripts/hud/PingHUD.gd")
 const CompassHUDScript            := preload("res://scripts/hud/CompassHUD.gd")
-const LevelUpDialogScene := preload("res://scenes/ui/LevelUpDialog.tscn")
 const WindParticlesScript := preload("res://scripts/WindParticles.gd")
 
 var _supporter_hud: Node = null
@@ -66,7 +65,7 @@ var _lane_boost_hud: Node = null
 var _entity_hud: Control = null
 var _ping_hud: Control    = null
 var _compass_hud: Control = null
-var _level_up_dialog: Control = null
+var _level_up_dialog: Control = null  # retired — kept to avoid parse errors on any stale refs; remove after full cleanup
 
 @onready var rts_camera:         Camera3D        = $RTSCamera
 @onready var vignette_rect:      ColorRect       = $HUD/VignetteRect
@@ -129,7 +128,7 @@ const LoadingScreenScene := preload("res://scenes/ui/LoadingScreen.tscn")
 var _start_menu: Control
 var _pause_menu: Control
 var _role_dialog: Control
-var _skill_overlay: Control
+var _char_screen: Control = null
 
 func _ready() -> void:
 	var _has_network_peer: bool = NetworkManager._peer != null
@@ -386,32 +385,20 @@ func _refresh_pending_button() -> void:
 	if pending_button == null:
 		return
 	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
-	var pts: int = LevelSystem.get_unspent_points(my_peer)
-	pending_button.visible = pts > 0
-	pending_button.text = "↑ %d pt%s" % [pts, "s" if pts != 1 else ""]
+	var attr_pts: int  = LevelSystem.get_unspent_points(my_peer)
+	var skill_pts: int = SkillTree.get_skill_pts(my_peer)
+	var total: int     = attr_pts + skill_pts
+	pending_button.visible = total > 0
+	pending_button.text    = "↑ %d pt%s" % [total, "s" if total != 1 else ""]
 
 func _on_pending_button_pressed() -> void:
-	_toggle_attributes_dialog()
+	if _char_screen != null:
+		_char_screen.toggle()
 
 func _toggle_attributes_dialog() -> void:
-	if _level_up_dialog != null and _level_up_dialog.visible:
-		_level_up_dialog.visible = false
-		if fps_player and player_role == Role.FIGHTER and game_state == GameState.PLAYING and not _respawning:
-			fps_player.set_active(true)
-			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-		return
-	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
-	var is_mp: bool  = multiplayer.has_multiplayer_peer()
-	if _level_up_dialog == null:
-		_level_up_dialog = LevelUpDialogScene.instantiate()
-		$HUD.add_child(_level_up_dialog)
-		_level_up_dialog.connect("point_spent", _on_level_dialog_point_spent)
-		_level_up_dialog.connect("closed", _on_level_dialog_closed)
-	_level_up_dialog.setup(my_peer, is_mp)
-	_level_up_dialog.visible = true
-	if fps_player and player_role == Role.FIGHTER:
-		fps_player.set_active(false)
-	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	# Retired — CharacterScreen handles its own toggle via Tab key.
+	# pending_button now calls _char_screen.toggle() directly.
+	pass
 
 func _on_xp_gained(peer_id: int, _amount: int, new_xp: int, xp_needed: int) -> void:
 	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
@@ -431,17 +418,12 @@ func _on_level_up_signal(peer_id: int, _new_level: int) -> void:
 	_refresh_pending_button()
 
 func _on_level_dialog_point_spent(_attr: String) -> void:
-	_refresh_pending_button()
-	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
-	if LevelSystem.get_unspent_points(my_peer) <= 0:
-		if fps_player and player_role == Role.FIGHTER and game_state == GameState.PLAYING and not _respawning:
-			fps_player.set_active(true)
-			Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	# Retired — attribute spending is now done inside CharacterScreen.
+	pass
 
 func _on_level_dialog_closed() -> void:
-	if fps_player and player_role == Role.FIGHTER and game_state == GameState.PLAYING and not _respawning:
-		fps_player.set_active(true)
-		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	# Retired — CharacterScreen handles its own mouse/active state.
+	pass
 
 # ── Event Feed ────────────────────────────────────────────────────────────────
 
@@ -463,22 +445,34 @@ func _setup_event_feed() -> void:
 	LobbyManager.tower_despawned.connect(_on_event_tower_despawned)
 
 func _register_skill_tree_peer(peer_id: int, role: Role) -> void:
-	var role_str: String = "fighter" if role == Role.FIGHTER else "supporter"
+	var role_str: String = "Fighter" if role == Role.FIGHTER else "Supporter"
 	SkillTree.register_peer(peer_id, role_str)
-	# Build and attach the overlay to HUD (Fighter only has FPS mode, both can use T)
-	if _skill_overlay == null:
-		_skill_overlay = SkillTreeOverlayScene.instantiate()
-		$HUD.add_child(_skill_overlay)
-		_skill_overlay.setup(peer_id, multiplayer.has_multiplayer_peer())
+	# Build and attach the unified CharacterScreen to HUD
+	if _char_screen == null:
+		_char_screen = CharacterScreenScene.instantiate()
+		$HUD.add_child(_char_screen)
+		_char_screen.setup(peer_id, multiplayer.has_multiplayer_peer())
+		_char_screen.connect("opened", _on_char_screen_opened)
+		_char_screen.connect("closed", _on_char_screen_closed)
 	# Connect SP badge notification on the pending_button (reuse existing button)
 	if not SkillTree.skill_pts_changed.is_connected(_on_skill_pts_changed):
 		SkillTree.skill_pts_changed.connect(_on_skill_pts_changed)
 
-func _on_skill_pts_changed(peer_id: int, pts: int) -> void:
-	if peer_id != multiplayer.get_unique_id():
+func _on_char_screen_opened() -> void:
+	if fps_player and player_role == Role.FIGHTER:
+		fps_player.set_active(false)
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+func _on_char_screen_closed() -> void:
+	if fps_player and player_role == Role.FIGHTER and game_state == GameState.PLAYING and not _respawning:
+		fps_player.set_active(true)
+		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+
+func _on_skill_pts_changed(peer_id: int, _pts: int) -> void:
+	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	if peer_id != my_peer:
 		return
-	if pending_button != null:
-		pending_button.visible = pts > 0
+	_refresh_pending_button()
 
 func _team_name(team: int) -> String:
 	return "Blue" if team == 0 else "Red"
@@ -723,8 +717,8 @@ func _input(event: InputEvent) -> void:
 					toggle_pause(false)
 			return
 		if event.keycode == KEY_TAB or event.physical_keycode == KEY_TAB:
-			if game_state == GameState.PLAYING and not game_over:
-				_toggle_attributes_dialog()
+			if game_state == GameState.PLAYING and not game_over and _char_screen != null:
+				_char_screen.toggle()
 				return
 
 func _on_start_game() -> void:
