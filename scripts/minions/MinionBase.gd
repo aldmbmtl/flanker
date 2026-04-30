@@ -85,6 +85,9 @@ var _killer_peer_id: int = -1
 # Animation / visuals
 var _active_char: Node3D     = null
 var _anim: AnimationPlayer   = null
+var _hit_overlay_mat: StandardMaterial3D = null
+var _hit_flash_tween: Tween = null
+var _flash_mesh_instances: Array[MeshInstance3D] = []
 
 # Throttle counters
 const TARGET_INTERVAL     := 15
@@ -211,11 +214,62 @@ func _build_visuals() -> void:
 
 	_play_anim("idle")
 	_add_shadow_proxy()
+	
+	# Cache all mesh instances for potential flash effect
+	_flash_mesh_instances.clear()
+	if _active_char != null:
+		_collect_mesh_instances(_active_char)
+	
+	# Create the hit overlay material for flash effect
+	_build_hit_overlay()
 
 ## Called just before the death tween and queue_free.
 ## Override to spawn VFX, drop items, award bonus points, etc.
 func _on_death() -> void:
 	pass
+
+# ─── Flash helpers ────────────────────────────────────────────────────────────
+
+func _collect_mesh_instances(root: Node3D) -> void:
+	if root is MeshInstance3D:
+		_flash_mesh_instances.append(root)
+	for child in root.get_children():
+		if child is Node3D:
+			_collect_mesh_instances(child)
+
+func _build_hit_overlay() -> void:
+	if _flash_mesh_instances.is_empty():
+		return
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(1.0, 0.2, 0.2, 0.8)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.2, 0.2, 1.0)
+	mat.emission_energy_multiplier = 3.0
+	_hit_overlay_mat = mat
+
+func _flash_hit() -> void:
+	if _flash_mesh_instances.is_empty() or _hit_overlay_mat == null:
+		return
+	if _hit_flash_tween and _hit_flash_tween.is_valid():
+		_hit_flash_tween.kill()
+	# Reset emission energy before applying (previous tween may have left it at 0)
+	_hit_overlay_mat.emission_energy_multiplier = 3.0
+	# Apply overlay to all mesh surfaces
+	for mi in _flash_mesh_instances:
+		if not is_instance_valid(mi) or mi.mesh == null:
+			continue
+		for i in mi.mesh.get_surface_count():
+			mi.set_surface_override_material(i, _hit_overlay_mat)
+	_hit_flash_tween = create_tween()
+	_hit_flash_tween.tween_property(_hit_overlay_mat, "emission_energy_multiplier", 0.0, 0.3)
+	_hit_flash_tween.tween_callback(func() -> void:
+		for mi in _flash_mesh_instances:
+			if not is_instance_valid(mi) or mi.mesh == null:
+				continue
+			for i in mi.mesh.get_surface_count():
+				mi.set_surface_override_material(i, null)
+	)
 
 # ─── Visuals helpers ──────────────────────────────────────────────────────────
 
@@ -507,6 +561,7 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_
 		return
 	_killer_peer_id = killer_peer_id
 	health -= amount
+	_flash_hit()
 	if health <= 0.0:
 		_die()
 		var awarding_team: int = _killer_team if _killer_team >= 0 else 0
