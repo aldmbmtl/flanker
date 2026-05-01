@@ -303,11 +303,33 @@ func sync_skill_state(pts: int, unlocked: Array, slots: Array, cooldowns: Dictio
 	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
 	var s: SkillTreeState = _states.get(my_id)
 	if s == null:
-		return
+		# Client has no local state yet — create it so queries work.
+		s = SkillTreeState.new()
+		_states[my_id] = s
+	# Diff unlocked arrays before overwriting so we can emit skill_unlocked for each new node.
+	var old_unlocked: Array = s.unlocked.duplicate()
+	var old_cooldowns: Dictionary = s.cooldowns.duplicate()
+	var old_slots: Array = s.active_slots.duplicate()
 	s.skill_pts = pts
 	s.unlocked = unlocked.duplicate()
 	s.active_slots = slots.duplicate()
 	s.cooldowns = cooldowns.duplicate()
+	# Emit skill_unlocked for every node that is new in this sync.
+	for nid in unlocked:
+		if not old_unlocked.has(nid):
+			skill_unlocked.emit(my_id, nid)
+	# Emit active_slots_changed if slots changed.
+	if s.active_slots != old_slots:
+		active_slots_changed.emit(my_id, s.active_slots.duplicate())
+	# Emit active_used for any slot whose cooldown just became > 0 (ability was fired).
+	for slot_idx in range(s.active_slots.size()):
+		var nid: String = s.active_slots[slot_idx]
+		if nid == "":
+			continue
+		var new_cd: float = s.cooldowns.get(nid, 0.0)
+		var old_cd: float = old_cooldowns.get(nid, 0.0)
+		if new_cd > 0.0 and old_cd == 0.0:
+			active_used.emit(my_id, nid)
 	skill_pts_changed.emit(my_id, pts)
 
 func _sender_id() -> int:
@@ -331,3 +353,46 @@ func request_assign_active(slot: int, node_id: String) -> void:
 func request_use_active(slot: int) -> void:
 	if not multiplayer.is_server(): return
 	use_active_local(_sender_id(), slot)
+
+# ── Effect delivery RPCs (server → owning client) ─────────────────────────────
+# These replicate meta-based ability state to the client's own player node so
+# FPSController can read them locally. Called by FighterSkills after setting
+# the same metas on the server-side node.
+
+@rpc("authority", "reliable")
+func apply_dash(origin: Vector3, target: Vector3, elapsed: float, duration: float) -> void:
+	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var player: Node = get_player(my_id)
+	if player == null:
+		return
+	player.set_meta("dash_origin",   origin)
+	player.set_meta("dash_target",   target)
+	player.set_meta("dash_elapsed",  elapsed)
+	player.set_meta("dash_duration", duration)
+
+@rpc("authority", "reliable")
+func apply_rapid_fire(duration: float, weapon_type: String) -> void:
+	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var player: Node = get_player(my_id)
+	if player == null:
+		return
+	player.set_meta("rapid_fire_timer",  duration)
+	player.set_meta("rapid_fire_weapon", weapon_type)
+
+@rpc("authority", "reliable")
+func apply_iron_skin(hp: float, timer: float) -> void:
+	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var player: Node = get_player(my_id)
+	if player == null:
+		return
+	player.set_meta("shield_hp",    hp)
+	player.set_meta("shield_timer", timer)
+
+@rpc("authority", "reliable")
+func apply_rally_cry(bonus: float, duration: float) -> void:
+	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var player: Node = get_player(my_id)
+	if player == null:
+		return
+	player.set_meta("rally_speed_bonus", bonus)
+	player.set_meta("rally_cry_timer",   duration)

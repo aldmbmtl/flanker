@@ -69,6 +69,8 @@ static func _rally_cry(peer_id: int) -> void:
 	if caster == null:
 		return
 	var team: int = SkillTree.get_player_team(peer_id)
+	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
+	var is_mp_server: bool = _mp.has_multiplayer_peer() and _mp.is_server()
 	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
 			continue
@@ -76,6 +78,23 @@ static func _rally_cry(peer_id: int) -> void:
 		if dist <= RALLY_CRY_RANGE:
 			ally.set_meta("rally_speed_bonus", RALLY_CRY_BONUS)
 			ally.set_meta("rally_cry_timer", RALLY_CRY_DURATION)
+			# Deliver to the owning client of this ally.
+			if is_mp_server:
+				var ally_peer_id: int = _peer_id_from_node(ally)
+				if ally_peer_id > 0 and ally_peer_id != _mp.get_unique_id() \
+						and _mp.get_peers().has(ally_peer_id):
+					SkillTree.apply_rally_cry.rpc_id(ally_peer_id, RALLY_CRY_BONUS, RALLY_CRY_DURATION)
+
+## Extract peer_id from a node named "FPSPlayer_<id>".
+static func _peer_id_from_node(node: Node) -> int:
+	var n: String = node.name
+	var prefix: String = "FPSPlayer_"
+	if not n.begins_with(prefix):
+		return -1
+	var id_str: String = n.substr(prefix.length())
+	if not id_str.is_valid_int():
+		return -1
+	return int(id_str)
 
 static func _revive_pulse(peer_id: int) -> void:
 	var caster: Node = _resolve(peer_id)
@@ -158,6 +177,12 @@ static func _dash(peer_id: int) -> void:
 	cb.set_meta("dash_duration",  DASH_DURATION)
 	cb.set_meta("dash_effect",    effect)
 
+	# Deliver dash metas to the owning client so FPSController can read them locally.
+	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
+	if _mp.has_multiplayer_peer() and _mp.is_server() and peer_id != _mp.get_unique_id() \
+			and _mp.get_peers().has(peer_id):
+		SkillTree.apply_dash.rpc_id(peer_id, cb.global_position, target, 0.0, DASH_DURATION)
+
 	# Auto-cleanup timer (failsafe if the player dies mid-dash)
 	# Captures only peer_id (int) — no Node references — to avoid freed-capture errors.
 	var cleanup_timer: SceneTreeTimer = Engine.get_main_loop().create_timer(DASH_DURATION + 0.1)
@@ -182,6 +207,11 @@ static func _rapid_fire(peer_id: int) -> void:
 		weapon_type = player.get_current_weapon_type()
 	player.set_meta("rapid_fire_timer",  RAPID_FIRE_DURATION)
 	player.set_meta("rapid_fire_weapon", weapon_type)
+	# Deliver to owning client.
+	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
+	if _mp.has_multiplayer_peer() and _mp.is_server() and peer_id != _mp.get_unique_id() \
+			and _mp.get_peers().has(peer_id):
+		SkillTree.apply_rapid_fire.rpc_id(peer_id, RAPID_FIRE_DURATION, weapon_type)
 
 static func _rocket_barrage(peer_id: int) -> void:
 	var player: Node = _resolve(peer_id)
@@ -243,6 +273,11 @@ static func _iron_skin(peer_id: int) -> void:
 		return
 	player.set_meta("shield_hp",    IRON_SKIN_HP)
 	player.set_meta("shield_timer", IRON_SKIN_DURATION)
+	# Deliver to owning client.
+	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
+	if _mp.has_multiplayer_peer() and _mp.is_server() and peer_id != _mp.get_unique_id() \
+			and _mp.get_peers().has(peer_id):
+		SkillTree.apply_iron_skin.rpc_id(peer_id, IRON_SKIN_HP, IRON_SKIN_DURATION)
 
 static func _deploy_mg(peer_id: int) -> void:
 	var player: Node = _resolve(peer_id)
