@@ -11,6 +11,7 @@ func before_each() -> void:
 	GameSync.player_dead.clear()
 	GameSync.respawn_countdown.clear()
 	LobbyManager.player_death_counts.clear()
+	LobbyManager.players.clear()
 	LevelSystem.clear_all()
 
 # ── get/set player health ─────────────────────────────────────────────────────
@@ -171,3 +172,41 @@ func test_set_player_reserve_ammo_emits_signal() -> void:
 
 func test_get_player_reserve_ammo_unknown_returns_999() -> void:
 	assert_eq(GameSync.get_player_reserve_ammo(999), 999)
+
+# ── Supporter XP from tower/minion kills ──────────────────────────────────────
+
+func test_tower_kill_awards_xp_to_supporter_on_attacking_team() -> void:
+	# Peer 2 is a Supporter on team 0 (the attacking team).
+	LobbyManager.register_player_local(2, "Sup")
+	LobbyManager.players[2]["team"] = 0
+	LobbyManager.players[2]["role"] = 1
+	LevelSystem.register_peer(2)
+	# Peer 1 is the victim on team 1.
+	GameSync.set_player_health(1, 50.0)
+	var xp_before: int = LevelSystem.get_xp(2)
+	# No player peer killed peer 1 (killer_peer_id = -1), source_team = 0 (tower's team).
+	GameSync.damage_player(1, 9999.0, 0, -1)
+	var xp_after: int = LevelSystem.get_xp(2)
+	assert_gt(xp_after, xp_before, "Supporter should receive XP when team tower kills a player")
+
+func test_player_kill_does_not_award_xp_to_supporter() -> void:
+	# Peer 2 is a Supporter on team 0.
+	LobbyManager.register_player_local(2, "Sup")
+	LobbyManager.players[2]["team"] = 0
+	LobbyManager.players[2]["role"] = 1
+	LevelSystem.register_peer(2)
+	# Peer 3 is a Fighter on team 0 who gets the kill.
+	LevelSystem.register_peer(3)
+	GameSync.set_player_health(1, 50.0)
+	var sup_xp_before: int = LevelSystem.get_xp(2)
+	# Valid player kill: killer_peer_id = 3.
+	GameSync.damage_player(1, 9999.0, 0, 3)
+	var sup_xp_after: int = LevelSystem.get_xp(2)
+	assert_eq(sup_xp_after, sup_xp_before, "Supporter should not receive XP when a player gets the kill")
+
+func test_no_supporter_on_team_does_not_crash_on_tower_kill() -> void:
+	# No Supporter registered for team 0.
+	GameSync.set_player_health(1, 50.0)
+	# Should not crash; XP simply goes uncredited.
+	GameSync.damage_player(1, 9999.0, 0, -1)
+	assert_true(GameSync.player_dead.get(1, false), "Player should be dead after lethal damage")

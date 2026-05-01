@@ -177,9 +177,7 @@ func get_respawn_time(peer_id: int) -> float:
 	var deaths: int = player_death_counts.get(peer_id, 0)
 	var t: float = RESPAWN_BASE + (deaths * RESPAWN_INCREMENT)
 	t = min(t, RESPAWN_CAP)
-	# Supporter skill: s_fast_respawn passive reduces respawn time
-	var reduction: float = SkillTree.get_passive_bonus(peer_id, "respawn_reduction")
-	return maxf(1.0, t - reduction)
+	return maxf(1.0, t)
 
 @rpc("authority", "reliable")
 func sync_death_count(peer_id: int, count: int) -> void:
@@ -228,6 +226,15 @@ func get_players_by_team(team: int) -> Array:
 		if players[id].team == team:
 			result.append(id)
 	return result
+
+# Returns the peer_id of the human Supporter on the given team, or -1 if none.
+# Used to attribute kill XP from towers and minions to the team's Supporter.
+func get_supporter_peer(team: int) -> int:
+	for id in players:
+		var info: Dictionary = players[id]
+		if info.get("team", -1) == team and info.get("role", -1) == 1:
+			return id
+	return -1
 
 func _on_peer_connected(id: int) -> void:
 	print("Lobby: peer connected ", id)
@@ -426,7 +433,7 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 				if target_team == -1 or target_team != shooter_team:
 					var new_hp: float = damage_player_broadcast(target_peer, damage, shooter_team, shooter_peer)
 					if new_hp <= 0.0:
-						_apply_point_surge(shooter_peer, shooter_team)
+						pass  # point_surge removed
 		spawn_bullet_visuals.rpc(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
 		# call_remote skips the server itself — spawn locally for the host
 		if projectile_type == "rocket":
@@ -440,7 +447,7 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 		var target_peer: int = hit_result.peer_id
 		var new_hp: float = damage_player_broadcast(target_peer, damage, shooter_team, shooter_peer)
 		if new_hp <= 0.0:
-			_apply_point_surge(shooter_peer, shooter_team)
+			pass  # point_surge removed
 	elif hit_result.has("minion_path"):
 		var main: Node = get_tree().root.get_node("Main")
 		if main != null:
@@ -924,8 +931,3 @@ func reset() -> void:
 	ai_supporter_teams.clear()
 	_dirty = false
 	_roles_pending = 0
-
-func _apply_point_surge(shooter_peer: int, shooter_team: int) -> void:
-	var surge: float = SkillTree.get_passive_bonus(shooter_peer, "point_surge")
-	if surge > 0.0:
-		TeamData.add_points(shooter_team, int(surge))

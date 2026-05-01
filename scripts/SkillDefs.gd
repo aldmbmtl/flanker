@@ -100,101 +100,85 @@ const ALL: Dictionary = {
 	},
 
 	# ─────────────────────────────────────────────────────────────────────────
-	# SUPPORTER — Arsenal branch
+	# SUPPORTER — Formation branch (minion durability)
 	# ─────────────────────────────────────────────────────────────────────────
-	"s_build_discount": {
-		"role": "Supporter", "branch": "Arsenal", "type": "passive",
+	"s_minion_hp": {
+		"role": "Supporter", "branch": "Formation", "type": "passive",
 		"tier": 1, "cost": 1, "prereqs": [], "level_req": 0,
-		"name": "Build Discount",
-		"description": "All your placements cost −2 team points.",
-		"passive_key": "build_discount", "passive_val": 2.0,
+		"name": "Tougher Troops",
+		"description": "All friendly minions spawn with +25% max HP.",
+		"passive_key": "minion_hp_bonus", "passive_val": 0.25,
 		"cooldown": 0.0,
 	},
-	"s_turret_overdrive": {
-		"role": "Supporter", "branch": "Arsenal", "type": "active",
-		"tier": 2, "cost": 2, "prereqs": ["s_build_discount"], "level_req": 0,
-		"name": "Turret Overdrive",
-		"description": "Targeted friendly tower fires 2× speed for 6 s. 25 s cooldown.",
+	"s_minion_armor": {
+		"role": "Supporter", "branch": "Formation", "type": "passive",
+		"tier": 2, "cost": 2, "prereqs": ["s_minion_hp"], "level_req": 0,
+		"name": "Battle Hardened",
+		"description": "Friendly minions take 15% less damage.",
+		"passive_key": "minion_damage_reduction", "passive_val": 0.15,
+		"cooldown": 0.0,
+	},
+	"s_minion_revive": {
+		"role": "Supporter", "branch": "Formation", "type": "passive",
+		"tier": 3, "cost": 3, "prereqs": ["s_minion_armor"], "level_req": 0,
+		"name": "Last Stand",
+		"description": "Once per wave, the first friendly minion to die is revived at 30% HP.",
+		"passive_key": "minion_revive", "passive_val": 1.0,
+		"cooldown": 0.0,
+	},
+	# ─────────────────────────────────────────────────────────────────────────
+	# SUPPORTER — Aggression branch (minion combat power)
+	# ─────────────────────────────────────────────────────────────────────────
+	"s_minion_damage": {
+		"role": "Supporter", "branch": "Aggression", "type": "passive",
+		"tier": 1, "cost": 1, "prereqs": [], "level_req": 0,
+		"name": "Sharp Blades",
+		"description": "Friendly minions deal +20% attack damage.",
+		"passive_key": "minion_damage_bonus", "passive_val": 0.20,
+		"cooldown": 0.0,
+	},
+	"s_minion_speed": {
+		"role": "Supporter", "branch": "Aggression", "type": "passive",
+		"tier": 2, "cost": 2, "prereqs": ["s_minion_damage"], "level_req": 0,
+		"name": "Force March",
+		"description": "Friendly minions move +25% faster.",
+		"passive_key": "minion_speed_bonus", "passive_val": 0.25,
+		"cooldown": 0.0,
+	},
+	"s_minion_barrage": {
+		"role": "Supporter", "branch": "Aggression", "type": "active",
+		"tier": 3, "cost": 3, "prereqs": ["s_minion_speed"], "level_req": 0,
+		"name": "Coordinated Fire",
+		"description": "All friendly living minions fire once immediately. 40 s cooldown.",
 		"passive_key": "", "passive_val": 0.0,
-		"cooldown": 25.0,
-	},
-	"s_advanced_launcher": {
-		"role": "Supporter", "branch": "Arsenal", "type": "unlock",
-		"tier": 3, "cost": 3, "prereqs": ["s_turret_overdrive"], "level_req": 0,
-		"name": "Adv. Launcher",
-		"description": "Unlocks Advanced Launcher missile type in the build shop.",
-		"passive_key": "advanced_launcher", "passive_val": 1.0,
-		"cooldown": 0.0,
+		"cooldown": 40.0,
 	},
 	# ─────────────────────────────────────────────────────────────────────────
-	# SUPPORTER — Logistics branch
+	# SUPPORTER — Logistics branch (wave economy)
 	# ─────────────────────────────────────────────────────────────────────────
-	"s_fast_respawn": {
-		"role": "Supporter", "branch": "Logistics", "type": "utility",
+	"s_minion_count": {
+		"role": "Supporter", "branch": "Logistics", "type": "passive",
 		"tier": 1, "cost": 1, "prereqs": [], "level_req": 0,
-		"name": "Fast Respawn",
-		"description": "Your personal respawn timer is −2 s.",
-		"passive_key": "respawn_reduction", "passive_val": 2.0,
+		"name": "Reinforce",
+		"description": "Waves spawn +1 extra minion per lane.",
+		"passive_key": "minion_count_bonus", "passive_val": 1.0,
 		"cooldown": 0.0,
 	},
-	"s_ammo_drop": {
+	"s_minion_xp": {
+		"role": "Supporter", "branch": "Logistics", "type": "passive",
+		"tier": 2, "cost": 2, "prereqs": ["s_minion_count"], "level_req": 0,
+		"name": "Combat Vets",
+		"description": "Minion kills award +50% XP.",
+		"passive_key": "minion_xp_bonus", "passive_val": 0.5,
+		"cooldown": 0.0,
+	},
+	"s_minion_surge": {
 		"role": "Supporter", "branch": "Logistics", "type": "active",
-		"tier": 2, "cost": 2, "prereqs": ["s_fast_respawn"], "level_req": 0,
-		"name": "Ammo Drop",
-		"description": "Place an ammo crate at your feet. Allies within 3 m reload instantly. 30 s cooldown.",
+		"tier": 3, "cost": 3, "prereqs": ["s_minion_xp"], "level_req": 0,
+		"name": "Point Raid",
+		"description": "Each living friendly minion grants +1 team point. 60 s cooldown.",
 		"passive_key": "", "passive_val": 0.0,
-		"cooldown": 30.0,
-	},
-	"s_build_anywhere": {
-		"role": "Supporter", "branch": "Logistics", "type": "utility",
-		"tier": 3, "cost": 3, "prereqs": ["s_ammo_drop"], "level_req": 0,
-		"name": "Build Anywhere",
-		"description": "Removes lane-setback restriction from your placements.",
-		"passive_key": "build_anywhere", "passive_val": 1.0,
-		"cooldown": 0.0,
-	},
-	"s_rally": {
-		"role": "Supporter", "branch": "Logistics", "type": "active",
-		"tier": 3, "cost": 3, "prereqs": ["s_build_anywhere"], "level_req": 0,
-		"name": "Rally",
-		"description": "Rally beacon: all teammates gain +10% move speed for 8 s. 45 s cooldown.",
-		"passive_key": "", "passive_val": 0.0,
-		"cooldown": 45.0,
-	},
-	# ─────────────────────────────────────────────────────────────────────────
-	# SUPPORTER — Defense branch
-	# ─────────────────────────────────────────────────────────────────────────
-	"s_tower_hp": {
-		"role": "Supporter", "branch": "Defense", "type": "passive",
-		"tier": 1, "cost": 1, "prereqs": [], "level_req": 0,
-		"name": "Tower HP",
-		"description": "Friendly towers you place spawn with +20% HP.",
-		"passive_key": "tower_hp_bonus", "passive_val": 0.2,
-		"cooldown": 0.0,
-	},
-	"s_repair": {
-		"role": "Supporter", "branch": "Defense", "type": "active",
-		"tier": 2, "cost": 2, "prereqs": ["s_tower_hp"], "level_req": 0,
-		"name": "Repair",
-		"description": "Restore 30% HP to the nearest friendly tower within 15 m. 20 s cooldown.",
-		"passive_key": "", "passive_val": 0.0,
-		"cooldown": 20.0,
-	},
-	"s_fortify": {
-		"role": "Supporter", "branch": "Defense", "type": "passive",
-		"tier": 2, "cost": 2, "prereqs": ["s_tower_hp"], "level_req": 0,
-		"name": "Fortify",
-		"description": "Barrier towers you place have ×2 HP.",
-		"passive_key": "barrier_hp_mult", "passive_val": 1.0,
-		"cooldown": 0.0,
-	},
-	"s_point_surge": {
-		"role": "Supporter", "branch": "Defense", "type": "utility",
-		"tier": 3, "cost": 3, "prereqs": ["s_repair"], "level_req": 0,
-		"name": "Point Surge",
-		"description": "On kill: your team gains +3 points.",
-		"passive_key": "point_surge", "passive_val": 3.0,
-		"cooldown": 0.0,
+		"cooldown": 60.0,
 	},
 }
 

@@ -93,13 +93,14 @@ func test_non_active_nodes_have_zero_cooldown() -> void:
 # ── Node count sanity ──────────────────────────────────────────────────────────
 
 func test_total_node_count_is_22() -> void:
-	assert_eq(SkillDefs.ALL.size(), 20)
+	# 9 Fighter + 9 Supporter = 18 total
+	assert_eq(SkillDefs.ALL.size(), 18)
 
 func test_fighter_node_count_is_11() -> void:
 	assert_eq(SkillDefs.get_nodes_for_role("Fighter").size(), 9)
 
 func test_supporter_node_count_is_11() -> void:
-	assert_eq(SkillDefs.get_nodes_for_role("Supporter").size(), 11)
+	assert_eq(SkillDefs.get_nodes_for_role("Supporter").size(), 9)
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 
@@ -120,9 +121,9 @@ func test_get_branches_for_fighter() -> void:
 
 func test_get_branches_for_supporter() -> void:
 	var branches: Array = SkillDefs.get_branches_for_role("Supporter")
-	assert_true(branches.has("Arsenal"))
+	assert_true(branches.has("Formation"))
+	assert_true(branches.has("Aggression"))
 	assert_true(branches.has("Logistics"))
-	assert_true(branches.has("Defense"))
 
 func test_get_nodes_in_branch_sorted_by_tier() -> void:
 	var nodes: Array = SkillDefs.get_nodes_in_branch("Fighter", "Guardian")

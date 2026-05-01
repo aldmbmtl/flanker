@@ -1,6 +1,7 @@
 extends CanvasLayer
 ## Supporter HUD — horizontal toolbar for selecting what to place.
 ## Hotkeys 1-8 or click to select. Slot 5 = weapon sub-row.
+## XP / level display is handled by the shared top-center panel in Main.tscn.
 
 signal slot_changed(item_type: String, subtype: String)
 

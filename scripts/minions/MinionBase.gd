@@ -82,6 +82,7 @@ var _cached_bases: Array  = []
 var _enemy_base: Node3D   = null
 
 var _killer_peer_id: int = -1
+var _attacker_team: int = -1
 
 # Animation / visuals
 var _active_char: Node3D     = null
@@ -585,6 +586,13 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_
 	if _killer_team >= 0 and _killer_team == team:
 		return
 	_killer_peer_id = killer_peer_id
+	_attacker_team = _killer_team
+	# s_minion_armor: damage reduction passive from Supporter on this minion's team
+	var sup: int = LobbyManager.get_supporter_peer(team)
+	if sup > 0:
+		var dr: float = SkillTree.get_passive_bonus(sup, "minion_damage_reduction")
+		if dr > 0.0:
+			amount = amount * (1.0 - clampf(dr, 0.0, 1.0))
 	health -= amount
 	_flash_hit()
 	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
@@ -614,6 +622,20 @@ func _die() -> void:
 	if _dead:
 		return
 	_dead = true
+
+	# s_minion_revive: once-per-wave revival — check before committing death
+	if multiplayer.is_server() or not multiplayer.has_multiplayer_peer():
+		var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
+		if spawner != null:
+			var revive_used: Dictionary = spawner.get("_revive_used") if spawner.get("_revive_used") != null else {}
+			var sup: int = LobbyManager.get_supporter_peer(team)
+			if sup > 0 and SkillTree.get_passive_bonus(sup, "minion_revive") > 0.0 and not revive_used.get(team, false):
+				revive_used[team] = true
+				spawner.set("_revive_used", revive_used)
+				health = maxf(1.0, get("max_health") * 0.30)
+				_dead = false
+				return
+
 	remove_from_group("minions")
 	_play_anim("death")
 	death_audio.play()
@@ -629,10 +651,25 @@ func _die() -> void:
 		if spawner != null:
 			spawner.get("_minion_node_cache").erase(_minion_id)
 		if _killer_peer_id > 0:
-			LevelSystem.award_xp(_killer_peer_id, LevelSystem.XP_MINION)
+			var xp_amt: int = _xp_with_bonus(_killer_peer_id, LevelSystem.XP_MINION)
+			LevelSystem.award_xp(_killer_peer_id, xp_amt)
+		else:
+			# No player peer fired the killing blow (e.g. a tower or another minion).
+			# Credit the Supporter on the attacking team.
+			var sup: int = LobbyManager.get_supporter_peer(_attacker_team)
+			if sup > 0:
+				LevelSystem.award_xp(sup, LevelSystem.XP_MINION)
 	elif not multiplayer.has_multiplayer_peer():
 		var sp_killer: int = _killer_peer_id if _killer_peer_id > 0 else 1
-		LevelSystem.award_xp(sp_killer, LevelSystem.XP_MINION)
+		var xp_amt: int = _xp_with_bonus(sp_killer, LevelSystem.XP_MINION)
+		LevelSystem.award_xp(sp_killer, xp_amt)
+
+## Returns XP amount scaled by s_minion_xp passive of the Supporter on the
+## dead minion's *own* team — killer earns more XP when they've upgraded minions.
+func _xp_with_bonus(killer_peer: int, base_xp: int) -> int:
+	var sup: int = LobbyManager.get_supporter_peer(team)
+	var bonus: float = SkillTree.get_passive_bonus(sup, "minion_xp_bonus") if sup > 0 else 0.0
+	return int(ceil(float(base_xp) * (1.0 + bonus)))
 
 func force_die() -> void:
 	_die()

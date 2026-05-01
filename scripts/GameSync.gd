@@ -53,9 +53,15 @@ func damage_player(peer_id: int, amount: float, source_team: int, killer_peer_id
 		var deaths: int = LobbyManager.increment_death_count(peer_id)
 		var respawn_time: float = LobbyManager.get_respawn_time(peer_id)
 		respawn_countdown[peer_id] = respawn_time
-		# Award XP to killer (server-authoritative)
+		# Award XP to killer (server-authoritative).
+		# If no player peer fired the killing blow (e.g. a tower projectile),
+		# credit the Supporter on the attacking team instead.
 		if killer_peer_id > 0:
 			LevelSystem.award_xp(killer_peer_id, LevelSystem.XP_PLAYER)
+		elif source_team >= 0:
+			var sup: int = LobbyManager.get_supporter_peer(source_team)
+			if sup > 0:
+				LevelSystem.award_xp(sup, LevelSystem.XP_PLAYER)
 	
 	return hp
 

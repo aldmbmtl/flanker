@@ -57,7 +57,6 @@ func get_item_cost(item_type: String, subtype: String) -> int:
 		base = WEAPON_COSTS.get(subtype, 0)
 		# f_explosive: rocket launcher costs 30 less for an unlocked Fighter
 		if subtype == "rocket_launcher":
-			var discount: int = _get_skill_build_discount(0)  # team 0 as fallback; actual discount checked per-placer
 			base = max(0, base - 30) if _any_team_has_explosive() else base
 	else:
 		var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
@@ -70,14 +69,6 @@ func _any_team_has_explosive() -> bool:
 		if SkillTree.is_unlocked(peer_id, "f_explosive"):
 			return true
 	return false
-
-func _get_skill_build_discount(team: int) -> int:
-	# Sum build_discount passive from all peers on that team
-	var total: int = 0
-	for peer_id in SkillTree.get_all_peers():
-		if SkillTree.get_role(peer_id) == "supporter":
-			total += int(SkillTree.get_passive_bonus(peer_id, "build_discount"))
-	return total
 
 func can_place_item(world_pos: Vector3, team: int, item_type: String, placer_peer_id: int = -1) -> bool:
 	var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
@@ -244,12 +235,7 @@ func get_tower_cost() -> int:
 func _apply_tower_hp_bonuses(node: Node, item_type: String, placer_peer_id: int) -> void:
 	# Attr bonus: from the placing Supporter's tower_hp attribute
 	var hp_bonus_pct: float = LevelSystem.get_bonus_tower_hp_mult(placer_peer_id)
-	# Skill tree bonus: s_tower_hp passive (stacks on top of attr bonus)
-	hp_bonus_pct += SkillTree.get_passive_bonus(placer_peer_id, "tower_hp_bonus")
-	# Barrier ×2 HP from skill tree (s_fortify) — scoped to placer
 	var barrier_mult: float = 1.0
-	if item_type == "barrier":
-		barrier_mult = maxf(barrier_mult, 1.0 + SkillTree.get_passive_bonus(placer_peer_id, "barrier_hp_mult"))
 	if hp_bonus_pct == 0.0 and barrier_mult == 1.0:
 		return
 	var current_hp: float = node.get("_health") if node.get("_health") != null else 0.0

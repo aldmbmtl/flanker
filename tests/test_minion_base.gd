@@ -349,3 +349,55 @@ func test_approach_with_strafe_has_offset() -> void:
 	var strafe: float = sin(time_val * 2.2 + phase) * 0.35 + sin(phase) * 0.25
 	var move_dir: Vector3 = (forward + right * strafe).normalized()
 	assert_true(abs(move_dir.x) > 0.01, "Strafe must have permanent lateral component when _strafe_phase=PI/2")
+
+# ── Supporter XP from minion kills (multiplayer server path) ──────────────────
+
+func test_supporter_gets_xp_when_minion_killed_by_tower_in_multiplayer() -> void:
+	# Peer 99 is a Supporter on team 1 (the enemy team, which owns the tower that killed minion).
+	# Minion is on team 0; killer is on team 1.
+	LobbyManager.players.clear()
+	LobbyManager.register_player_local(99, "Sup")
+	LobbyManager.players[99]["team"] = 1
+	LobbyManager.players[99]["role"] = 1  # Supporter
+	LevelSystem.register_peer(99)
+	# Build a minion on team 0 (enemy of Supporter's team 1).
+	var m: FakeMinion = FakeMinion.new()
+	m.max_health = 60.0
+	add_child_autofree(m)
+	m.setup(0, [], 0)
+	var xp_before: int = LevelSystem.get_xp(99)
+	# Damage from team 1 with no player peer (tower kill: killer_peer_id = -1).
+	m.take_damage(60.0, "cannon", 1, -1)
+	var xp_after: int = LevelSystem.get_xp(99)
+	LobbyManager.players.clear()
+	assert_gt(xp_after, xp_before, "Supporter should receive XP when their team's tower kills a minion")
+
+func test_supporter_does_not_get_xp_when_player_gets_kill() -> void:
+	# Peer 5 is a Fighter; Peer 99 is a Supporter on the same team 1.
+	LobbyManager.players.clear()
+	LobbyManager.register_player_local(99, "Sup")
+	LobbyManager.players[99]["team"] = 1
+	LobbyManager.players[99]["role"] = 1
+	LevelSystem.register_peer(99)
+	LevelSystem.register_peer(5)
+	var m: FakeMinion = FakeMinion.new()
+	m.max_health = 60.0
+	add_child_autofree(m)
+	m.setup(0, [], 0)
+	var xp_before: int = LevelSystem.get_xp(99)
+	# Player 5 gets the kill.
+	m.take_damage(60.0, "player", 1, 5)
+	var xp_after: int = LevelSystem.get_xp(99)
+	LobbyManager.players.clear()
+	assert_eq(xp_after, xp_before, "Supporter should not receive XP when a player peer gets the kill")
+
+func test_no_supporter_on_team_does_not_crash_on_minion_kill() -> void:
+	LobbyManager.players.clear()
+	# No Supporter registered for team 1.
+	var m: FakeMinion = FakeMinion.new()
+	m.max_health = 60.0
+	add_child_autofree(m)
+	m.setup(0, [], 0)
+	# Should not crash; XP simply goes uncredited.
+	m.take_damage(60.0, "cannon", 1, -1)
+	assert_true(m._dead, "Minion should be dead after lethal damage")

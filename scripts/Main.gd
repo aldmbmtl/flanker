@@ -252,10 +252,6 @@ func _start_multiplayer_game() -> void:
 		ammo_label.visible = false
 		reload_prompt.visible = false
 		$HUD/MinimapPanel.visible = false
-		# Hide XP/level widgets — Supporter doesn't earn XP via kills
-		xp_bar.visible = false
-		level_label.visible = false
-		pending_button.visible = false
 		# PointsLabel and LivesBar remain visible for Supporter
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 		# Spawn SupporterHUD toolbar
@@ -284,6 +280,14 @@ func _start_multiplayer_game() -> void:
 		_entity_hud = $HUD/HUDOverlay
 		_entity_hud.set_script(EntityHUDScript)
 		_entity_hud.setup(player_start_team)
+		# Build-limit line — shows world z=0 placement boundary in RTS view
+		var build_limit_line := Control.new()
+		build_limit_line.set_script(load("res://scripts/ui/BuildLimitLine.gd"))
+		build_limit_line.name = "BuildLimitLine"
+		$HUD.add_child(build_limit_line)
+		build_limit_line.setup(rts_camera)
+		# Wire leveling HUD — Supporter earns XP from tower/minion kills
+		_setup_level_hud()
 
 	# Wire PingHUD — blinking diamond overlay for all roles
 	_setup_ping_hud()

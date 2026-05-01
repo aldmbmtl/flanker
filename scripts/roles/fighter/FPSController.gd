@@ -305,9 +305,6 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_
 		# Singleplayer: award XP to killer
 		if killer_peer_id > 0 and not multiplayer.has_multiplayer_peer():
 			LevelSystem.award_xp(killer_peer_id, LevelSystem.XP_PLAYER)
-			# point_surge: check if killer has the Supporter skill
-			if SkillTree.get_passive_bonus(killer_peer_id, "point_surge") > 0.0:
-				TeamData.add_points(awarding_team, int(SkillTree.get_passive_bonus(killer_peer_id, "point_surge")))
 			# killstreak_heal: heal killer
 			var heal_amt: float = SkillTree.get_passive_bonus(killer_peer_id, "killstreak_heal")
 			if heal_amt > 0.0:
