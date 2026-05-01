@@ -2,9 +2,16 @@
 ## No state — use via preload or direct autoload path.
 class_name CombatUtils
 
-static func should_damage(hit: Object, shooter_team: int) -> bool:
+static func should_damage(hit: Object, shooter_team: int, shooter_peer_id: int = -1) -> bool:
 	if hit == null or not hit.has_method("take_damage"):
 		return false
+	# Self-damage exclusion: never damage the peer who fired the projectile.
+	if shooter_peer_id >= 0:
+		var hit_peer: int = hit.get("peer_id") if hit.get("peer_id") != null else -1
+		if hit_peer == shooter_peer_id:
+			return false
+		if hit is StaticBody3D and hit.get_meta("ghost_peer_id", -1) == shooter_peer_id:
+			return false
 	var hit_team = hit.get("team")
 	if hit_team == null:
 		hit_team = hit.get("player_team")

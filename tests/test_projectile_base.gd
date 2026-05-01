@@ -302,3 +302,55 @@ func test_mortar_on_hit_tree_does_not_apply_splash() -> void:
 
 	fake_main.queue_free()
 	await get_tree().process_frame
+
+# ── Self-damage exclusion — _handle_ghost_hit ─────────────────────────────────
+
+func test_handle_ghost_hit_self_peer_returns_true_no_damage() -> void:
+	# Shooter peer_id 5 collides with their own ghost hitbox (ghost_peer_id=5).
+	# _handle_ghost_hit must return true (consumed) but apply zero damage.
+	var ghost := StaticBody3D.new()
+	ghost.set_meta("ghost_peer_id", 5)
+	add_child_autofree(ghost)
+
+	var p := FakeProjectile.new()
+	p.shooter_peer_id = 5
+	p.shooter_team    = -1
+	p.damage          = 30.0
+	add_child_autofree(p)
+
+	GameSync.set_player_health(5, 100.0)
+	GameSync.player_dead[5] = false
+	GameSync.set_player_team(5, 0)
+	var hp_before: float = GameSync.get_player_health(5)
+	var consumed: bool = p._handle_ghost_hit(ghost, p.damage)
+	var hp_after: float = GameSync.get_player_health(5)
+
+	assert_true(consumed, "_handle_ghost_hit must return true for own ghost hitbox")
+	assert_eq(hp_after, hp_before, "Shooter health must not decrease on self ghost hit")
+	GameSync.player_healths.erase(5)
+	GameSync.player_dead.erase(5)
+	GameSync.player_teams.erase(5)
+
+func test_handle_ghost_hit_other_peer_applies_damage() -> void:
+	# Shooter peer_id 5 hits peer 7's ghost — damage must apply (server path).
+	var ghost := StaticBody3D.new()
+	ghost.set_meta("ghost_peer_id", 7)
+	add_child_autofree(ghost)
+
+	var p := FakeProjectile.new()
+	p.shooter_peer_id = 5
+	p.shooter_team    = -1
+	p.damage          = 30.0
+	add_child_autofree(p)
+
+	GameSync.set_player_health(7, 100.0)
+	GameSync.player_dead[7] = false
+	GameSync.set_player_team(7, 1)   # enemy team
+	var hp_before: float = GameSync.get_player_health(7)
+	p._handle_ghost_hit(ghost, p.damage)
+	var hp_after: float = GameSync.get_player_health(7)
+
+	assert_lt(hp_after, hp_before, "Enemy ghost hitbox must take damage")
+	GameSync.player_healths.erase(7)
+	GameSync.player_dead.erase(7)
+	GameSync.player_teams.erase(7)

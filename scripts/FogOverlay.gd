@@ -58,9 +58,11 @@ func _build_mesh() -> void:
 	_mat.set_shader_parameter("sources", _sources_buf)
 	_mat.set_shader_parameter("source_count", 0)
 
+## tower_sources: Array[Vector4] where each element is Vector4(x, z, radius, 0).
+## Each tower contributes its own reveal radius so fog matches attack_range.
 func update_sources(player_positions: Array, player_radius: float,
 		minion_positions: Array, minion_radius: float,
-		tower_positions: Array, tower_radius: float) -> void:
+		tower_sources: Array) -> void:
 	if _mat == null:
 		return
 
@@ -80,11 +82,11 @@ func update_sources(player_positions: Array, player_radius: float,
 		_sources_buf[count] = Vector4(pos.x, pos.z, minion_radius, 0.0)
 		count += 1
 
-	# Towers
-	for pos in tower_positions:
+	# Towers — each element is already a Vector4(x, z, radius, 0)
+	for src in tower_sources:
 		if count >= MAX_SOURCES:
 			break
-		_sources_buf[count] = Vector4(pos.x, pos.z, tower_radius, 0.0)
+		_sources_buf[count] = src
 		count += 1
 
 	# Timed reveals (recon strike, etc.)

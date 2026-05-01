@@ -709,9 +709,8 @@ The tests verify **data plumbing** — signals fire with correct values, state d
 2. **`notify_player_respawned` ignores bonus HP** — broadcasts flat `PLAYER_MAX_HP` instead of `PLAYER_MAX_HP + LevelSystem.get_bonus_hp(peer_id)`. Clients see wrong HP after respawn for leveled-up players. (`LobbyManager.gd:452-455`)
 3. **`request_destroy_tree` uses `call_remote`** — host-fired bullet hits never destroy trees on the host side. (`LobbyManager.gd:694-705`)
 4. **`broadcast_player_transform` double-emits on server** — `report_player_transform` calls `broadcast_player_transform` both directly (line 370) and via `.rpc()` (line 371), firing `remote_player_updated` twice on the host. (`LobbyManager.gd:370-371`)
-5. **`spawn_cannonball_visuals` / `spawn_mortar_visuals` are `call_remote`** — host never sees cannon or mortar tower projectile VFX. (`LobbyManager.gd`)
-6. **Remote players invisible on minimap** — `BasePlayer` puppet nodes are in group `"players"` but `Minimap` only queries group `"player"`. Remote allies/enemies never appear on the minimap. (`Minimap.gd`)
-7. **Minimap fog ignores allied remote player positions** — `_draw_fog_overlay` / `_is_fogged` only clears fog for the local player. Allied positions passed to fog overlay are not used. (`Minimap.gd`)
+5. **Remote players invisible on minimap** — `BasePlayer` puppet nodes are in group `"players"` but `Minimap` only queries group `"player"`. Remote allies/enemies never appear on the minimap. (`Minimap.gd`)
+6. **Minimap fog ignores allied remote player positions** — `_draw_fog_overlay` / `_is_fogged` only clears fog for the local player. Allied positions passed to fog overlay are not used. (`Minimap.gd`)
 
 ### Writing new tests
 - Place files in `res://tests/`. GUT auto-discovers all `test_*.gd` files in that directory.

@@ -555,6 +555,46 @@ func test_spawn_mortar_visuals_rpc_is_call_remote() -> void:
 		"spawn_mortar_visuals.rpc() must dispatch via multiplayer")
 	get_tree().set_multiplayer(null, LobbyManager.get_path())
 
+# ── _fire_ballistic RPC dispatch regression guard ────────────────────────────
+#
+# Verify that _fire_ballistic calls rpc_callable.rpc() (not .call()) so that
+# clients actually receive the cannonball/mortar VFX broadcast.
+# Previously the code used rpc_callable.call() which executed the function body
+# locally but never dispatched to peers.
+
+class FakeCannonTower extends TowerAI:
+	func _build_visuals() -> void:
+		pass
+
+func test_fire_ballistic_dispatches_rpc_to_clients() -> void:
+	var mock := MockMultiplayerAPI.new()
+	mock.set_as_server()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var t := FakeCannonTower.new()
+	t.max_health      = 900.0
+	t.attack_range    = 0.0
+	t.attack_interval = 1.0
+	t.tower_type      = "cannon"
+	add_child_autofree(t)
+	t.setup(0)
+
+	# Fake target — needs global_position accessible via Node3D
+	var target := Node3D.new()
+	add_child_autofree(target)
+	target.global_position = Vector3(0, 0, 10)
+
+	var cannon_scene: PackedScene = preload("res://scenes/projectiles/Cannonball.tscn")
+	t._fire_ballistic(
+		cannon_scene, 50.0, "cannonball",
+		"res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_001.ogg",
+		0.0, 0.9, 1.05, target,
+		Callable(LobbyManager, "spawn_cannonball_visuals"))
+
+	assert_true(mock.was_called("spawn_cannonball_visuals"),
+		"_fire_ballistic must dispatch spawn_cannonball_visuals.rpc() to clients when is_server()")
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
 # ── SlowTower pulse VFX RPC broadcast regression guard ───────────────────────
 #
 # Verify that _emit_pulse() calls LobbyManager.spawn_slow_pulse_visuals.rpc()

@@ -57,7 +57,7 @@ func _on_body_entered(body: Node3D) -> void:
 		return
 	# Only the local player's controller triggers pickup — prevents double-fire
 	# on server (which has CharacterBody3D for all players) and ignores ghosts.
-	var is_local: bool = body.get("_is_local") == true
+	var is_local: bool = body.get("is_local") == true
 	if not is_local:
 		return
 	if team != -1:

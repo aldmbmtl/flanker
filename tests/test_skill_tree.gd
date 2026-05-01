@@ -102,7 +102,7 @@ func test_can_unlock_tier1_with_1_point() -> void:
 
 func test_cannot_unlock_wrong_role() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
-	assert_false(SkillTree.can_unlock(FIGHTER_ID, "s_minion_hp"))
+	assert_false(SkillTree.can_unlock(FIGHTER_ID, "s_basic_t1"))
 
 func test_cannot_unlock_unknown_node() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
@@ -192,11 +192,11 @@ func test_assign_active_slot_succeeds_when_unlocked() -> void:
 	assert_eq(SkillTree.get_active_slots(FIGHTER_ID)[0], "f_dash")
 
 func test_cannot_assign_non_active_node_to_slot() -> void:
-	# s_minion_hp is type "passive" — should be rejected from active slot
+	# s_basic_t1 is type "passive" — should be rejected from active slot
 	SkillTree.register_peer(SUPPORTER_ID, "Supporter")
 	SkillTree._on_level_up(SUPPORTER_ID, 2)
-	SkillTree.unlock_node_local(SUPPORTER_ID, "s_minion_hp")
-	SkillTree.assign_active_slot(SUPPORTER_ID, 0, "s_minion_hp")
+	SkillTree.unlock_node_local(SUPPORTER_ID, "s_basic_t1")
+	SkillTree.assign_active_slot(SUPPORTER_ID, 0, "s_basic_t1")
 	assert_eq(SkillTree.get_active_slots(SUPPORTER_ID)[0], "")
 
 func test_assign_active_emits_slots_changed() -> void:
@@ -285,14 +285,17 @@ func test_second_wind_unregistered_returns_true_safely() -> void:
 func test_supporter_minion_hp_passive() -> void:
 	SkillTree.register_peer(SUPPORTER_ID, "Supporter")
 	SkillTree._on_level_up(SUPPORTER_ID, 2)
-	SkillTree.unlock_node_local(SUPPORTER_ID, "s_minion_hp")
-	assert_almost_eq(SkillTree.get_passive_bonus(SUPPORTER_ID, "minion_hp_bonus"), 0.25, 0.001)
+	SkillTree.unlock_node_local(SUPPORTER_ID, "s_basic_t1")
+	assert_almost_eq(SkillTree.get_passive_bonus(SUPPORTER_ID, "basic_tier"), 1.0, 0.001)
 
 func test_supporter_minion_damage_passive() -> void:
 	SkillTree.register_peer(SUPPORTER_ID, "Supporter")
 	SkillTree._on_level_up(SUPPORTER_ID, 2)
-	SkillTree.unlock_node_local(SUPPORTER_ID, "s_minion_damage")
-	assert_almost_eq(SkillTree.get_passive_bonus(SUPPORTER_ID, "minion_damage_bonus"), 0.20, 0.001)
+	SkillTree.unlock_node_local(SUPPORTER_ID, "s_basic_t1")
+	SkillTree._on_level_up(SUPPORTER_ID, 3)
+	SkillTree._on_level_up(SUPPORTER_ID, 4)
+	SkillTree.unlock_node_local(SUPPORTER_ID, "s_basic_t2")
+	assert_almost_eq(SkillTree.get_passive_bonus(SUPPORTER_ID, "basic_tier"), 2.0, 0.001)
 
 # ── Explicit slot targeting (Q=0, E=1) ───────────────────────────────────────
 

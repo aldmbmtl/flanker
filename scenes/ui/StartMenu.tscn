@@ -95,7 +95,7 @@ layout_mode = 2
 layout_mode = 2
 custom_minimum_size = Vector2(260, 44)
 theme = ExtResource("4")
-text = "HOST GAME"
+text = "START GAME"
 
 [node name="JoinButton" type="Button" parent="MenuPanel/VBox"]
 layout_mode = 2

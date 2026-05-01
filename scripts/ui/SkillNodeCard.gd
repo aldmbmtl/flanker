@@ -5,6 +5,8 @@ extends Control
 # Hover + E         → assign to active slot 1 (E key) if unlocked + active type.
 # Hover + Q/E (locked) → brief red flash on lock overlay to signal not unlocked.
 # Hover             → Godot built-in tooltip shows name / description / cost.
+# portrait_texture  → optional branch portrait shown inside the circle.
+# tier_tooltip      → optional multi-line upgrade preview appended to tooltip.
 
 signal unlock_requested(node_id: String)
 signal assign_active_requested(node_id: String, slot: int)
@@ -14,6 +16,14 @@ var _peer_id:   int    = 1
 var _is_active: bool   = false
 var _hovered:   bool   = false
 
+# Optional portrait shown inside the skill circle. Set by SkillTreeOverlay for
+# Supporter branch header nodes (tier-1 nodes) before calling setup().
+var portrait_texture: Texture2D = null
+
+# Optional multi-line upgrade text shown at the bottom of the tooltip.
+# Format: "Tier 1: <desc>\nTier 2: <desc>\nTier 3: <desc>"
+var tier_tooltip: String = ""
+
 @onready var _circle_btn:   Button    = $CircleBtn
 @onready var _name_label:   Label     = $NameLabel
 @onready var _cost_badge:   Label     = $CostBadge
@@ -22,6 +32,9 @@ var _hovered:   bool   = false
 var _style_locked:    StyleBoxFlat
 var _style_available: StyleBoxFlat
 var _style_unlocked:  StyleBoxFlat
+
+# Portrait TextureRect — created dynamically when portrait_texture is assigned.
+var _portrait_rect: TextureRect = null
 
 func _make_circle_style(bg: Color, border: Color) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
@@ -45,7 +58,7 @@ func setup(node_id: String, peer_id: int) -> void:
 
 	_is_active = def.get("type", "") == "active"
 
-	# Tooltip: full name + description + cost + type hint.
+	# Tooltip: full name + description + cost + type hint + optional tier progression.
 	var type_hint: String = " [Active]" if _is_active else " [Passive]"
 	var tooltip: String   = "%s%s\n%s\nCost: %d SP" % [
 		node_id.replace("_", " ").capitalize(),
@@ -55,6 +68,8 @@ func setup(node_id: String, peer_id: int) -> void:
 	]
 	if _is_active:
 		tooltip += "\nHover + Q to assign slot 1 (Q), E to assign slot 2 (E)"
+	if tier_tooltip != "":
+		tooltip += "\n\n" + tier_tooltip
 	# tooltip_text lives on the CircleBtn so hover anywhere on the circle shows it.
 	_circle_btn.tooltip_text = tooltip
 
@@ -66,6 +81,21 @@ func setup(node_id: String, peer_id: int) -> void:
 	_style_locked    = _make_circle_style(Color(0.18, 0.18, 0.2,  1.0), Color(0.35, 0.35, 0.35, 1.0))
 	_style_available = _make_circle_style(Color(0.85, 0.55, 0.05, 1.0), Color(1.0,  0.8,  0.2,  1.0))
 	_style_unlocked  = _make_circle_style(Color(0.15, 0.6,  0.2,  1.0), Color(0.3,  1.0,  0.4,  1.0))
+
+	# Portrait image — show inside the circle button if provided.
+	if portrait_texture != null:
+		_portrait_rect = TextureRect.new()
+		_portrait_rect.texture = portrait_texture
+		_portrait_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		_portrait_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_portrait_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		# Clip inside the circle (best-effort; engine will show a square clip).
+		_portrait_rect.clip_contents = true
+		# Insert BELOW the name label so the name stays readable.
+		_circle_btn.add_child(_portrait_rect)
+		_circle_btn.move_child(_portrait_rect, 0)
+		# Semi-transparent so state colours show through slightly.
+		_portrait_rect.modulate = Color(1.0, 1.0, 1.0, 0.75)
 
 	refresh()
 

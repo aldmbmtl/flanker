@@ -1,6 +1,6 @@
 extends Control
-## BuildLimitLine — draws a horizontal line across the RTS viewport at world z=0,
-## which is the hard placement boundary for both teams.
+## BuildLimitLine — draws a horizontal line across the RTS viewport at the
+## team's current dynamic build limit z (from LaneControl).
 ## Added to $HUD at runtime in the Supporter branch only.
 ## The line is drawn in _draw() each frame; queue_redraw() is called from _process().
 
@@ -11,10 +11,12 @@ const LABEL_COLOR := Color(1.0, 0.4, 0.1, 0.75)
 const LABEL_SIZE  := 12
 
 var _rts_cam: Camera3D = null
+var _team: int = 0
 
 ## Call immediately after add_child so _draw() has a valid camera reference.
-func setup(rts_cam: Camera3D) -> void:
+func setup(rts_cam: Camera3D, team: int = 0) -> void:
 	_rts_cam = rts_cam
+	_team = team
 	# Fill entire viewport so draw coords map 1:1 to screen pixels.
 	anchor_left   = 0.0
 	anchor_top    = 0.0
@@ -25,7 +27,7 @@ func setup(rts_cam: Camera3D) -> void:
 func _process(_delta: float) -> void:
 	queue_redraw()
 
-## Returns true when the world midline z=0 projects into the visible viewport.
+## Returns true when the team's current build limit z projects into the visible viewport.
 ## Exposed as a standalone method so tests can call it without relying on _draw.
 func _should_draw() -> bool:
 	if _rts_cam == null or not is_instance_valid(_rts_cam):
@@ -33,7 +35,8 @@ func _should_draw() -> bool:
 	var h: float = get_viewport_rect().size.y
 	if h <= 0.0:
 		return false
-	var screen_pt: Vector2 = _rts_cam.unproject_position(Vector3(0.0, 0.0, 0.0))
+	var limit_z: float = LaneControl.get_build_limit(_team)
+	var screen_pt: Vector2 = _rts_cam.unproject_position(Vector3(0.0, 0.0, limit_z))
 	return screen_pt.y >= 0.0 and screen_pt.y <= h
 
 func _draw() -> void:
@@ -42,7 +45,8 @@ func _draw() -> void:
 	var size: Vector2 = get_viewport_rect().size
 	if size.y <= 0.0:
 		return
-	var screen_pt: Vector2 = _rts_cam.unproject_position(Vector3(0.0, 0.0, 0.0))
+	var limit_z: float = LaneControl.get_build_limit(_team)
+	var screen_pt: Vector2 = _rts_cam.unproject_position(Vector3(0.0, 0.0, limit_z))
 	var y: float = screen_pt.y
 	if y < 0.0 or y > size.y:
 		return

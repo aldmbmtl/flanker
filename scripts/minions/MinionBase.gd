@@ -103,6 +103,17 @@ var _tower_cache_frame: int = 0
 static var _shared_minion_cache: Array  = []
 static var _shared_cache_frame: int     = -1
 
+## minion_type: "basic", "cannon", or "healer".
+## Set by MinionSpawner before add_child.
+var minion_type: String = "basic"
+
+# Per-instance model chars set by MinionSpawner._apply_tier_model before add_child.
+# When set, _build_visuals() uses these instead of the global static chars.
+# Both are the same char (same model family for both teams); team colour comes from
+# the CharacterBlue / CharacterRed node visibility toggle.
+var _spawn_blue_char: String = ""
+var _spawn_red_char:  String = ""
+
 # ─── Static model character selection ────────────────────────────────────────
 
 static var _blue_model_char: String     = "e"
@@ -179,20 +190,35 @@ func _build_visuals() -> void:
 	var char_blue: Node3D = get_node_or_null("CharacterBlue")
 	var char_red: Node3D  = get_node_or_null("CharacterRed")
 
-	if _blue_scene_cache == null:
-		_blue_scene_cache = load(get_blue_model_path())
-	if _red_scene_cache == null:
-		_red_scene_cache = load(get_red_model_path())
+	# Per-instance chars (set by MinionSpawner for typed minions) take priority
+	# over the global static chars used by the basic MinionAI pool.
+	var blue_char_to_use: String = _spawn_blue_char if _spawn_blue_char != "" else _blue_model_char
+	var red_char_to_use:  String = _spawn_red_char  if _spawn_red_char  != "" else _red_model_char
 
-	if char_blue and _blue_scene_cache:
-		var blue_model: Node = _blue_scene_cache.instantiate()
+	var blue_path: String = "res://assets/kenney_blocky-characters/Models/GLB format/character-%s.glb" % blue_char_to_use
+	var red_path:  String = "res://assets/kenney_blocky-characters/Models/GLB format/character-%s.glb" % red_char_to_use
+
+	# Only use the shared static cache when chars match the global selection
+	var use_static_blue: bool = (blue_char_to_use == _blue_model_char)
+	var use_static_red:  bool = (red_char_to_use  == _red_model_char)
+
+	if use_static_blue and _blue_scene_cache == null:
+		_blue_scene_cache = load(blue_path)
+	if use_static_red and _red_scene_cache == null:
+		_red_scene_cache = load(red_path)
+
+	var blue_scene: PackedScene = _blue_scene_cache if use_static_blue else load(blue_path)
+	var red_scene:  PackedScene = _red_scene_cache  if use_static_red  else load(red_path)
+
+	if char_blue and blue_scene:
+		var blue_model: Node = blue_scene.instantiate()
 		char_blue.add_child(blue_model)
 		blue_model.scale = Vector3(0.667, 0.667, 0.667)
 		blue_model.rotate_y(PI)
 		_disable_shadows(blue_model)
 
-	if char_red and _red_scene_cache:
-		var red_model: Node = _red_scene_cache.instantiate()
+	if char_red and red_scene:
+		var red_model: Node = red_scene.instantiate()
 		char_red.add_child(red_model)
 		red_model.scale = Vector3(0.667, 0.667, 0.667)
 		red_model.rotate_y(PI)
@@ -577,6 +603,27 @@ func _is_in_darkness(pos: Vector3) -> bool:
 	return true
 
 # ─── Combat ───────────────────────────────────────────────────────────────────
+
+func heal(amount: float) -> void:
+	if is_puppet:
+		return
+	if _dead:
+		return
+	var hp_before: float = health
+	health = minf(health + amount, max_health)
+	var gain: float = health - hp_before
+	if gain > 0.0:
+		_emit_heal_particles(global_position + Vector3(0.0, 1.0, 0.0))
+
+## Overridable — called when health is actually gained. Default spawns green VFX.
+func _emit_heal_particles(pos: Vector3) -> void:
+	VfxUtils.spawn_particles(get_tree().root.get_child(0), pos, {
+		"amount": 12, "lifetime": 0.8,
+		"color": Color(0.2, 1.0, 0.4, 0.9),
+		"vel_min": 2.0, "vel_max": 5.0,
+		"direction": Vector3(0.0, 1.0, 0.0), "spread": 60.0,
+		"scale_min": 0.06, "scale_max": 0.12
+	})
 
 func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_peer_id: int = -1) -> void:
 	if is_puppet:

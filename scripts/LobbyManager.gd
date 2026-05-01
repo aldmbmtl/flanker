@@ -302,8 +302,8 @@ func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_tea
 	bullet.velocity = dir * 196.0
 	VfxUtils.get_scene_root(self).add_child(bullet)
 	bullet.global_position = pos
-	var main: Node = get_tree().root.get_node("Main")
-	if main.has_method("_on_bullet_hit_something") and shooter_peer_id == multiplayer.get_unique_id():
+	var main: Node = VfxUtils.get_scene_root(self)
+	if main != null and main.has_method("_on_bullet_hit_something") and shooter_peer_id == multiplayer.get_unique_id():
 		bullet.hit_something.connect(main._on_bullet_hit_something)
 
 @rpc("authority", "call_remote", "unreliable_ordered")
@@ -475,6 +475,37 @@ func damage_player_broadcast(target_peer: int, amount: float, source_team: int, 
 @rpc("authority", "call_local", "reliable")
 func apply_player_damage(peer_id: int, new_health: float) -> void:
 	GameSync.set_player_health(peer_id, new_health)
+
+## Server-authoritative: heal a player and notify the target peer's local controller.
+## Must only be called on the server. Finds the FPS player node on the receiving
+## peer via "Main/FPSPlayer_{peer_id}" and calls heal() on it.
+func heal_player_broadcast(target_peer: int, amount: float) -> void:
+	var new_hp: float = minf(
+		GameSync.player_healths.get(target_peer, 0.0) + amount,
+		GameSync.PLAYER_MAX_HP + LevelSystem.get_bonus_hp(target_peer))
+	GameSync.set_player_health(target_peer, new_hp)
+	# If target is the server-player, heal the local FPS node directly.
+	# Otherwise send a directed RPC to the target client.
+	if target_peer == multiplayer.get_unique_id():
+		var fps_node: Node = get_tree().root.get_node_or_null("Main/FPSPlayer_%d" % target_peer)
+		if fps_node != null and fps_node.has_method("heal"):
+			fps_node.call("heal", amount)
+	elif multiplayer.has_multiplayer_peer():
+		var peers: Array = multiplayer.get_peers()
+		if peers.has(target_peer):
+			apply_player_heal.rpc_id(target_peer, new_hp)
+
+@rpc("authority", "call_remote", "reliable")
+func apply_player_heal(new_health: float) -> void:
+	var my_id: int = multiplayer.get_unique_id()
+	var fps_node: Node = get_tree().root.get_node_or_null("Main/FPSPlayer_%d" % my_id)
+	if fps_node == null or not fps_node.has_method("heal"):
+		return
+	# Sync GameSync first, then apply to local controller (avoids double-sync)
+	var old_hp: float = GameSync.player_healths.get(my_id, 0.0)
+	if new_health > old_hp:
+		fps_node.get("hp")  # no-op read; heal() syncs GameSync internally
+		fps_node.call("heal", new_health - old_hp)
 
 @rpc("authority", "call_remote", "reliable")
 func notify_player_died(peer_id: int) -> void:

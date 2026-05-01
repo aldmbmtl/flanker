@@ -171,6 +171,20 @@ func _build_ui() -> void:
 		_settings_overlay = _build_settings_overlay(ui_theme)
 		add_child(_settings_overlay)
 
+	var switch_btn := Button.new()
+	switch_btn.text = "SWITCH TEAMS"
+	switch_btn.custom_minimum_size = Vector2(140, 44)
+	switch_btn.theme = ui_theme
+	switch_btn.pressed.connect(func() -> void:
+		var current_team: int = LobbyManager.players.get(_my_peer_id, {}).get("team", 0)
+		var new_team: int = 1 - current_team
+		if _is_host:
+			LobbyManager.set_team(new_team)
+		else:
+			LobbyManager.set_team.rpc_id(1, new_team)
+	)
+	actions.add_child(switch_btn)
+
 	var leave_btn := Button.new()
 	leave_btn.text = "LEAVE"
 	leave_btn.custom_minimum_size = Vector2(120, 44)
@@ -244,22 +258,6 @@ func _make_player_entry(id: int, info: Dictionary, ui_theme: Theme) -> HBoxConta
 	else:
 		ready_lbl.add_theme_color_override("font_color", Color(0.35, 0.30, 0.25, 1.0))
 	row.add_child(ready_lbl)
-
-	# Switch button — only shown on your own row
-	if id == _my_peer_id:
-		var switch_btn := Button.new()
-		switch_btn.text = "SWITCH"
-		switch_btn.custom_minimum_size = Vector2(68, 26)
-		switch_btn.theme = ui_theme
-		var current_team: int = info.get("team", 0)
-		switch_btn.pressed.connect(func() -> void:
-			var new_team: int = 1 - current_team
-			if _is_host:
-				LobbyManager.set_team(new_team)
-			else:
-				LobbyManager.set_team.rpc_id(1, new_team)
-		)
-		row.add_child(switch_btn)
 
 	return row
 

@@ -1,0 +1,39 @@
+[gd_scene load_steps=6 format=3 uid="uid://cannon_minion"]
+
+[ext_resource type="Script" path="res://scripts/minions/CannonMinionAI.gd" id="1"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
+height = 1.8
+radius = 0.35
+
+[node name="CannonMinion" type="CharacterBody3D"]
+script = ExtResource("1")
+max_health = 40.0
+attack_damage = 40.0
+attack_cooldown = 3.0
+shoot_range = 25.0
+detect_range = 28.0
+bullet_speed = 0.0
+
+[node name="CharacterBlue" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.9, 0)
+visible = true
+
+[node name="CharacterRed" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.9, 0)
+visible = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CapsuleShape3D_1")
+
+[node name="ShootAudio" type="AudioStreamPlayer3D" parent="."]
+stream = null
+volume_db = -4.0
+max_distance = 40.0
+attenuation_model = 2
+
+[node name="DeathAudio" type="AudioStreamPlayer3D" parent="."]
+stream = null
+volume_db = -4.0
+max_distance = 20.0
+attenuation_model = 2

@@ -7,6 +7,7 @@ const TerrainScript       := preload("res://scripts/TerrainGenerator.gd")
 const LaneVizScript       := preload("res://scripts/LaneVisualizer.gd")
 const TreeScript          := preload("res://scripts/TreePlacer.gd")
 const FencePlacerScript   := preload("res://scripts/FencePlacer.gd")
+const WallPlacerScript    := preload("res://scripts/WallPlacer.gd")
 const PortalGoalScene     := preload("res://scenes/PortalGoal.tscn")
 const MenuSimScript       := preload("res://scripts/ui/MenuSimulation.gd")
 const WindParticlesScript  := preload("res://scripts/WindParticles.gd")
@@ -241,6 +242,12 @@ func _on_menu_world_ready(trees: Node, world: Node3D) -> void:
 	fence.set_script(FencePlacerScript)
 	fence.name = "FencePlacer"
 	world.add_child(fence)
+
+	# Rocks and grass/sand scatter — same as in-game world
+	var walls := Node3D.new()
+	walls.set_script(WallPlacerScript)
+	walls.name = "WallPlacer"
+	world.add_child(walls)
 
 	# Portals — one per lane per team at lane endpoints.
 	# body_entered is disconnected immediately after _ready() connects it so

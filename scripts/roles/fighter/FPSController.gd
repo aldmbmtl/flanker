@@ -11,6 +11,7 @@ const STAMINA_EXHAUST_CD    := 5.0
 const JUMP_VELOCITY     := 6.0
 const MOUSE_SENSITIVITY := 0.003
 const GRAVITY           := 20.0
+const KILL_PLANE_Y      := -30.0  # below terrain floor; fall-off-map death trigger
 
 const ROLE_STATS := {
 	"Tank":    {"hp": 150, "speed_mult": 0.8, "damage_mult": 0.7},
@@ -64,8 +65,9 @@ const FOOTSTEP_INTERVAL_SPRINT := 0.24
 
 var active    := true
 var hp: float  = GameSync.PLAYER_MAX_HP
-var _dead      := false
-var _crouching := false
+var _dead         := false
+var _crouching    := false
+var _syncing_heal := false  # re-entrant guard: heal() → GameSync → _on_game_sync_health_changed
 
 # Fire cooldown (inter-shot delay)
 var _fire_timer: float = 0.0
@@ -318,8 +320,20 @@ func _get_max_hp() -> float:
 func heal(amount: float) -> void:
 	if _dead:
 		return
+	var hp_before: float = hp
 	hp = min(hp + amount, _get_max_hp())
 	_update_health_bar()
+	if hp > hp_before:
+		_syncing_heal = true
+		GameSync.set_player_health(peer_id, hp)
+		_syncing_heal = false
+		_emit_heal_flash()
+
+## Overridable — called when HP actually increases. Default triggers screen flash.
+func _emit_heal_flash() -> void:
+	var main := get_tree().current_scene
+	if main != null and main.has_method("flash_heal"):
+		main.flash_heal()
 
 func apply_slow(duration: float, mult: float) -> void:
 	if not is_local:
@@ -632,6 +646,10 @@ func _physics_process(delta: float) -> void:
 
 	if not active:
 		return
+
+	# Kill plane — player fell off or through the map
+	if global_position.y < KILL_PLANE_Y and not _dead:
+		take_damage(999999.0, "void", -1, -1)
 
 	# Gravity
 	if not is_on_floor():
@@ -1057,11 +1075,15 @@ func _on_game_sync_health_changed(p_peer_id: int, new_hp: float) -> void:
 		return
 	if _dead:
 		return
+	if _syncing_heal:
+		return
+	var was_damaged: bool = new_hp < hp
 	hp = new_hp
-	camera_shake_time = 0.35
-	var _main := get_tree().current_scene
-	if _main != null and _main.has_method("flash_damage"):
-		_main.flash_damage()
+	if was_damaged:
+		camera_shake_time = 0.35
+		var _main := get_tree().current_scene
+		if _main != null and _main.has_method("flash_damage"):
+			_main.flash_damage()
 	_update_health_bar()
 	if hp <= 0.0:
 		_on_death()

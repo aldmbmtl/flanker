@@ -4,17 +4,37 @@ extends Node
 
 static func execute(node_id: String, peer_id: int) -> void:
 	match node_id:
-		"s_minion_barrage":
-			_minion_barrage(peer_id)
-		"s_minion_surge":
-			_minion_surge(peer_id)
+		"s_basic_t3":
+			_basic_barrage(peer_id)
+		"s_cannon_t3":
+			_cannon_barrage(peer_id)
+		"s_healer_t3":
+			_mass_heal(peer_id)
 
-static func _minion_barrage(peer_id: int) -> void:
-	# Force all living friendly minions to fire immediately by resetting their
-	# attack timer to zero. They will fire on the next physics frame.
+# ── s_basic_t3: force all living basic minions to fire immediately ─────────────
+
+static func _basic_barrage(peer_id: int) -> void:
 	var team: int = SkillTree.get_player_team(peer_id)
 	var minions: Array = Engine.get_main_loop().root.get_tree().get_nodes_in_group("minions")
 	for m in minions:
+		var m_team: int = int(m.get("team") if m.get("team") != null else -1)
+		if m_team != team:
+			continue
+		if m.get("_dead"):
+			continue
+		# Only trigger on basic minions (MinionAI / MinionBase, not cannon/healer subclasses).
+		if m is CannonMinionAI or m is HealerMinionAI:
+			continue
+		m.set("_attack_timer", 0.0)
+
+# ── s_cannon_t3: force all living cannon minions to fire immediately ───────────
+
+static func _cannon_barrage(peer_id: int) -> void:
+	var team: int = SkillTree.get_player_team(peer_id)
+	var minions: Array = Engine.get_main_loop().root.get_tree().get_nodes_in_group("minions")
+	for m in minions:
+		if not (m is CannonMinionAI):
+			continue
 		var m_team: int = int(m.get("team") if m.get("team") != null else -1)
 		if m_team != team:
 			continue
@@ -22,17 +42,24 @@ static func _minion_barrage(peer_id: int) -> void:
 			continue
 		m.set("_attack_timer", 0.0)
 
-static func _minion_surge(peer_id: int) -> void:
-	# Award 1 team point per living friendly minion.
+# ── s_healer_t3: instantly heal 30 HP to all friendly minions and players ──────
+
+static func _mass_heal(peer_id: int) -> void:
 	var team: int = SkillTree.get_player_team(peer_id)
-	var minions: Array = Engine.get_main_loop().root.get_tree().get_nodes_in_group("minions")
-	var count: int = 0
-	for m in minions:
+	var tree: SceneTree = Engine.get_main_loop().root.get_tree()
+	# Heal friendly minions
+	for m in tree.get_nodes_in_group("minions"):
 		var m_team: int = int(m.get("team") if m.get("team") != null else -1)
 		if m_team != team:
 			continue
 		if m.get("_dead"):
 			continue
-		count += 1
-	if count > 0:
-		TeamData.add_points(team, count)
+		if m.has_method("heal"):
+			m.heal(30.0)
+	# Heal friendly players
+	for p in tree.get_nodes_in_group("players"):
+		var p_team: int = int(p.get("player_team") if p.get("player_team") != null else -1)
+		if p_team != team:
+			continue
+		if p.has_method("heal"):
+			p.heal(30.0)

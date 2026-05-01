@@ -380,7 +380,7 @@ func _fire_ballistic(proj_scene: PackedScene, dmg: float, source_tag: String,
 	VfxUtils.get_scene_root(self).add_child(proj)
 	SoundManager.play_3d(snd, spawn_pos, snd_vol, randf_range(pitch_min, pitch_max))
 	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		rpc_callable.call(spawn_pos, aim_pos, dmg, team)
+		rpc_callable.rpc(spawn_pos, aim_pos, dmg, team)
 
 ## Called by _process after _turret_pivot.look_at() when the pivot actually moved.
 ## Override in subclasses that need to broadcast the new yaw to remote peers.

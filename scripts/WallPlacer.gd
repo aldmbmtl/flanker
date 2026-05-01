@@ -30,7 +30,7 @@ const SAND_SCENE_PATHS: Array[PackedScene] = [
 	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-sand-c.glb"),
 ]
 
-const SAND_COUNT := 375
+const SAND_COUNT := 113
 
 const GRID_SIZE := 200
 const GRID_STEPS := 200
@@ -266,6 +266,19 @@ func _scatter_sand() -> void:
 		sand.scale = Vector3(scale, scale, scale)
 		add_child(sand)
 
+		# Collision — same layer/size heuristic as jungle rocks.
+		var col_shape: BoxShape3D = BoxShape3D.new()
+		col_shape.size = Vector3(3.2 * scale, 2.0 * scale, 3.2 * scale)
+		var col_node: CollisionShape3D = CollisionShape3D.new()
+		col_node.shape = col_shape
+		col_node.position = Vector3(0.0, 1.0 * scale, 0.0)
+		var collision: StaticBody3D = StaticBody3D.new()
+		collision.add_child(col_node)
+		collision.position = sand_pos
+		collision.collision_layer = 2
+		collision.collision_mask = 1
+		add_child(collision)
+
 		placed += 1
 
 		# Yield every 20 placements to keep the loading screen responsive
@@ -323,7 +336,9 @@ func _is_on_lane_area(pos: Vector2) -> bool:
 	return false
 
 func _is_on_secret_path(pos: Vector2) -> bool:
-	var terrain: Node = $/root/Main/World/Terrain
+	# Find the Terrain node relative to our parent (works in both Main/World and
+	# StartMenu/World3D) rather than relying on an absolute scene-tree path.
+	var terrain: Node = get_parent().get_node_or_null("Terrain")
 	if terrain and terrain.has_method("get_secret_paths"):
 		var paths: Array = terrain.get_secret_paths()
 		for path_pts in paths:

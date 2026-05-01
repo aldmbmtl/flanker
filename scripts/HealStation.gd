@@ -1,14 +1,17 @@
 extends StaticBody3D
 ## Heal Station — persistent structure that heals nearby friendly units at 5 HP/s.
+## Expires after LIFETIME seconds. Emits a continuous radial green particle burst.
 
 const HEAL_RATE    := 5.0   # HP per second
 const HEAL_RADIUS  := 4.0
 const MAX_HEALTH   := 200.0
+const LIFETIME     := 180.0  # 3 minutes
 const PILLAR_MODEL_PATH := "res://assets/kenney_fantasy-town-kit/Models/GLB format/pillar-stone.glb"
 
 var team: int = 0
 var health: float = MAX_HEALTH
 var _dead := false
+var _age: float = 0.0
 var _bodies_in_range: Array = []
 
 func setup(p_team: int) -> void:
@@ -25,23 +28,41 @@ func _build_visuals() -> void:
 		pillar.scale = Vector3(2.0, 2.5, 2.0)
 		add_child(pillar)
 
-	# Green glow ring on the ground to show heal radius
-	var ring := MeshInstance3D.new()
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = HEAL_RADIUS * 0.95
-	cyl.bottom_radius = HEAL_RADIUS * 0.95
-	cyl.height = 0.08
-	cyl.rings = 1
-	var ring_mat := StandardMaterial3D.new()
-	ring_mat.albedo_color = Color(0.05, 0.8, 0.15, 0.6)
-	ring_mat.emission_enabled = true
-	ring_mat.emission = Color(0.0, 1.0, 0.1)
-	ring_mat.emission_energy_multiplier = 1.5
-	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	ring.mesh = cyl
-	ring.material_override = ring_mat
-	ring.position = Vector3(0.0, 0.05, 0.0)
-	add_child(ring)
+	# Radial green particle burst — continuous, spreads outward from the heal zone
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape        = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
+	pm.emission_sphere_radius = HEAL_RADIUS * 0.5
+	pm.direction             = Vector3(0.0, 0.0, 0.0)
+	pm.spread                = 180.0
+	pm.initial_velocity_min  = 1.5
+	pm.initial_velocity_max  = 4.0
+	pm.gravity               = Vector3(0.0, -2.0, 0.0)
+	pm.scale_min             = 0.15
+	pm.scale_max             = 0.3
+
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode       = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color       = Color(0.1, 1.0, 0.2, 0.8)
+	mat.transparency       = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.billboard_mode     = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.emission_enabled           = true
+	mat.emission                   = Color(0.1, 1.0, 0.2)
+	mat.emission_energy_multiplier = 2.0
+
+	var mesh := QuadMesh.new()
+	mesh.size     = Vector2(0.25, 0.25)
+	mesh.material = mat
+
+	var ps := GPUParticles3D.new()
+	ps.process_material = pm
+	ps.draw_pass_1      = mesh
+	ps.amount           = 40
+	ps.lifetime         = 1.5
+	ps.one_shot         = false
+	ps.explosiveness    = 0.0
+	ps.position         = Vector3(0.0, 0.3, 0.0)
+	ps.emitting         = true
+	add_child(ps)
 
 	var light := OmniLight3D.new()
 	light.light_color = Color(0.2, 1.0, 0.3)
@@ -81,6 +102,10 @@ func _on_body_exited_zone(body: Node3D) -> void:
 
 func _process(delta: float) -> void:
 	if _dead:
+		return
+	_age += delta
+	if _age >= LIFETIME:
+		_die()
 		return
 	for body in _bodies_in_range:
 		if not is_instance_valid(body):

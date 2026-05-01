@@ -53,6 +53,12 @@ func _ready() -> void:
 	secret_paths_cache = secret_paths
 	var plateaus: Array     = _gen_plateaus(seed_val, lane_polylines)
 
+	# Generate one guaranteed walkable ramp down from each plateau and append
+	# it to secret_paths so it passes through the same flatten pipeline.
+	var ramp_paths: Array = _gen_plateau_ramps(plateaus, seed_val)
+	for rp in ramp_paths:
+		secret_paths.append(rp)
+
 	LoadingState.report("Building terrain...", 10.0)
 
 	# Run the heavy CPU math on a background thread.
@@ -334,6 +340,34 @@ func _gen_plateaus(seed_val: int, lane_polylines: Array) -> Array:
 		if overlap: continue
 		plateaus.append([cx, cz, rng.randf_range(10.0, 18.0), rng.randf_range(8.0, 14.0), rng.randf_range(5.0, 7.0)])
 	return plateaus
+
+# ── Plateau ramp generation ────────────────────────────────────────────────────
+# For each plateau, produce one linear polyline radiating from the plateau
+# centre outward at a seeded random angle.  The polyline is appended to
+# secret_paths so it passes through the identical SECRET_FLAT/BLEND flatten
+# pipeline, creating a ~3-unit-wide walkable corridor from the plateau edge
+# down to the surrounding map terrain.
+func _gen_plateau_ramps(plateaus: Array, seed_val: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_val + 77777
+	const RAMP_SAMPLES := 20
+	var paths: Array = []
+	for plat in plateaus:
+		var cx: float = plat[0]
+		var cz: float = plat[1]
+		var rx: float = plat[2]
+		var rz: float = plat[3]
+		# Random outward angle, seeded per plateau
+		var angle: float = rng.randf() * TAU
+		# Ramp length: exits plateau blend zone + 8 extra units of gentle slope
+		var ramp_len: float = max(rx, rz) + PLATEAU_BLEND + 8.0
+		var dir := Vector2(cos(angle), sin(angle))
+		var pts: Array = []
+		for i in range(RAMP_SAMPLES + 1):
+			var t := float(i) / float(RAMP_SAMPLES)
+			pts.append(Vector2(cx, cz) + dir * (t * ramp_len))
+		paths.append(pts)
+	return paths
 
 func _plateau_weight(pos: Vector2, plat: Array) -> float:
 	var cx: float = plat[0]; var cz: float = plat[1]

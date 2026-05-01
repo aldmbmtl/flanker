@@ -56,6 +56,7 @@ const PingHUDScript               := preload("res://scripts/hud/PingHUD.gd")
 const FighterSkillBarScript       := preload("res://scripts/ui/FighterSkillBar.gd")
 const CompassHUDScript            := preload("res://scripts/hud/CompassHUD.gd")
 const WindParticlesScript := preload("res://scripts/WindParticles.gd")
+const LanePressureHUDScript := preload("res://scripts/ui/LanePressureHUD.gd")
 
 var _supporter_hud: Node = null
 var _launcher_hud: Node = null
@@ -63,6 +64,7 @@ var _lane_boost_hud: Node = null
 var _entity_hud: Control = null
 var _ping_hud: Control    = null
 var _compass_hud: Control = null
+var _lane_pressure_hud: Control = null
 var _level_up_dialog: Control = null  # retired — kept to avoid parse errors on any stale refs; remove after full cleanup
 
 @onready var rts_camera:         Node        = $RTSCamera
@@ -77,7 +79,10 @@ const VIGNETTE_LERP   := 6.0  # transition speed
 
 const DAMAGE_FLASH_INTENSITY := 0.45  # peak red alpha on hit
 const DAMAGE_FLASH_DECAY     := 2.5   # how fast it fades (units/sec, timer starts at 1.0)
+const HEAL_FLASH_INTENSITY   := 0.35  # peak green alpha on heal
+const HEAL_FLASH_DECAY       := 3.5   # faster fade than damage
 var _damage_flash_time := 0.0
+var _heal_flash_time   := 0.0
 
 const HIT_RING_DURATION := 0.2
 var _hit_ring_time := 0.0
@@ -285,12 +290,18 @@ func _start_multiplayer_game() -> void:
 		build_limit_line.set_script(load("res://scripts/ui/BuildLimitLine.gd"))
 		build_limit_line.name = "BuildLimitLine"
 		$HUD.add_child(build_limit_line)
-		build_limit_line.setup(rts_camera)
+		build_limit_line.setup(rts_camera, player_start_team)
 		# Wire leveling HUD — Supporter earns XP from tower/minion kills
 		_setup_level_hud()
 
 	# Wire PingHUD — blinking diamond overlay for all roles
 	_setup_ping_hud()
+	# Wire LanePressureHUD — territory push/rollback warnings for all roles
+	_lane_pressure_hud = Control.new()
+	_lane_pressure_hud.set_script(LanePressureHUDScript)
+	_lane_pressure_hud.name = "LanePressureHUD"
+	$HUD.add_child(_lane_pressure_hud)
+	_lane_pressure_hud.setup(player_start_team)
 	# Wire CompassHUD — CoD-style bearing strip (Fighter only)
 	if player_role == Role.FIGHTER:
 		_setup_compass_hud()
@@ -624,12 +635,21 @@ func _process(delta: float) -> void:
 		if mat:
 			var current: float = mat.get_shader_parameter("intensity")
 			mat.set_shader_parameter("intensity", lerp(current, target_intensity, VIGNETTE_LERP * delta))
-	# Damage flash — decays red screen overlay after taking a hit.
+	# Damage / heal flash — shared ColorRect, damage takes priority.
+	var flash_mat: ShaderMaterial = damage_flash_rect.material as ShaderMaterial
 	if _damage_flash_time > 0.0:
 		_damage_flash_time = max(0.0, _damage_flash_time - DAMAGE_FLASH_DECAY * delta)
-		var flash_mat: ShaderMaterial = damage_flash_rect.material as ShaderMaterial
 		if flash_mat:
+			flash_mat.set_shader_parameter("flash_color", Color(1.0, 0.0, 0.0, 1.0))
 			flash_mat.set_shader_parameter("intensity", _damage_flash_time * DAMAGE_FLASH_INTENSITY)
+	elif _heal_flash_time > 0.0:
+		_heal_flash_time = max(0.0, _heal_flash_time - HEAL_FLASH_DECAY * delta)
+		if flash_mat:
+			flash_mat.set_shader_parameter("flash_color", Color(0.1, 1.0, 0.3, 1.0))
+			flash_mat.set_shader_parameter("intensity", _heal_flash_time * HEAL_FLASH_INTENSITY)
+	else:
+		if flash_mat:
+			flash_mat.set_shader_parameter("intensity", 0.0)
 	# Hit ring — fades out after showing on a successful hit.
 	if _hit_ring_time > 0.0:
 		_hit_ring_time = max(0.0, _hit_ring_time - delta)
@@ -737,6 +757,7 @@ func leave_game() -> void:
 	TeamLives.reset()
 	LevelSystem.clear_all()
 	SkillTree.clear_all()
+	LaneControl.reset()
 	get_tree().change_scene_to_file("res://scenes/ui/StartMenu.tscn")
 
 func toggle_pause(paused: bool) -> void:
@@ -811,7 +832,15 @@ func flash_damage() -> void:
 	_damage_flash_time = 1.0
 	var flash_mat: ShaderMaterial = damage_flash_rect.material as ShaderMaterial
 	if flash_mat:
+		flash_mat.set_shader_parameter("flash_color", Color(1.0, 0.0, 0.0, 1.0))
 		flash_mat.set_shader_parameter("intensity", DAMAGE_FLASH_INTENSITY)
+
+func flash_heal() -> void:
+	_heal_flash_time = 1.0
+	var flash_mat: ShaderMaterial = damage_flash_rect.material as ShaderMaterial
+	if flash_mat:
+		flash_mat.set_shader_parameter("flash_color", Color(0.1, 1.0, 0.3, 1.0))
+		flash_mat.set_shader_parameter("intensity", HEAL_FLASH_INTENSITY)
 
 func game_over_signal(winner: String) -> void:
 	if game_over:

@@ -81,7 +81,7 @@ func _process(delta: float) -> void:
 ## Called when the raycast hits a collider. Default: apply damage via CombatUtils.
 ## Override for custom hit logic (ghost peers, splash, VFX, tree clearing, etc.).
 func _on_hit(pos: Vector3, collider: Object) -> void:
-	if CombatUtils.should_damage(collider, shooter_team):
+	if CombatUtils.should_damage(collider, shooter_team, shooter_peer_id):
 		collider.take_damage(damage, source, shooter_team, shooter_peer_id)
 
 ## Called each frame after global_position is updated (no collision this frame).
@@ -114,6 +114,9 @@ func _handle_ghost_hit(collider: Object, dmg: float) -> bool:
 	if not (collider is StaticBody3D and collider.has_meta("ghost_peer_id")):
 		return false
 	var target_peer: int = collider.get_meta("ghost_peer_id")
+	# Self-damage exclusion: shooter's own ghost hitbox — consume the hit, no damage.
+	if shooter_peer_id >= 0 and target_peer == shooter_peer_id:
+		return true
 	if not GameSync.player_dead.get(target_peer, false):
 		var ghost_team: int = GameSync.get_player_team(target_peer)
 		var friendly: bool = (shooter_team >= 0 and ghost_team == shooter_team)
@@ -162,5 +165,5 @@ func _apply_splash(pos: Vector3, radius: float, splash_dmg: float,
 		var body: Object = overlap.get("collider")
 		if body == null or body == exclude_body:
 			continue
-		if CombatUtils.should_damage(body, shooter_team):
+		if CombatUtils.should_damage(body, shooter_team, shooter_peer_id):
 			body.take_damage(splash_dmg, splash_source, shooter_team, shooter_peer_id)

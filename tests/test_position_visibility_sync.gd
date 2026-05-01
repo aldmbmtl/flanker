@@ -256,23 +256,35 @@ func test_D1_rocket_workaround_calls_spawn_bullet_visuals_on_server() -> void:
 	get_tree().set_multiplayer(null, LobbyManager.get_path())
 
 func test_D2_spawn_cannonball_visuals_executes_on_host() -> void:
-	# Bug 5 fixed: spawn_cannonball_visuals annotation changed from call_remote
-	# to call_local. Calling the function body directly (as call_local does on
-	# the server) must execute without error. The function adds a child to
-	# root.get_child(0); we assert that path exists and doesn't crash.
+	# Bug 5 fixed: _fire_ballistic now calls rpc_callable.rpc() instead of
+	# rpc_callable.call(). The RPC annotation stays call_remote so the body only
+	# runs on clients. Calling the function body directly (as a client would)
+	# must execute without error.
 	# (No GLB rendering assertion — visual correctness is not testable headless.)
 	assert_true(LobbyManager.has_method("spawn_cannonball_visuals"),
 		"spawn_cannonball_visuals must exist on LobbyManager")
-	# Calling directly simulates what call_local does on the server — no crash = pass.
+	# Calling directly simulates the client receiving the RPC — no crash = pass.
 	LobbyManager.spawn_cannonball_visuals(Vector3.ZERO, Vector3(0, 0, 10), 50.0, 0)
 	pass
 
 func test_D3_spawn_mortar_visuals_executes_on_host() -> void:
-	# Bug 5 fixed: spawn_mortar_visuals annotation changed from call_remote
-	# to call_local. Same rationale as D2.
+	# Bug 5 fixed: same rationale as D2 — _fire_ballistic dispatches via .rpc()
+	# so clients receive the call. Body must run without error on the receiving peer.
 	assert_true(LobbyManager.has_method("spawn_mortar_visuals"),
 		"spawn_mortar_visuals must exist on LobbyManager")
 	LobbyManager.spawn_mortar_visuals(Vector3.ZERO, Vector3(0, 0, 10), 30.0, 1)
+	pass
+
+func test_D4_spawn_bullet_visuals_no_crash_on_client() -> void:
+	# Regression guard: spawn_bullet_visuals previously called
+	# get_tree().root.get_node("Main") with no null guard, crashing on clients
+	# when the scene root child isn't named "Main". Fixed to use
+	# VfxUtils.get_scene_root(self) with a null guard.
+	# Calling the function body directly (simulating client RPC receive in a
+	# test scene that is not named "Main") must not crash.
+	assert_true(LobbyManager.has_method("spawn_bullet_visuals"),
+		"spawn_bullet_visuals must exist on LobbyManager")
+	LobbyManager.spawn_bullet_visuals(Vector3.ZERO, Vector3(0, 0, 1), 10.0, 1, 2, "bullet")
 	pass
 
 # ── §E  Minimap positions ─────────────────────────────────────────────────────
@@ -358,7 +370,7 @@ func test_F1_fog_overlay_update_sources_player_position_included() -> void:
 	add_child_autofree(fog)
 
 	var player_positions: Array = [Vector3(5, 0, 10)]
-	fog.update_sources(player_positions, 35.0, [], 20.0, [], 18.0)
+	fog.update_sources(player_positions, 35.0, [], 20.0, [])
 
 	assert_eq(fog.update_calls.size(), 1)
 	var call: Dictionary = fog.update_calls[0]
@@ -372,14 +384,14 @@ func test_F2_fog_overlay_update_sources_ally_positions_included() -> void:
 
 	var player_positions: Array = [Vector3(0, 0, 0), Vector3(10, 0, 0)]
 	var minion_positions: Array = [Vector3(5, 0, 5)]
-	var tower_positions: Array = [Vector3(-10, 0, -10)]
-	fog.update_sources(player_positions, 35.0, minion_positions, 20.0, tower_positions, 18.0)
+	var tower_sources: Array = [Vector4(-10, -10, 30.0, 0.0)]
+	fog.update_sources(player_positions, 35.0, minion_positions, 20.0, tower_sources)
 
 	var call: Dictionary = fog.update_calls[0]
 	assert_eq(call["player_positions"].size(), 2,
 		"Both allied player positions should reach update_sources")
 	assert_eq(call["minion_positions"].size(), 1)
-	assert_eq(call["tower_positions"].size(), 1)
+	assert_eq(call["tower_sources"].size(), 1)
 
 func test_F3_fog_overlay_add_timed_reveal_stored() -> void:
 	var fog := StubFogOverlay.new()
@@ -397,7 +409,7 @@ func test_F4_fog_overlay_update_sources_radius_passed_correctly() -> void:
 	add_child_autofree(fog)
 
 	var player_pos: Array = [Vector3(1, 0, 2)]
-	fog.update_sources(player_pos, 40.0, [], 20.0, [], 18.0)
+	fog.update_sources(player_pos, 40.0, [], 20.0, [])
 
 	var call: Dictionary = fog.update_calls[0]
 	assert_almost_eq(call["player_radius"], 40.0, 0.01,

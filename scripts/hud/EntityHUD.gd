@@ -16,6 +16,10 @@ const BAR_WIDTH     := 60.0
 const BAR_HEIGHT    := 8.0
 const BAR_Y_OFFSET  := -14.0   # pixels above the projected tower position
 
+const MINION_BAR_WIDTH   := 48.0
+const MINION_BAR_HEIGHT  := 6.0
+const MINION_BAR_Y_OFFSET := -10.0  # pixels above the projected minion position
+
 const CIRCLE_W      := 52.0    # circle diameter in pixels
 const CIRCLE_H      := 52.0    # equal to CIRCLE_W for a true circle
 const CIRCLE_THICK  := 2.5     # outline stroke width
@@ -31,7 +35,7 @@ const COL_UNKNOWN   := Color(0.80, 0.80, 0.80, 0.70)
 
 const PLAYER_VISION_RADIUS := 35.0
 const MINION_VISION_RADIUS := 25.0
-const TOWER_VISION_RADIUS  := 30.0
+const PASSIVE_TOWER_FOG_RADIUS := 8.0
 
 # ── State ─────────────────────────────────────────────────────────────────────
 
@@ -67,6 +71,7 @@ func _draw() -> void:
 	if _camera == null:
 		return
 	_draw_tower_bars()
+	_draw_minion_bars()
 	_draw_player_circles()
 
 # ── Tower health bars ─────────────────────────────────────────────────────────
@@ -110,8 +115,44 @@ func _draw_tower_bars() -> void:
 		var fill_col: Color = COL_HP_HIGH.lerp(COL_HP_LOW, 1.0 - ratio)
 		draw_rect(Rect2(bar_origin, Vector2(BAR_WIDTH * ratio, BAR_HEIGHT)), fill_col)
 
-# ── Player ground circles ─────────────────────────────────────────────────────
+# ── Minion health bars ────────────────────────────────────────────────────────
 
+func _draw_minion_bars() -> void:
+	var minions: Array = get_tree().get_nodes_in_group("minions")
+	for minion in minions:
+		if not is_instance_valid(minion):
+			continue
+		if not ("team" in minion) or minion.team != _player_team:
+			continue
+		if not ("health" in minion) or not ("max_health" in minion):
+			continue
+		var max_hp: float = minion.max_health
+		if max_hp <= 0.0:
+			continue
+		var hp: float = minion.health
+
+		var world_pos: Vector3 = minion.global_position + Vector3(0.0, 2.2, 0.0)
+		if _camera.is_position_behind(world_pos):
+			continue
+		var screen_pos: Vector2 = _camera.unproject_position(world_pos)
+
+		var vp_size: Vector2 = get_viewport_rect().size
+		if screen_pos.x < 0.0 or screen_pos.x > vp_size.x or \
+		   screen_pos.y < 0.0 or screen_pos.y > vp_size.y:
+			continue
+
+		var bar_origin: Vector2 = Vector2(
+			screen_pos.x - MINION_BAR_WIDTH * 0.5,
+			screen_pos.y + MINION_BAR_Y_OFFSET - MINION_BAR_HEIGHT * 0.5
+		)
+
+		draw_rect(Rect2(bar_origin, Vector2(MINION_BAR_WIDTH, MINION_BAR_HEIGHT)), COL_BAR_BG)
+
+		var ratio: float = clampf(hp / max_hp, 0.0, 1.0)
+		var fill_col: Color = COL_HP_HIGH.lerp(COL_HP_LOW, 1.0 - ratio)
+		draw_rect(Rect2(bar_origin, Vector2(MINION_BAR_WIDTH * ratio, MINION_BAR_HEIGHT)), fill_col)
+
+# ── Player ground circles ─────────────────────────────────────────────────────
 func _draw_player_circles() -> void:
 	# Local FPS player (Fighter role only) — no name label for own circle
 	var local_players: Array = get_tree().get_nodes_in_group("player")
@@ -183,16 +224,18 @@ func _is_revealed(world_pos: Vector3) -> bool:
 		if t == _player_team and world_pos.distance_squared_to(minion.global_position) <= minion_vis_sq:
 			return true
 
-	var tower_vis_sq: float = TOWER_VISION_RADIUS * TOWER_VISION_RADIUS
 	for tower in get_tree().get_nodes_in_group("towers"):
 		if not is_instance_valid(tower):
 			continue
 		var t: int = -1
 		if "team" in tower:
 			t = tower.team
-		if t == _player_team and world_pos.distance_squared_to(tower.global_position) <= tower_vis_sq:
+		if t != _player_team:
+			continue
+		var ar: float = tower.get("attack_range") if tower.get("attack_range") != null else 0.0
+		var fog_r: float = ar if ar > 0.0 else PASSIVE_TOWER_FOG_RADIUS
+		if world_pos.distance_squared_to(tower.global_position) <= fog_r * fog_r:
 			return true
-
 	return false
 
 # ── Draw ellipse ──────────────────────────────────────────────────────────────

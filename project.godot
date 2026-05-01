@@ -34,6 +34,7 @@ SoundManager="*res://scripts/SoundManager.gd"
 TeamLives="*res://scripts/TeamLives.gd"
 SkillDefs="*res://scripts/SkillDefs.gd"
 SkillTree="*res://scripts/SkillTree.gd"
+LaneControl="*res://scripts/LaneControl.gd"
 FighterSkills="*res://scripts/skills/FighterSkills.gd"
 SupporterSkills="*res://scripts/skills/SupporterSkills.gd"
 

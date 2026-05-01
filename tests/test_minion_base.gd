@@ -401,3 +401,40 @@ func test_no_supporter_on_team_does_not_crash_on_minion_kill() -> void:
 	# Should not crash; XP simply goes uncredited.
 	m.take_damage(60.0, "cannon", 1, -1)
 	assert_true(m._dead, "Minion should be dead after lethal damage")
+
+# ── heal() + _emit_heal_particles ─────────────────────────────────────────────
+
+class FakeMinionParticles extends FakeMinion:
+	var particles_emitted: int = 0
+	var last_particle_pos: Vector3 = Vector3.ZERO
+	func _emit_heal_particles(pos: Vector3) -> void:
+		particles_emitted += 1
+		last_particle_pos = pos
+
+func test_heal_emits_particles_when_gain_positive() -> void:
+	var m: FakeMinionParticles = FakeMinionParticles.new()
+	m.max_health = 80.0
+	add_child_autofree(m)
+	m.setup(0, [], 0)
+	m.health = 40.0
+	m.heal(20.0)
+	assert_eq(m.particles_emitted, 1, "Particles should emit on positive heal gain")
+
+func test_heal_no_particles_when_dead() -> void:
+	var m: FakeMinionParticles = FakeMinionParticles.new()
+	m.max_health = 80.0
+	add_child_autofree(m)
+	m.setup(0, [], 0)
+	m._dead = true
+	m.health = 40.0
+	m.heal(20.0)
+	assert_eq(m.particles_emitted, 0, "No particles when minion is dead")
+
+func test_heal_no_particles_when_already_full() -> void:
+	var m: FakeMinionParticles = FakeMinionParticles.new()
+	m.max_health = 80.0
+	add_child_autofree(m)
+	m.setup(0, [], 0)
+	m.health = 80.0
+	m.heal(20.0)
+	assert_eq(m.particles_emitted, 0, "No particles when already at full health")

@@ -638,7 +638,12 @@ func _update_fog() -> void:
 
 	# Pre-collect friendly positions — avoids per-entity team check in inner loop
 	var friendly_minion_positions: PackedVector3Array = PackedVector3Array()
-	var tower_positions: Array = []
+	# tower_sources: Array[Vector4] — each element is Vector4(x, z, fog_radius, 0)
+	# tower_data: Array[Dictionary] — parallel array for _is_visible_to_sources
+	var tower_sources: Array = []
+	var tower_data: Array = []
+
+	const PASSIVE_TOWER_FOG_RADIUS := 8.0
 
 	for minion in all_minions:
 		if not is_instance_valid(minion):
@@ -652,16 +657,20 @@ func _update_fog() -> void:
 			continue
 		var t: int = tower.get("team") if tower.get("team") != null else -1
 		if t == _player_team:
-			tower_positions.append(tower.global_position)
+			var ar: float = tower.get("attack_range") if tower.get("attack_range") != null else 0.0
+			var fog_r: float = ar if ar > 0.0 else PASSIVE_TOWER_FOG_RADIUS
+			var pos: Vector3 = tower.global_position
+			tower_sources.append(Vector4(pos.x, pos.z, fog_r, 0.0))
+			tower_data.append({"pos": pos, "radius": fog_r})
 
 	if _fog_overlay and is_instance_valid(_fog_overlay):
 		_fog_overlay.visible = true
 		_fog_overlay.call("update_sources", allied_player_positions, PLAYER_VISION_RADIUS,
 				Array(friendly_minion_positions), MINION_VISION_RADIUS,
-				tower_positions, 30.0)
+				tower_sources)
 
-	_apply_fog_to_group(all_towers, allied_player_positions, friendly_minion_positions, tower_positions)
-	_apply_fog_to_group(all_minions, allied_player_positions, friendly_minion_positions, tower_positions)
+	_apply_fog_to_group(all_towers, allied_player_positions, friendly_minion_positions, tower_data)
+	_apply_fog_to_group(all_minions, allied_player_positions, friendly_minion_positions, tower_data)
 
 	# Hide/show enemy remote player ghosts based on fog visibility
 	for ghost in get_tree().get_nodes_in_group("remote_players"):
@@ -676,10 +685,10 @@ func _update_fog() -> void:
 		if t == _player_team:
 			ghost.visible = true
 		else:
-			ghost.visible = _is_visible_to_sources(ghost.global_position, allied_player_positions, friendly_minion_positions, tower_positions)
+			ghost.visible = _is_visible_to_sources(ghost.global_position, allied_player_positions, friendly_minion_positions, tower_data)
 
 
-func _apply_fog_to_group(nodes: Array, allied_player_positions: Array, friendly_minion_positions: PackedVector3Array, friendly_tower_positions: Array) -> void:
+func _apply_fog_to_group(nodes: Array, allied_player_positions: Array, friendly_minion_positions: PackedVector3Array, friendly_tower_data: Array) -> void:
 	for node in nodes:
 		if not is_instance_valid(node):
 			continue
@@ -687,10 +696,10 @@ func _apply_fog_to_group(nodes: Array, allied_player_positions: Array, friendly_
 		if node_team == _player_team:
 			node.visible = true
 			continue
-		node.visible = _is_visible_to_sources(node.global_position, allied_player_positions, friendly_minion_positions, friendly_tower_positions)
+		node.visible = _is_visible_to_sources(node.global_position, allied_player_positions, friendly_minion_positions, friendly_tower_data)
 
 
-func _is_visible_to_sources(world_pos: Vector3, allied_player_positions: Array, friendly_minion_positions: PackedVector3Array, friendly_tower_positions: Array) -> bool:
+func _is_visible_to_sources(world_pos: Vector3, allied_player_positions: Array, friendly_minion_positions: PackedVector3Array, friendly_tower_data: Array) -> bool:
 	var player_vis_sq: float = PLAYER_VISION_RADIUS * PLAYER_VISION_RADIUS
 	for pp in allied_player_positions:
 		if world_pos.distance_squared_to(pp) <= player_vis_sq:
@@ -701,9 +710,10 @@ func _is_visible_to_sources(world_pos: Vector3, allied_player_positions: Array, 
 		if world_pos.distance_squared_to(mp) <= minion_vis_sq:
 			return true
 
-	var tower_vision_sq: float = 30.0 * 30.0
-	for tp in friendly_tower_positions:
-		if world_pos.distance_squared_to(tp) <= tower_vision_sq:
+	# friendly_tower_data: Array[Dictionary{pos: Vector3, radius: float}]
+	for entry in friendly_tower_data:
+		var r: float = entry["radius"]
+		if world_pos.distance_squared_to(entry["pos"]) <= r * r:
 			return true
 
 	return false

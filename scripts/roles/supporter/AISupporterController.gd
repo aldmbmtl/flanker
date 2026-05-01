@@ -12,6 +12,11 @@ extends Node
 #
 # Player-need drops: healthpack when ally HP < 40, weapon drop when ally reserve ammo < 15.
 # Per-player 30s cooldown prevents spam.
+#
+# The AI uses a synthetic peer_id (-100 - team) registered with LevelSystem and
+# SkillTree so that all attribute bonuses (tower HP, fire rate, placement range)
+# and skill tree passive bonuses apply to its placed towers exactly as they do
+# for human Supporters.
 
 const RESERVE_POINTS: float = 5.0
 
@@ -54,6 +59,18 @@ const BASE_EXCLUSION_Z: float = 70.0
 var team: int = 0
 var build_system: Node = null
 
+# Synthetic peer_id for LevelSystem / SkillTree registration.
+# -100 - team ensures no collision with ENet peer IDs (which start at 1).
+# This id is local-server-only — never sent over the network.
+var peer_id: int = -100
+
+# Skill unlock priority: follow the minion branch order tier-by-tier.
+const _SKILL_UNLOCK_ORDER: Array = [
+	"s_basic_t1", "s_cannon_t1", "s_healer_t1",
+	"s_basic_t2", "s_cannon_t2", "s_healer_t2",
+	"s_basic_t3", "s_cannon_t3", "s_healer_t3",
+]
+
 var _timer: float = 4.0
 var _wave_number: int = 0
 var _placed_counts: Dictionary = {}
@@ -69,10 +86,86 @@ var _launcher_cooldowns: Dictionary = {}
 
 func _ready() -> void:
 	set_process(true)
+	peer_id = -100 - team
+	LevelSystem.register_peer(peer_id)
+	SkillTree.register_peer(peer_id, "Supporter")
+	# XP sources — same events that award XP to human players
+	LobbyManager.tower_despawned.connect(_on_tower_despawned)
+	GameSync.player_died.connect(_on_player_died)
+	# Attribute auto-spend and skill auto-unlock
+	LevelSystem.level_up.connect(_on_level_up)
+	SkillTree.skill_pts_changed.connect(_on_skill_pts_changed)
 	GameSync.remote_player_updated.connect(_on_remote_player_updated)
 
-func _on_remote_player_updated(peer_id: int, pos: Vector3, _rot: Vector3, _t: int) -> void:
-	_known_positions[peer_id] = pos
+func _on_remote_player_updated(pid: int, pos: Vector3, _rot: Vector3, _t: int) -> void:
+	_known_positions[pid] = pos
+
+# ── XP hooks ──────────────────────────────────────────────────────────────────
+
+# Enemy tower destroyed — award tower kill XP (same as LevelSystem.XP_TOWER).
+func _on_tower_despawned(_item_type: String, tower_team: int, _tower_name: String) -> void:
+	if tower_team == team:
+		return  # own tower destroyed, no XP
+	LevelSystem.award_xp(peer_id, LevelSystem.XP_TOWER)
+
+# Enemy player died — award player kill XP (same as LevelSystem.XP_PLAYER).
+func _on_player_died(dead_peer_id: int) -> void:
+	if GameSync.get_player_team(dead_peer_id) == team:
+		return  # ally died, no XP
+	LevelSystem.award_xp(peer_id, LevelSystem.XP_PLAYER)
+
+# ── Attribute auto-spend ──────────────────────────────────────────────────────
+
+# Called whenever the AI levels up. Spends all available attribute points
+# with wave-adaptive priority:
+#   early (wave < 3)  → tower_hp first, then tower_fire_rate, then placement_range
+#   mid   (3–6)       → tower_fire_rate first, then tower_hp, then placement_range
+#   late  (≥ 7)       → placement_range first, then tower_fire_rate, then tower_hp
+func _on_level_up(leveled_peer_id: int, _new_level: int) -> void:
+	if leveled_peer_id != peer_id:
+		return
+	_spend_all_attribute_points()
+
+func _spend_all_attribute_points() -> void:
+	var priority: Array
+	if _wave_number < 3:
+		priority = ["tower_hp", "tower_fire_rate", "placement_range"]
+	elif _wave_number < 7:
+		priority = ["tower_fire_rate", "tower_hp", "placement_range"]
+	else:
+		priority = ["placement_range", "tower_fire_rate", "tower_hp"]
+
+	while LevelSystem.get_unspent_points(peer_id) > 0:
+		var spent: bool = false
+		for attr in priority:
+			var cur: int = LevelSystem.get_attrs(peer_id).get(attr, 0)
+			if cur < LevelSystem.ATTR_CAP:
+				LevelSystem.spend_point_local(peer_id, attr)
+				spent = true
+				break
+		if not spent:
+			break  # all attrs at cap
+
+# ── Skill auto-unlock ─────────────────────────────────────────────────────────
+
+# Called whenever skill points change for any peer. Unlocks the next available
+# node in the minion branch priority order when it's our peer_id.
+func _on_skill_pts_changed(changed_peer_id: int, _pts: int) -> void:
+	if changed_peer_id != peer_id:
+		return
+	_unlock_next_skills()
+
+func _unlock_next_skills() -> void:
+	var changed: bool = true
+	while changed:
+		changed = false
+		for nid in _SKILL_UNLOCK_ORDER:
+			if SkillTree.is_unlocked(peer_id, nid):
+				continue
+			if SkillTree.can_unlock(peer_id, nid):
+				SkillTree.unlock_node_local(peer_id, nid)
+				changed = true
+				break
 
 func _process(delta: float) -> void:
 	# Tick per-player drop cooldowns
@@ -190,7 +283,7 @@ func _try_place_near_player(player_pos: Vector3, item_type: String, subtype: Str
 				continue
 			var cy: float = _terrain_y(cx, cz)
 			var candidate := Vector3(cx, cy, cz)
-			if build_system.can_place_item(candidate, team, item_type):
+			if build_system.can_place_item(candidate, team, item_type, peer_id):
 				return _do_place(candidate, item_type, subtype)
 	return false
 
@@ -233,6 +326,13 @@ func _phase_mid(points: float) -> void:
 				if _try_place_zone(lane_i, 0.45, 0.5, tower_type, "", cost, points):
 					_placed_counts[key] = 1
 					return
+	# One machinegun per pressure lane at aggressive zone mid-phase
+	for lane_i in lane_order:
+		var key: String = "lane_%d_machinegun_agg" % lane_i
+		if _placed_counts.get(key, 0) < 1:
+			if _try_place_zone(lane_i, 0.45, 0.5, "machinegun", "", 40.0, points):
+				_placed_counts[key] = 1
+				return
 	# One missile launcher mid-phase
 	var lkey: String = "launcher_missile_0"
 	if _placed_counts.get(lkey, 0) < 1:
@@ -273,6 +373,14 @@ func _phase_late(points: float) -> void:
 					if _try_place_zone(lane_i, zone_pair[0], zone_pair[1], tower_type, "", cost, points):
 						_placed_counts[key] = _placed_counts.get(key, 0) + 1
 						return
+	# Up to 2 machineguns per pressure lane at aggressive/mid late-phase
+	for lane_i in lane_order:
+		for zone_pair in [[0.45, 0.5, "agg"], [0.2, 0.45, "mid"]]:
+			var key: String = "lane_%d_machinegun_%s" % [lane_i, zone_pair[2]]
+			if _placed_counts.get(key, 0) < 2:
+				if _try_place_zone(lane_i, zone_pair[0], zone_pair[1], "machinegun", "", 40.0, points):
+					_placed_counts[key] = _placed_counts.get(key, 0) + 1
+					return
 	# Dense jungle fill — cannons + mortars
 	for ji in range(8):
 		var jkey: String = "jungle_cannon_%d" % ji
@@ -318,7 +426,7 @@ func _try_place_zone(lane_i: int, start_frac: float, end_frac: float,
 				continue
 			var cy: float = _terrain_y(cx, cz)
 			var candidate := Vector3(cx, cy, cz)
-			if build_system.can_place_item(candidate, team, item_type):
+			if build_system.can_place_item(candidate, team, item_type, peer_id):
 				return _do_place(candidate, item_type, subtype)
 	return false
 
@@ -340,7 +448,7 @@ func _try_place_jungle(item_type: String, subtype: String,
 			var cz: float = base_z * (1.0 - frac)
 			var cy: float = _terrain_y(x, cz)
 			var candidate := Vector3(x, cy, cz)
-			if build_system.can_place_item(candidate, team, item_type):
+			if build_system.can_place_item(candidate, team, item_type, peer_id):
 				return _do_place(candidate, item_type, subtype)
 	return false
 
@@ -361,7 +469,7 @@ func _terrain_y(x: float, z: float) -> float:
 	return result.position.y
 
 func _do_place(world_pos: Vector3, item_type: String, subtype: String) -> bool:
-	var assigned_name: String = build_system.place_item(world_pos, team, item_type, subtype)
+	var assigned_name: String = build_system.place_item(world_pos, team, item_type, subtype, peer_id)
 	if assigned_name == "":
 		return false
 	LobbyManager.spawn_item_visuals.rpc(world_pos, team, item_type, subtype, assigned_name)

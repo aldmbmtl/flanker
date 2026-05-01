@@ -433,8 +433,7 @@ These are confirmed broken in the current codebase. Tests document them but do n
 2. **Respawn ignores level bonus HP** — `LobbyManager.gd:452-455` broadcasts flat `PLAYER_MAX_HP` instead of `PLAYER_MAX_HP + bonus`
 3. **`request_destroy_tree` is `call_remote`** — host-fired bullets never destroy trees on the host side — `LobbyManager.gd:694-705`
 4. **`broadcast_player_transform` double-emits on server** — `remote_player_updated` fires twice on the host — `LobbyManager.gd:370-371`
-5. **Host never sees cannon/mortar projectile VFX** — `spawn_cannonball_visuals` / `spawn_mortar_visuals` are `call_remote` with no host-side compensating call
-6. **Remote players invisible on minimap** — `RemotePlayerGhost` is in group `"remote_players"` but `Minimap` only queries group `"player"` — `Minimap.gd`
-7. **Minimap fog ignores allied remote player positions** — fog only clears around the local player — `Minimap.gd`
+5. **Remote players invisible on minimap** — `RemotePlayerGhost` is in group `"remote_players"` but `Minimap` only queries group `"player"` — `Minimap.gd`
+6. **Minimap fog ignores allied remote player positions** — fog only clears around the local player — `Minimap.gd`
 
 (End of file - total 478 lines)

@@ -100,83 +100,89 @@ const ALL: Dictionary = {
 	},
 
 	# ─────────────────────────────────────────────────────────────────────────
-	# SUPPORTER — Formation branch (minion durability)
+	# SUPPORTER — Basic Minion branch (j → m → r model upgrades)
+	# passive_key "basic_tier" accumulates: 0.0 = tier-0 model, 1.0 = tier-1 (m),
+	# 2.0 = tier-2 (r). MinionSpawner reads the sum to pick the right char.
 	# ─────────────────────────────────────────────────────────────────────────
-	"s_minion_hp": {
-		"role": "Supporter", "branch": "Formation", "type": "passive",
+	"s_basic_t1": {
+		"role": "Supporter", "branch": "Basic Minion", "type": "passive",
 		"tier": 1, "cost": 1, "prereqs": [], "level_req": 0,
-		"name": "Tougher Troops",
-		"description": "All friendly minions spawn with +25% max HP.",
-		"passive_key": "minion_hp_bonus", "passive_val": 0.25,
+		"name": "Veteran Troops",
+		"description": "Basic minions use upgraded model (j→m) and spawn with +20% HP.",
+		"passive_key": "basic_tier", "passive_val": 1.0,
 		"cooldown": 0.0,
 	},
-	"s_minion_armor": {
-		"role": "Supporter", "branch": "Formation", "type": "passive",
-		"tier": 2, "cost": 2, "prereqs": ["s_minion_hp"], "level_req": 0,
-		"name": "Battle Hardened",
-		"description": "Friendly minions take 15% less damage.",
-		"passive_key": "minion_damage_reduction", "passive_val": 0.15,
+	"s_basic_t2": {
+		"role": "Supporter", "branch": "Basic Minion", "type": "passive",
+		"tier": 2, "cost": 2, "prereqs": ["s_basic_t1"], "level_req": 0,
+		"name": "Elite Troops",
+		"description": "Basic minions use elite model (m→r) and deal +20% damage.",
+		"passive_key": "basic_tier", "passive_val": 1.0,
 		"cooldown": 0.0,
 	},
-	"s_minion_revive": {
-		"role": "Supporter", "branch": "Formation", "type": "passive",
-		"tier": 3, "cost": 3, "prereqs": ["s_minion_armor"], "level_req": 0,
-		"name": "Last Stand",
-		"description": "Once per wave, the first friendly minion to die is revived at 30% HP.",
-		"passive_key": "minion_revive", "passive_val": 1.0,
-		"cooldown": 0.0,
-	},
-	# ─────────────────────────────────────────────────────────────────────────
-	# SUPPORTER — Aggression branch (minion combat power)
-	# ─────────────────────────────────────────────────────────────────────────
-	"s_minion_damage": {
-		"role": "Supporter", "branch": "Aggression", "type": "passive",
-		"tier": 1, "cost": 1, "prereqs": [], "level_req": 0,
-		"name": "Sharp Blades",
-		"description": "Friendly minions deal +20% attack damage.",
-		"passive_key": "minion_damage_bonus", "passive_val": 0.20,
-		"cooldown": 0.0,
-	},
-	"s_minion_speed": {
-		"role": "Supporter", "branch": "Aggression", "type": "passive",
-		"tier": 2, "cost": 2, "prereqs": ["s_minion_damage"], "level_req": 0,
-		"name": "Force March",
-		"description": "Friendly minions move +25% faster.",
-		"passive_key": "minion_speed_bonus", "passive_val": 0.25,
-		"cooldown": 0.0,
-	},
-	"s_minion_barrage": {
-		"role": "Supporter", "branch": "Aggression", "type": "active",
-		"tier": 3, "cost": 3, "prereqs": ["s_minion_speed"], "level_req": 0,
+	"s_basic_t3": {
+		"role": "Supporter", "branch": "Basic Minion", "type": "active",
+		"tier": 3, "cost": 3, "prereqs": ["s_basic_t2"], "level_req": 0,
 		"name": "Coordinated Fire",
-		"description": "All friendly living minions fire once immediately. 40 s cooldown.",
+		"description": "All living basic minions fire immediately. 30 s cooldown.",
 		"passive_key": "", "passive_val": 0.0,
-		"cooldown": 40.0,
+		"cooldown": 30.0,
 	},
 	# ─────────────────────────────────────────────────────────────────────────
-	# SUPPORTER — Logistics branch (wave economy)
+	# SUPPORTER — Cannon Minion branch (d → g → h model upgrades)
+	# passive_key "cannon_tier" accumulates: 0.0 = tier-0 (d), 1.0 = tier-1 (g),
+	# 2.0 = tier-2 (h).
 	# ─────────────────────────────────────────────────────────────────────────
-	"s_minion_count": {
-		"role": "Supporter", "branch": "Logistics", "type": "passive",
+	"s_cannon_t1": {
+		"role": "Supporter", "branch": "Cannon Minion", "type": "passive",
 		"tier": 1, "cost": 1, "prereqs": [], "level_req": 0,
-		"name": "Reinforce",
-		"description": "Waves spawn +1 extra minion per lane.",
-		"passive_key": "minion_count_bonus", "passive_val": 1.0,
+		"name": "Heavy Ordnance",
+		"description": "Cannon minions use upgraded model (d→g) and deal +25% damage.",
+		"passive_key": "cannon_tier", "passive_val": 1.0,
 		"cooldown": 0.0,
 	},
-	"s_minion_xp": {
-		"role": "Supporter", "branch": "Logistics", "type": "passive",
-		"tier": 2, "cost": 2, "prereqs": ["s_minion_count"], "level_req": 0,
-		"name": "Combat Vets",
-		"description": "Minion kills award +50% XP.",
-		"passive_key": "minion_xp_bonus", "passive_val": 0.5,
+	"s_cannon_t2": {
+		"role": "Supporter", "branch": "Cannon Minion", "type": "passive",
+		"tier": 2, "cost": 2, "prereqs": ["s_cannon_t1"], "level_req": 0,
+		"name": "Long Range",
+		"description": "Cannon minions use elite model (g→h) and gain +30% shoot range.",
+		"passive_key": "cannon_tier", "passive_val": 1.0,
 		"cooldown": 0.0,
 	},
-	"s_minion_surge": {
-		"role": "Supporter", "branch": "Logistics", "type": "active",
-		"tier": 3, "cost": 3, "prereqs": ["s_minion_xp"], "level_req": 0,
-		"name": "Point Raid",
-		"description": "Each living friendly minion grants +1 team point. 60 s cooldown.",
+	"s_cannon_t3": {
+		"role": "Supporter", "branch": "Cannon Minion", "type": "active",
+		"tier": 3, "cost": 3, "prereqs": ["s_cannon_t2"], "level_req": 0,
+		"name": "Rocket Barrage",
+		"description": "All living cannon minions fire immediately. 45 s cooldown.",
+		"passive_key": "", "passive_val": 0.0,
+		"cooldown": 45.0,
+	},
+	# ─────────────────────────────────────────────────────────────────────────
+	# SUPPORTER — Healer Minion branch (i → n → q model upgrades)
+	# passive_key "healer_tier" accumulates: 0.0 = tier-0 (i), 1.0 = tier-1 (n),
+	# 2.0 = tier-2 (q).
+	# ─────────────────────────────────────────────────────────────────────────
+	"s_healer_t1": {
+		"role": "Supporter", "branch": "Healer Minion", "type": "passive",
+		"tier": 1, "cost": 1, "prereqs": [], "level_req": 0,
+		"name": "Field Medicine",
+		"description": "Healer minions use upgraded model (i→n); heal pulses +5 HP (15 total).",
+		"passive_key": "healer_tier", "passive_val": 1.0,
+		"cooldown": 0.0,
+	},
+	"s_healer_t2": {
+		"role": "Supporter", "branch": "Healer Minion", "type": "passive",
+		"tier": 2, "cost": 2, "prereqs": ["s_healer_t1"], "level_req": 0,
+		"name": "Extended Care",
+		"description": "Healer minions use elite model (n→q); heal range +4 m (12 m total).",
+		"passive_key": "healer_tier", "passive_val": 1.0,
+		"cooldown": 0.0,
+	},
+	"s_healer_t3": {
+		"role": "Supporter", "branch": "Healer Minion", "type": "active",
+		"tier": 3, "cost": 3, "prereqs": ["s_healer_t2"], "level_req": 0,
+		"name": "Mass Heal",
+		"description": "Instantly restore 30 HP to all living friendly minions and players on the map. 60 s cooldown.",
 		"passive_key": "", "passive_val": 0.0,
 		"cooldown": 60.0,
 	},

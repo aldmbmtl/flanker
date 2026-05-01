@@ -121,9 +121,9 @@ func test_get_branches_for_fighter() -> void:
 
 func test_get_branches_for_supporter() -> void:
 	var branches: Array = SkillDefs.get_branches_for_role("Supporter")
-	assert_true(branches.has("Formation"))
-	assert_true(branches.has("Aggression"))
-	assert_true(branches.has("Logistics"))
+	assert_true(branches.has("Basic Minion"))
+	assert_true(branches.has("Cannon Minion"))
+	assert_true(branches.has("Healer Minion"))
 
 func test_get_nodes_in_branch_sorted_by_tier() -> void:
 	var nodes: Array = SkillDefs.get_nodes_in_branch("Fighter", "Guardian")

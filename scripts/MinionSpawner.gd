@@ -1,10 +1,21 @@
 extends Node
 
-const MINION_SCENE := "res://scenes/minions/Minion.tscn"
+const MINION_SCENE        := "res://scenes/minions/Minion.tscn"
+const CANNON_MINION_SCENE := "res://scenes/minions/CannonMinion.tscn"
+const HEALER_MINION_SCENE := "res://scenes/minions/HealerMinion.tscn"
+
 const WAVE_INTERVAL := 20.0
 const MAX_WAVE_SIZE := 6
 const MINION_STAGGER := 0.0  # seconds between each minion in a wave
 const SYNC_INTERVAL := 3     # physics frames between position broadcasts
+
+# ── Model chars per minion type, indexed by tier (0, 1, 2) ───────────────────
+# basic:  j → m → r
+# cannon: d → g → h
+# healer: i → n → q
+const BASIC_CHARS:  Array[String] = ["j", "m", "r"]
+const CANNON_CHARS: Array[String] = ["d", "g", "h"]
+const HEALER_CHARS: Array[String] = ["i", "n", "q"]
 
 var wave_number := 0
 var wave_timer := 0.0
@@ -21,10 +32,14 @@ var _last_synced_next_in: int = -1
 var _revive_used: Dictionary = {0: false, 1: false}
 
 var _minion_scene: PackedScene = null
+var _cannon_scene: PackedScene = null
+var _healer_scene: PackedScene = null
 var _main: Node = null
 
 func _ready() -> void:
 	_minion_scene = load(MINION_SCENE)
+	_cannon_scene = load(CANNON_MINION_SCENE)
+	_healer_scene = load(HEALER_MINION_SCENE)
 	_main = get_node_or_null("/root/Main")
 	_minion_node_cache.clear()
 	_minion_counter = 0
@@ -99,17 +114,26 @@ func _launch_wave() -> void:
 		_main.show_wave_announcement(wave_number)
 		LobbyManager.sync_wave_announcement.rpc(wave_number)
 
-	var base_count: int = min(wave_number, 5)
+	var base_count: int = min(wave_number, MAX_WAVE_SIZE)
 	for lane_i in range(3):
 		for team in range(2):
 			var extra: int = _lane_boosts[team][lane_i]
-			# s_minion_count: +1 per lane from Supporter passive
-			var sup: int = LobbyManager.get_supporter_peer(team)
-			var count_bonus: int = int(SkillTree.get_passive_bonus(sup, "minion_count_bonus")) if sup > 0 else 0
-			var count: int = base_count + extra + count_bonus
-			for i in range(count):
-				var delay := i * MINION_STAGGER
-				_spawn_minion_delayed(team, lane_i, delay)
+			var count: int = base_count + extra
+			# Determine wave composition.
+			# Slots 0-3 = basic, slot 4 = cannon (wave ≥ 5), slot 5 = healer (wave = 6+).
+			# Smaller waves fill from the start of the slot list.
+			var i: int = 0
+			while i < count:
+				var mtype: String
+				if i <= 3:
+					mtype = "basic"
+				elif i == 4:
+					mtype = "cannon"
+				else:
+					mtype = "healer"
+				var delay: float = i * MINION_STAGGER
+				_spawn_minion_delayed(team, lane_i, delay, mtype)
+				i += 1
 
 	# Reset all boosts after the wave launches and broadcast zeroes to all peers
 	_lane_boosts = [[0, 0, 0], [0, 0, 0]]
@@ -134,56 +158,128 @@ func boost_all_lanes(team: int) -> void:
 	for lane_i in range(3):
 		_lane_boosts[team][lane_i] += 1
 
-func _spawn_minion_delayed(team: int, lane_i: int, delay: float) -> void:
+func _spawn_minion_delayed(team: int, lane_i: int, delay: float, mtype: String = "basic") -> void:
 	if delay <= 0.0:
-		_spawn_minion(team, lane_i)
+		_spawn_minion(team, lane_i, mtype)
 	else:
 		await get_tree().create_timer(delay).timeout
-		_spawn_minion(team, lane_i)
+		_spawn_minion(team, lane_i, mtype)
 
-func _spawn_minion(team: int, lane_i: int) -> void:
+func _spawn_minion(team: int, lane_i: int, mtype: String = "basic") -> void:
 	var waypts: Array[Vector3] = LaneData.get_lane_waypoints(lane_i, team)
 	var spawn_pos := Vector3(waypts[0].x, 0.0, waypts[0].z)
 	spawn_pos.y = _get_terrain_height(spawn_pos) + 1.0
 	_minion_counter += 1
 	var minion_id: int = _minion_counter
-	_spawn_at_position(team, spawn_pos, waypts, lane_i, minion_id)
+	_spawn_at_position(team, spawn_pos, waypts, lane_i, minion_id, mtype)
 
 	if multiplayer.is_server():
 		LobbyManager.spawn_minion_visuals.rpc(team, spawn_pos, waypts, lane_i, minion_id)
 
-func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int) -> void:
-	if _minion_scene == null:
-		_minion_scene = load(MINION_SCENE)
-	var minion: CharacterBody3D = _minion_scene.instantiate()
+func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int, mtype: String = "basic") -> void:
+	# Pick scene based on minion type.
+	var scene: PackedScene
+	match mtype:
+		"cannon":
+			if _cannon_scene == null:
+				_cannon_scene = load(CANNON_MINION_SCENE)
+			scene = _cannon_scene
+		"healer":
+			if _healer_scene == null:
+				_healer_scene = load(HEALER_MINION_SCENE)
+			scene = _healer_scene
+		_:
+			if _minion_scene == null:
+				_minion_scene = load(MINION_SCENE)
+			scene = _minion_scene
+
+	var minion: CharacterBody3D = scene.instantiate()
 	minion.set("team", team)
 	minion.set("_minion_id", minion_id)
 	minion.name = "Minion_%d" % minion_id
 	minion.position = pos
 
-	# Apply Supporter passive bonuses before add_child so _ready() sees the final values.
+	# Apply Supporter passive bonuses and model tier before add_child.
 	var sup: int = LobbyManager.get_supporter_peer(team)
-	if sup > 0:
-		var hp_bonus: float = SkillTree.get_passive_bonus(sup, "minion_hp_bonus")
-		if hp_bonus > 0.0:
-			var base_hp: float = float(minion.get("max_health") if minion.get("max_health") != null else 60.0)
-			var new_hp: float = base_hp * (1.0 + hp_bonus)
-			minion.set("max_health", new_hp)
-		var dmg_bonus: float = SkillTree.get_passive_bonus(sup, "minion_damage_bonus")
-		if dmg_bonus > 0.0:
-			var base_dmg: float = float(minion.get("attack_damage") if minion.get("attack_damage") != null else 8.0)
-			minion.set("attack_damage", base_dmg * (1.0 + dmg_bonus))
-		var spd_bonus: float = SkillTree.get_passive_bonus(sup, "minion_speed_bonus")
-		if spd_bonus > 0.0:
-			var base_spd: float = float(minion.get("speed") if minion.get("speed") != null else 4.0)
-			minion.set("speed", base_spd * (1.0 + spd_bonus))
+	_apply_type_bonuses(minion, mtype, sup)
+	_apply_tier_model(minion, mtype, sup)
 
 	get_tree().root.get_node("Main").add_child(minion)
 	minion.setup(team, waypts, lane_i)
 	_minion_node_cache[minion_id] = minion
 
+## Apply stat bonuses from skill tier passives per minion type.
+func _apply_type_bonuses(minion: CharacterBody3D, mtype: String, sup: int) -> void:
+	if sup <= 0:
+		return
+	match mtype:
+		"basic":
+			# s_basic_t1: +20% HP per tier point (basic_tier sums to 1 or 2 when unlocked)
+			var tier: float = SkillTree.get_passive_bonus(sup, "basic_tier")
+			if tier >= 1.0:
+				var base_hp: float = float(minion.get("max_health") if minion.get("max_health") != null else 60.0)
+				minion.set("max_health", base_hp * 1.20)
+			if tier >= 2.0:
+				var base_dmg: float = float(minion.get("attack_damage") if minion.get("attack_damage") != null else 8.0)
+				minion.set("attack_damage", base_dmg * 1.20)
+		"cannon":
+			var tier: float = SkillTree.get_passive_bonus(sup, "cannon_tier")
+			if tier >= 1.0:
+				var base_dmg: float = float(minion.get("attack_damage") if minion.get("attack_damage") != null else 40.0)
+				minion.set("attack_damage", base_dmg * 1.25)
+			if tier >= 2.0:
+				var base_range: float = float(minion.get("shoot_range") if minion.get("shoot_range") != null else 25.0)
+				minion.set("shoot_range", base_range * 1.30)
+				# detect_range must exceed shoot_range
+				minion.set("detect_range", minion.get("shoot_range") * 1.12)
+		"healer":
+			var tier: float = SkillTree.get_passive_bonus(sup, "healer_tier")
+			if tier >= 1.0:
+				var base_amt: float = float(minion.get("heal_amount") if minion.get("heal_amount") != null else 10.0)
+				minion.set("heal_amount", base_amt + 5.0)
+			if tier >= 2.0:
+				var base_rad: float = float(minion.get("heal_radius") if minion.get("heal_radius") != null else 8.0)
+				minion.set("heal_radius", base_rad + 4.0)
+
+## Pick the model chars for this minion's team and type based on skill tier.
+## Sets MinionBase static chars so _build_visuals() loads the right GLB.
+## NOTE: This overwrites the global static chars; they are set immediately before
+## add_child so the next _build_visuals() call sees the right char.
+func _apply_tier_model(minion: CharacterBody3D, mtype: String, sup: int) -> void:
+	var tier_sum: float = 0.0
+	if sup > 0:
+		match mtype:
+			"basic":
+				tier_sum = SkillTree.get_passive_bonus(sup, "basic_tier")
+			"cannon":
+				tier_sum = SkillTree.get_passive_bonus(sup, "cannon_tier")
+			"healer":
+				tier_sum = SkillTree.get_passive_bonus(sup, "healer_tier")
+
+	# tier_sum: 0.0 = base, 1.0 = mid, ≥2.0 = max
+	var tier_idx: int = clampi(int(tier_sum), 0, 2)
+
+	var chars: Array[String]
+	match mtype:
+		"basic":
+			chars = BASIC_CHARS
+		"cannon":
+			chars = CANNON_CHARS
+		"healer":
+			chars = HEALER_CHARS
+		_:
+			chars = BASIC_CHARS
+
+	# Each team gets the same tier char for this type.
+	# Blue = team 0, Red = team 1 — both use the same aesthetic family.
+	var ch: String = chars[tier_idx]
+	# We store the chars on the minion itself via a helper so other minions
+	# spawning in parallel don't clobber each other's global static.
+	minion.set("_spawn_blue_char", ch)
+	minion.set("_spawn_red_char", ch)
+
 func spawn_for_network(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int) -> void:
-	_spawn_at_position(team, pos, waypts, lane_i, minion_id)
+	_spawn_at_position(team, pos, waypts, lane_i, minion_id, "basic")
 	# Mark as puppet — server drives position
 	var minion: Node = _minion_node_cache.get(minion_id)
 	if minion == null:

@@ -75,10 +75,11 @@ func can_place_item(world_pos: Vector3, team: int, item_type: String, placer_pee
 	if def.is_empty():
 		return false
 
-	# Must be on own team's half
-	if team == 0 and world_pos.z < 0.0:
+	# Must be within own team's current build zone (dynamic — pushed by LaneControl)
+	var limit_z: float = LaneControl.get_build_limit(team)
+	if team == 0 and world_pos.z < limit_z:
 		return false
-	if team == 1 and world_pos.z > 0.0:
+	if team == 1 and world_pos.z > limit_z:
 		return false
 
 	# Lane setback (towers only)

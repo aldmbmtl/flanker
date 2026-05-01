@@ -9,6 +9,24 @@ var _cards: Array = []  # Array[SkillNodeCard]
 
 const SkillNodeCardScene := preload("res://scenes/ui/SkillNodeCard.tscn")
 
+# Portrait PNGs for each minion type branch (used for Supporter skill tree).
+# Keys match the "branch" value in SkillDefs.
+const BRANCH_PORTRAIT_BASE := "res://assets/kenney_blocky-characters/Previews/character-%s.png"
+
+# For each Supporter branch: the tier-0/1/2 chars used as upgrade preview in tooltip.
+const BRANCH_TIER_CHARS: Dictionary = {
+	"Basic Minion":  ["j", "m", "r"],
+	"Cannon Minion": ["d", "g", "h"],
+	"Healer Minion": ["i", "n", "q"],
+}
+
+# Portrait char: the tier-0 (base) char for each branch (shown in the circle).
+const BRANCH_PORTRAIT_CHAR: Dictionary = {
+	"Basic Minion":  "j",
+	"Cannon Minion": "d",
+	"Healer Minion": "i",
+}
+
 @onready var _pts_label:     Label          = $Panel/VBox/Header/PtsLabel
 @onready var _role_label:    Label          = $Panel/VBox/Header/RoleLabel
 @onready var _branches_box:  HBoxContainer  = $Panel/VBox/BranchContainer
@@ -60,14 +78,40 @@ func _build_tree() -> void:
 		col.add_child(branch_lbl)
 
 		var nodes_in_branch: Array = SkillDefs.get_nodes_in_branch(role, branch)
+		var is_first_in_branch: bool = true
 		for nid in nodes_in_branch:
 			var card: Control = SkillNodeCardScene.instantiate()
+
+			# Attach portrait + tier tooltip to the first card in each Supporter branch.
+			if role == "Supporter" and is_first_in_branch:
+				_decorate_supporter_card(card, branch)
+
 			col.add_child(card)
 			card.setup(nid, _peer_id)
 			card.unlock_requested.connect(_on_unlock_requested)
 			card.assign_active_requested.connect(_on_assign_active_requested)
 			_cards.append(card)
+			is_first_in_branch = false
 		_branches_box.add_child(col)
+
+## Attach portrait texture and tier upgrade tooltip to the first card in a Supporter branch.
+func _decorate_supporter_card(card: Control, branch: String) -> void:
+	# Portrait image — load the tier-0 character preview PNG.
+	if BRANCH_PORTRAIT_CHAR.has(branch):
+		var char: String = BRANCH_PORTRAIT_CHAR[branch]
+		var path: String = BRANCH_PORTRAIT_BASE % char
+		if ResourceLoader.exists(path):
+			card.set("portrait_texture", load(path))
+
+	# Tier tooltip showing upgrade chain with character names.
+	if BRANCH_TIER_CHARS.has(branch):
+		var chars: Array = BRANCH_TIER_CHARS[branch]
+		var lines: PackedStringArray = PackedStringArray()
+		lines.append("Model upgrades:")
+		lines.append("  Tier 0 (base): character-%s" % chars[0])
+		lines.append("  Tier 1 (1 skill): character-%s" % chars[1])
+		lines.append("  Tier 2 (2 skills): character-%s" % chars[2])
+		card.set("tier_tooltip", "\n".join(lines))
 
 func _refresh_all() -> void:
 	_pts_label.text = "Skill Points: %d" % SkillTree.get_skill_pts(_peer_id)
