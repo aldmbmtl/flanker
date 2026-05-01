@@ -3,7 +3,7 @@ extends Node
 const MINION_SCENE := "res://scenes/minions/Minion.tscn"
 const WAVE_INTERVAL := 20.0
 const MAX_WAVE_SIZE := 6
-const MINION_STAGGER := 0.5  # seconds between each minion in a wave
+const MINION_STAGGER := 0.0  # seconds between each minion in a wave
 const SYNC_INTERVAL := 3     # physics frames between position broadcasts
 
 var wave_number := 0
@@ -16,6 +16,9 @@ var _minion_node_cache: Dictionary = {}  # minion_id -> Node
 var _lane_boosts: Array = [[0, 0, 0], [0, 0, 0]]
 var _sync_frame: int = 0
 var _last_synced_next_in: int = -1
+
+# s_minion_revive: once-per-wave flag per team. True = revive already used this wave.
+var _revive_used: Dictionary = {0: false, 1: false}
 
 var _minion_scene: PackedScene = null
 var _main: Node = null
@@ -86,6 +89,9 @@ func _process(delta: float) -> void:
 		wave_timer = 0.0
 		wave_number += 1
 		_last_synced_next_in = -1
+		# Reset once-per-wave revive flag for both teams
+		_revive_used[0] = false
+		_revive_used[1] = false
 		_launch_wave()
 
 func _launch_wave() -> void:
@@ -97,7 +103,10 @@ func _launch_wave() -> void:
 	for lane_i in range(3):
 		for team in range(2):
 			var extra: int = _lane_boosts[team][lane_i]
-			var count: int = base_count + extra
+			# s_minion_count: +1 per lane from Supporter passive
+			var sup: int = LobbyManager.get_supporter_peer(team)
+			var count_bonus: int = int(SkillTree.get_passive_bonus(sup, "minion_count_bonus")) if sup > 0 else 0
+			var count: int = base_count + extra + count_bonus
 			for i in range(count):
 				var delay := i * MINION_STAGGER
 				_spawn_minion_delayed(team, lane_i, delay)
@@ -151,6 +160,24 @@ func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i:
 	minion.set("_minion_id", minion_id)
 	minion.name = "Minion_%d" % minion_id
 	minion.position = pos
+
+	# Apply Supporter passive bonuses before add_child so _ready() sees the final values.
+	var sup: int = LobbyManager.get_supporter_peer(team)
+	if sup > 0:
+		var hp_bonus: float = SkillTree.get_passive_bonus(sup, "minion_hp_bonus")
+		if hp_bonus > 0.0:
+			var base_hp: float = float(minion.get("max_health") if minion.get("max_health") != null else 60.0)
+			var new_hp: float = base_hp * (1.0 + hp_bonus)
+			minion.set("max_health", new_hp)
+		var dmg_bonus: float = SkillTree.get_passive_bonus(sup, "minion_damage_bonus")
+		if dmg_bonus > 0.0:
+			var base_dmg: float = float(minion.get("attack_damage") if minion.get("attack_damage") != null else 8.0)
+			minion.set("attack_damage", base_dmg * (1.0 + dmg_bonus))
+		var spd_bonus: float = SkillTree.get_passive_bonus(sup, "minion_speed_bonus")
+		if spd_bonus > 0.0:
+			var base_spd: float = float(minion.get("speed") if minion.get("speed") != null else 4.0)
+			minion.set("speed", base_spd * (1.0 + spd_bonus))
+
 	get_tree().root.get_node("Main").add_child(minion)
 	minion.setup(team, waypts, lane_i)
 	_minion_node_cache[minion_id] = minion

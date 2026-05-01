@@ -278,3 +278,105 @@ func test_spawn_item_local_clears_trees_at_correct_position() -> void:
 
 	fake_main.queue_free()
 	await get_tree().process_frame
+
+# ── Supporter attribute: tower HP bonus ───────────────────────────────────────
+
+func test_apply_tower_hp_bonuses_uses_placer_peer_bonus() -> void:
+	LevelSystem.register_peer(42)
+	SkillTree.register_peer(42, "Supporter")
+	LevelSystem.award_xp(42, 70)
+	LevelSystem.spend_point_local(42, "tower_hp")  # +5% bonus
+
+	var s := GDScript.new()
+	s.source_code = "extends Node\nvar _health: float = 500.0\nvar max_health: float = 500.0\nvar tower_type: String = \"cannon\"\n"
+	s.reload()
+	var tower_node := Node.new()
+	tower_node.set_script(s)
+	add_child_autofree(tower_node)
+
+	bs._apply_tower_hp_bonuses(tower_node, "cannon", 42)
+	var new_hp: float = tower_node.get("_health")
+	var expected: float = 500.0 * (1.0 + LevelSystem.TOWER_HP_PER_POINT)
+	assert_almost_eq(new_hp, expected, 0.01,
+		"Tower HP should reflect placer's tower_hp attr bonus")
+
+	LevelSystem.clear_peer(42)
+	SkillTree.clear_peer(42)
+
+# ── Supporter attribute: fire rate bonus ──────────────────────────────────────
+
+func test_apply_tower_fire_rate_bonus_reduces_attack_interval() -> void:
+	LevelSystem.register_peer(43)
+	SkillTree.register_peer(43, "Supporter")
+	LevelSystem.award_xp(43, 70)
+	LevelSystem.spend_point_local(43, "tower_fire_rate")  # -5% interval
+
+	var s := GDScript.new()
+	s.source_code = "extends Node\nvar attack_interval: float = 1.0\n"
+	s.reload()
+	var tower_node := Node.new()
+	tower_node.set_script(s)
+	add_child_autofree(tower_node)
+
+	bs._apply_tower_fire_rate_bonus(tower_node, 43)
+	var new_interval: float = tower_node.get("attack_interval")
+	var expected: float = 1.0 * (1.0 - LevelSystem.TOWER_FIRE_RATE_PER_POINT)
+	assert_almost_eq(new_interval, expected, 0.0001,
+		"attack_interval should be reduced by tower_fire_rate mult")
+
+	LevelSystem.clear_peer(43)
+	SkillTree.clear_peer(43)
+
+# ── Supporter attribute: placement range reduction ────────────────────────────
+
+func test_can_place_item_spacing_reduced_with_placement_range_attr() -> void:
+	# Remove any stale tower nodes from prior tests (queue_free is deferred so
+	# they may still be in the group when this test runs).
+	for n in get_tree().get_nodes_in_group("towers"):
+		n.remove_from_group("towers")
+
+	SkillTree.clear_peer(44)
+	LevelSystem.register_peer(44)
+	SkillTree.register_peer(44, "Supporter")
+	LevelSystem.award_xp(44, 999999)
+	for _i in range(6):
+		LevelSystem.spend_point_local(44, "placement_range")
+
+	# cannon spacing = 30 * 0.75 = 22.5; 60% reduction: effective = max(22.5*0.4, 3.0) = 9.0
+	# base tower at (40, 0, 70), test pos at (40, 0, 85) — 15 units away.
+	# Without attr: 15 < 22.5 → blocked.
+	# With max attr (effective 9.0): 15 > 9.0 → allowed.
+	_add_fake_tower(Vector3(40.0, 0.0, 70.0), "cannon")
+	var result_no_attr: bool = bs.can_place_item(Vector3(40.0, 0.0, 85.0), 0, "cannon", -1)
+	var result_with_attr: bool = bs.can_place_item(Vector3(40.0, 0.0, 85.0), 0, "cannon", 44)
+	assert_false(result_no_attr, "Without placement_range attr, 15-unit gap should be blocked")
+	assert_true(result_with_attr, "With max placement_range attr, 15-unit gap should be allowed")
+
+	LevelSystem.clear_peer(44)
+	SkillTree.clear_peer(44)
+
+# ── Retroactive fire rate: _on_attribute_spent ────────────────────────────────
+
+func test_retroactive_fire_rate_update_on_attribute_spent() -> void:
+	LevelSystem.register_peer(45)
+	SkillTree.register_peer(45, "Supporter")
+
+	var s := GDScript.new()
+	s.source_code = "extends Node3D\nvar attack_interval: float = 1.0\nvar placer_peer_id: int = 45\nvar tower_type: String = \"cannon\"\n"
+	s.reload()
+	var tower_node := Node3D.new()
+	tower_node.set_script(s)
+	add_child_autofree(tower_node)
+	tower_node.add_to_group("towers")
+
+	# Spend 1 point — triggers attribute_spent → _on_attribute_spent in BuildSystem
+	LevelSystem.award_xp(45, 70)
+	LevelSystem.spend_point_local(45, "tower_fire_rate")
+
+	var expected: float = 1.0 * (1.0 - LevelSystem.TOWER_FIRE_RATE_PER_POINT)
+	var actual: float = tower_node.get("attack_interval")
+	assert_almost_eq(actual, expected, 0.0001,
+		"Existing tower's attack_interval must be updated retroactively on attribute spend")
+
+	LevelSystem.clear_peer(45)
+	SkillTree.clear_peer(45)

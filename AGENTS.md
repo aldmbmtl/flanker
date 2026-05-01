@@ -15,13 +15,25 @@ make test
 
 This runs the GUT headless suite. The suite must exit with no failing tests (the summary line will read `---- N pending/risky tests ----` with zero failures, or `---- All tests passed! ----`). A change that introduces any new failure is not acceptable, even if the feature works at runtime.
 
-Rules:
+### Required process for every fix or feature
+
+Every code change — bug fix or new feature — must follow this exact sequence:
+
+1. **Apply the fix** — make the code change.
+2. **Write the regression test** — write a test that passes with the fix in place.
+3. **Verify the test catches the regression** — revert the fix (restore the broken code), run `make test`, and confirm the new test fails. If it does not fail, the test is not actually guarding against the regression and must be rewritten.
+4. **Re-apply the fix** — restore the correct code, run `make test`, confirm all tests pass.
+
+This sequence is mandatory. A test that was never verified to fail without the fix provides no safety guarantee.
+
+### Rules
+
 - **Fix the test if the code is correct** — with written justification for why the test was wrong.
 - **Fix the code if the test is correct** — do not mark real regressions as `pending()`.
 - **Write new tests for every new feature or bug fix** before the change is considered complete.
 - **Never silence a failure** by deleting the test or converting it to `pending()` without a documented known-bug justification.
 
-The suite currently has **591 passing** and **8 pending/risky** (all intentional — documented known bugs or no-assert smoke tests). Any run that drops below 591 passing is a regression.
+The suite currently has **608 passing** and **8 pending/risky** (all intentional — documented known bugs or no-assert smoke tests). Any run that drops below 608 passing is a regression.
 
 See the [Test Suite](#test-suite) section for the full inventory of test files and what each covers.
 
@@ -665,8 +677,8 @@ Tests live in `res://tests/`. Run with `make test`. All tests extend `GutTest`. 
 | `tests/test_level_system.gd` | 1 | 27 | `LevelSystem`: XP, level-up, carry-over, MAX_LEVEL cap, attribute spend, bonus stats |
 | `tests/test_game_sync.gd` | 1 | 22 | `GameSync`: health get/set/damage/death/respawn, teams, ammo, spawn positions |
 | `tests/test_lobby_manager.gd` | 1+2 | 23 | `LobbyManager`: registration, team balance, can_start, role slots, death count, respawn time. 2 known bugs as `pending()` |
-| `tests/test_tower_base.gd` | 1 | 16 | `TowerBase`: setup, take_damage, friendly fire, death, XP, `get_fire_position`, `_get_body_team` |
-| `tests/test_minion_base.gd` | 1 | 28 | `MinionBase`: setup, take_damage, death, slow, puppet state, model helpers, waypoints, force_die |
+| `tests/test_tower_base.gd` | 1 | 33 | `TowerBase`: setup, take_damage, friendly fire, death, XP, `get_fire_position`, `_get_body_team`, composite model assembly, hit-flash, LOS puppet regression |
+| `tests/test_minion_base.gd` | 1 | 35 | `MinionBase`: setup, take_damage, death, slow, puppet state, model helpers, waypoints, force_die, target spread, separation, lane offset |
 | `tests/test_projectile_base.gd` | 1 | 14 | `ProjectileBase`: initial state, lifetime/expire, gravity, `_on_hit`, friendly fire guard |
 | `tests/test_build_system.gd` | 1+2 | 28 | `BuildSystem`: item costs, spacing formula, team-half guard, spacing block/allow, drop spacing, insufficient funds, `PLACEABLE_DEFS` integrity |
 | `tests/test_base_player.gd` | 1 | 30 | `BasePlayer`: setup, _ready HitShape contract, _set_alive, update_transform, puppet lerp, avatar loading, hook dispatch, lobby_updated guard |
@@ -674,9 +686,10 @@ Tests live in `res://tests/`. Run with `make test`. All tests extend `GutTest`. 
 | `tests/test_multiplayer_integration.gd` | 3 | 19 | ENet loopback (ports 7510–7519): connection, peer detection, seed broadcast, `damage_player`, death signal, respawn, role accept/reject, `sync_lobby_state`, death counts. 3 known bugs as `pending()` |
 | `tests/test_multiplayer_rpcs.gd` | 1+2+3 | 71 | Full RPC surface of `LobbyManager`: player registration, role flow, game seed, shot validation, damage, respawn, transform broadcast, minion sync, tower spawn/despawn, team points, ping, lane boosts, recon reveal, level/XP RPCs, ammo reporting. 3 known bugs as `pending()`, 10 smoke tests as `[Risky]` |
 | `tests/test_position_visibility_sync.gd` | 1+3 | 30 | Player position broadcast, remote player ghost creation/update, minion puppet sync, tower spawn/despawn visuals, projectile visual RPCs, minimap fog sources, fog overlay source management. 6 known bugs as `pending()`, 2 smoke tests as `[Risky]` |
+| `tests/test_machine_gun_tower.gd` | 1 | 20 | `MachineGunTowerAI`: setup, attack_damage, friendly-fire guard, enemy hit, detection sphere, SupporterHUD slot wiring, raycast self-exclude regression, particle lifetime regression, muzzle flash unconditional regression |
 | `tests/helpers/MockMultiplayerAPI.gd` | helper | — | `MultiplayerAPIExtension` that logs all RPC calls to `rpc_log`. Helpers: `calls_to()`, `was_called()`, `reset()` |
 
-**Total: 591 passing, 8 pending/risky (all intentional — documented known bugs or no-assert smoke tests)**
+**Total: 608 passing, 8 pending/risky (all intentional — documented known bugs or no-assert smoke tests)**
 
 ### Test tiers
 - **Tier 1** — `OfflineMultiplayerPeer`. `multiplayer.is_server()` returns `true`. Server-authoritative code paths run without network guards blocking them.

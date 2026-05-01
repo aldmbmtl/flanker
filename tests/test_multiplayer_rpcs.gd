@@ -380,6 +380,201 @@ func test_notify_player_died_sets_dead_flag() -> void:
 	LobbyManager.notify_player_died(5)
 	assert_true(GameSync.player_dead.get(5, false))
 
+func test_damage_player_broadcast_reduces_health() -> void:
+	# damage_player_broadcast must apply damage via GameSync and return new HP.
+	GameSync.set_player_health(10, 100.0)
+	GameSync.set_player_team(10, 1)
+	var new_hp: float = LobbyManager.damage_player_broadcast(10, 25.0, 0)
+	assert_eq(new_hp, 75.0, "damage_player_broadcast must return new HP after damage")
+	assert_eq(GameSync.get_player_health(10), 75.0,
+		"GameSync health must reflect damage after broadcast")
+
+func test_damage_player_broadcast_sends_apply_damage_rpc() -> void:
+	# Verifies apply_player_damage.rpc is dispatched so the client HUD updates.
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+	GameSync.set_player_health(11, 100.0)
+	GameSync.set_player_team(11, 1)
+	LobbyManager.damage_player_broadcast(11, 20.0, 0)
+	assert_true(mock.was_called("apply_player_damage"),
+		"damage_player_broadcast must dispatch apply_player_damage RPC")
+	var calls: Array = mock.calls_to("apply_player_damage")
+	assert_eq(calls[0]["args"][0], 11, "RPC arg 0 must be target peer_id")
+	assert_eq(calls[0]["args"][1], 80.0, "RPC arg 1 must be new HP")
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+func test_damage_player_broadcast_sends_notify_died_on_kill() -> void:
+	# Verifies notify_player_died.rpc is dispatched when damage is lethal.
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+	GameSync.set_player_health(12, 10.0)
+	GameSync.set_player_team(12, 1)
+	LobbyManager.damage_player_broadcast(12, 50.0, 0)
+	assert_true(mock.was_called("notify_player_died"),
+		"damage_player_broadcast must dispatch notify_player_died RPC on lethal hit")
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+func test_damage_player_broadcast_no_notify_died_on_non_lethal() -> void:
+	# notify_player_died must NOT fire for non-lethal hits.
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+	GameSync.set_player_health(13, 100.0)
+	GameSync.set_player_team(13, 1)
+	LobbyManager.damage_player_broadcast(13, 10.0, 0)
+	assert_false(mock.was_called("notify_player_died"),
+		"damage_player_broadcast must NOT dispatch notify_player_died for non-lethal hit")
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+# ── §5b Hit flash RPC dispatch ────────────────────────────────────────────────
+
+class FakeTowerForFlash extends TowerBase:
+	var flash_called: int = 0
+	func _build_visuals() -> void:
+		pass
+	func _flash_hit() -> void:
+		flash_called += 1
+
+class FakeMinionForFlash extends MinionBase:
+	var flash_called: int = 0
+	func _init() -> void:
+		var sa := AudioStreamPlayer3D.new()
+		sa.name = "ShootAudio"
+		add_child(sa)
+		var da := AudioStreamPlayer3D.new()
+		da.name = "DeathAudio"
+		add_child(da)
+	func _build_visuals() -> void:
+		pass
+	func _init_visuals() -> void:
+		pass
+	func _flash_hit() -> void:
+		flash_called += 1
+
+func test_tower_take_damage_dispatches_notify_tower_hit_rpc() -> void:
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var t := FakeTowerForFlash.new()
+	t.max_health   = 500.0
+	t.attack_range = 0.0
+	t.tower_type   = "cannon"
+	add_child_autofree(t)
+	t.setup(0)
+
+	t.take_damage(50.0, "test", 1)  # enemy hit
+
+	assert_true(mock.was_called("notify_tower_hit"),
+		"take_damage must dispatch notify_tower_hit RPC so clients see flash")
+	var calls: Array = mock.calls_to("notify_tower_hit")
+	assert_eq(calls[0]["args"][0], t.name,
+		"notify_tower_hit arg must be the tower's node name")
+
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+func test_tower_take_damage_friendly_fire_no_flash_rpc() -> void:
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var t := FakeTowerForFlash.new()
+	t.max_health   = 500.0
+	t.attack_range = 0.0
+	t.tower_type   = "cannon"
+	add_child_autofree(t)
+	t.setup(0)
+
+	t.take_damage(50.0, "test", 0)  # same team — friendly fire
+
+	assert_false(mock.was_called("notify_tower_hit"),
+		"Friendly fire must NOT dispatch notify_tower_hit")
+
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+func test_minion_take_damage_dispatches_notify_minion_hit_rpc() -> void:
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var m := FakeMinionForFlash.new()
+	m.set("team", 1)
+	m.set("_minion_id", 42)
+	add_child_autofree(m)
+	m.setup(1, [], 0)
+
+	m.take_damage(10.0, "test", 0)  # enemy hit (team 0 attacks team 1)
+
+	assert_true(mock.was_called("notify_minion_hit"),
+		"take_damage must dispatch notify_minion_hit RPC so clients see flash")
+	var calls: Array = mock.calls_to("notify_minion_hit")
+	assert_eq(calls[0]["args"][0], 42,
+		"notify_minion_hit arg must be the minion's _minion_id")
+
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+func test_minion_take_damage_friendly_fire_no_flash_rpc() -> void:
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var m := FakeMinionForFlash.new()
+	m.set("team", 1)
+	m.set("_minion_id", 43)
+	add_child_autofree(m)
+	m.setup(1, [], 0)
+
+	m.take_damage(10.0, "test", 1)  # same team — friendly fire
+
+	assert_false(mock.was_called("notify_minion_hit"),
+		"Friendly fire must NOT dispatch notify_minion_hit")
+
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+func test_notify_tower_hit_calls_flash_on_tower() -> void:
+	# Ensure any previous Main stub is gone.
+	var existing: Node = get_tree().root.get_node_or_null("Main")
+	if existing != null:
+		existing.queue_free()
+		await get_tree().process_frame
+
+	var main_stub := Node.new()
+	main_stub.name = "Main"
+	get_tree().root.add_child(main_stub)
+
+	var t := FakeTowerForFlash.new()
+	t.max_health   = 500.0
+	t.attack_range = 0.0
+	t.tower_type   = "cannon"
+	main_stub.add_child(t)
+	t.setup(0)
+
+	LobbyManager.notify_tower_hit(t.name)
+
+	assert_eq(t.flash_called, 1, "notify_tower_hit must call _flash_hit on the tower")
+
+	main_stub.queue_free()
+	await get_tree().process_frame
+
+func test_notify_minion_hit_calls_flash_on_minion() -> void:
+	# Ensure any previous Main stub is gone before adding ours.
+	var existing: Node = get_tree().root.get_node_or_null("Main")
+	if existing != null:
+		existing.queue_free()
+		await get_tree().process_frame
+
+	var main_stub := Node.new()
+	main_stub.name = "Main"
+	get_tree().root.add_child(main_stub)
+
+	var m := FakeMinionForFlash.new()
+	m.set("team", 0)
+	m.set("_minion_id", 99)
+	m.name = "Minion_99"
+	main_stub.add_child(m)
+
+	LobbyManager.notify_minion_hit(99)
+
+	assert_eq(m.flash_called, 1, "notify_minion_hit must call _flash_hit on the minion")
+
+	main_stub.queue_free()
+	await get_tree().process_frame
+
 # ── §6 Death → respawn ────────────────────────────────────────────────────────
 
 func test_notify_player_respawned_resets_health() -> void:

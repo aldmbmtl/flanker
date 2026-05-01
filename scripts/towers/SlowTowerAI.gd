@@ -49,6 +49,8 @@ func _process(delta: float) -> void:
 
 func _emit_pulse() -> void:
 	_spawn_pulse_vfx()
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		LobbyManager.spawn_slow_pulse_visuals.rpc(name, global_position + Vector3(0.0, 0.3, 0.0))
 	if _area == null:
 		return
 	for body in _area.get_overlapping_bodies():
@@ -66,117 +68,35 @@ func _spawn_pulse_vfx() -> void:
 	var root: Node = get_tree().root
 	var origin: Vector3 = global_position + Vector3(0.0, 0.3, 0.0)
 
-	# Ground shockwave ring
-	var p1 := GPUParticles3D.new()
-	var pm1 := ParticleProcessMaterial.new()
-	pm1.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	pm1.emission_sphere_radius = 0.5
-	pm1.direction = Vector3(0.0, 0.05, 0.0)
-	pm1.spread = 180.0
-	pm1.initial_velocity_min = 6.0
-	pm1.initial_velocity_max = 12.0
-	pm1.gravity = Vector3(0.0, -28.0, 0.0)
-	pm1.scale_min = 0.15
-	pm1.scale_max = 0.35
-	var m1 := QuadMesh.new()
-	m1.size = Vector2(0.25, 0.25)
-	var mat1 := StandardMaterial3D.new()
-	mat1.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat1.albedo_color = Color(0.4, 0.95, 1.0, 0.9)
-	mat1.emission_enabled = true
-	mat1.emission = Color(0.1, 0.85, 1.0)
-	mat1.emission_energy_multiplier = 4.0
-	mat1.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m1.material = mat1
-	p1.process_material = pm1
-	p1.draw_pass_1 = m1
-	p1.amount = 60
-	p1.lifetime = 0.5
-	p1.one_shot = true
-	p1.explosiveness = 1.0
-	root.add_child(p1)
-	p1.global_position = origin
-	p1.emitting = true
-	p1.restart()
-	get_tree().create_timer(p1.lifetime + 0.1).timeout.connect(p1.queue_free)
+	VfxUtils.spawn_particles(root, origin, {
+		"emission_shape": ParticleProcessMaterial.EMISSION_SHAPE_SPHERE,
+		"emission_radius": 0.5, "direction": Vector3(0.0, 0.05, 0.0), "spread": 180.0,
+		"vel_min": 6.0, "vel_max": 12.0, "gravity": Vector3(0.0, -28.0, 0.0),
+		"scale_min": 0.15, "scale_max": 0.35, "quad_size": Vector2(0.25, 0.25),
+		"color": Color(0.4, 0.95, 1.0, 0.9), "billboard": false,
+		"emission_enabled": true, "emission_color": Color(0.1, 0.85, 1.0), "emission_energy": 4.0,
+		"amount": 60, "lifetime": 0.5, "explosiveness": 1.0})
 
-	# Rising ice crystal wisps
-	var p2 := GPUParticles3D.new()
-	var pm2 := ParticleProcessMaterial.new()
-	pm2.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	pm2.emission_sphere_radius = attack_range * 0.35
-	pm2.direction = Vector3.UP
-	pm2.spread = 30.0
-	pm2.initial_velocity_min = 3.0
-	pm2.initial_velocity_max = 8.0
-	pm2.gravity = Vector3(0.0, -1.5, 0.0)
-	pm2.scale_min = 0.08
-	pm2.scale_max = 0.2
-	var m2 := QuadMesh.new()
-	m2.size = Vector2(0.15, 0.4)
-	var mat2 := StandardMaterial3D.new()
-	mat2.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat2.albedo_color = Color(0.55, 0.9, 1.0, 0.75)
-	mat2.emission_enabled = true
-	mat2.emission = Color(0.2, 0.7, 1.0)
-	mat2.emission_energy_multiplier = 2.5
-	mat2.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat2.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m2.material = mat2
-	p2.process_material = pm2
-	p2.draw_pass_1 = m2
-	p2.amount = 30
-	p2.lifetime = 0.8
-	p2.one_shot = true
-	p2.explosiveness = 0.85
-	root.add_child(p2)
-	p2.global_position = origin
-	p2.emitting = true
-	p2.restart()
-	get_tree().create_timer(p2.lifetime + 0.1).timeout.connect(p2.queue_free)
+	var p2_opts: Dictionary = {
+		"emission_shape": ParticleProcessMaterial.EMISSION_SHAPE_SPHERE,
+		"emission_radius": attack_range * 0.35, "direction": Vector3.UP, "spread": 30.0,
+		"vel_min": 3.0, "vel_max": 8.0, "gravity": Vector3(0.0, -1.5, 0.0),
+		"scale_min": 0.08, "scale_max": 0.2, "quad_size": Vector2(0.15, 0.4),
+		"color": Color(0.55, 0.9, 1.0, 0.75),
+		"emission_enabled": true, "emission_color": Color(0.2, 0.7, 1.0), "emission_energy": 2.5,
+		"amount": 30, "lifetime": 0.8, "explosiveness": 0.85}
+	VfxUtils.spawn_particles(root, origin, p2_opts)
 
-	# Central flash burst
-	var p3 := GPUParticles3D.new()
-	var pm3 := ParticleProcessMaterial.new()
-	pm3.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	pm3.emission_sphere_radius = 0.2
-	pm3.direction = Vector3.UP
-	pm3.spread = 180.0
-	pm3.initial_velocity_min = 3.0
-	pm3.initial_velocity_max = 7.0
-	pm3.gravity = Vector3.ZERO
-	pm3.scale_min = 0.3
-	pm3.scale_max = 0.7
-	var m3 := QuadMesh.new()
-	m3.size = Vector2(0.6, 0.6)
-	var mat3 := StandardMaterial3D.new()
-	mat3.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat3.albedo_color = Color(0.85, 0.98, 1.0, 0.95)
-	mat3.emission_enabled = true
-	mat3.emission = Color(0.5, 0.95, 1.0)
-	mat3.emission_energy_multiplier = 6.0
-	mat3.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m3.material = mat3
-	p3.process_material = pm3
-	p3.draw_pass_1 = m3
-	p3.amount = 15
-	p3.lifetime = 0.2
-	p3.one_shot = true
-	p3.explosiveness = 1.0
-	root.add_child(p3)
-	p3.global_position = origin
-	p3.emitting = true
-	p3.restart()
-	get_tree().create_timer(p3.lifetime + 0.1).timeout.connect(p3.queue_free)
+	VfxUtils.spawn_particles(root, origin, {
+		"emission_shape": ParticleProcessMaterial.EMISSION_SHAPE_SPHERE,
+		"emission_radius": 0.2, "direction": Vector3.UP, "spread": 180.0,
+		"vel_min": 3.0, "vel_max": 7.0, "gravity": Vector3.ZERO,
+		"scale_min": 0.3, "scale_max": 0.7, "quad_size": Vector2(0.6, 0.6),
+		"color": Color(0.85, 0.98, 1.0, 0.95), "billboard": false,
+		"emission_enabled": true, "emission_color": Color(0.5, 0.95, 1.0), "emission_energy": 6.0,
+		"amount": 15, "lifetime": 0.2, "explosiveness": 1.0})
 
 	# Flash light
-	var flash := OmniLight3D.new()
-	flash.light_color = Color(0.3, 0.9, 1.0)
-	flash.light_energy = 5.0
-	flash.omni_range = 8.0
-	flash.shadow_enabled = false
-	root.add_child(flash)
-	flash.global_position = origin + Vector3(0.0, 1.0, 0.0)
-	var tw: Tween = flash.create_tween()
-	tw.tween_property(flash, "light_energy", 0.0, 0.3)
-	tw.tween_callback(flash.queue_free)
+	VfxUtils.spawn_flash_light(root, origin, {
+		"color": Color(0.3, 0.9, 1.0), "energy": 5.0, "range": 8.0,
+		"duration": 0.3, "offset": Vector3(0.0, 1.0, 0.0)})

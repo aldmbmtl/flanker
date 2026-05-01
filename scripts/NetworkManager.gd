@@ -9,7 +9,7 @@ signal connected_to_server
 const DEFAULT_PORT := 8910
 const MAX_CLIENTS := 10
 
-var _peer: ENetMultiplayerPeer
+var _peer: MultiplayerPeer
 var _is_host := false
 
 func _ready() -> void:

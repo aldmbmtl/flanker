@@ -46,6 +46,17 @@ func test_clear_all_removes_all_peers() -> void:
 	assert_eq(SkillTree.get_role(FIGHTER_ID), "")
 	assert_eq(SkillTree.get_role(SUPPORTER_ID), "")
 
+# Regression: leave_game() was missing SkillTree.clear_all(), causing stale
+# role data when a peer rejoined with a different role in the next session.
+func test_clear_all_allows_reregister_with_different_role() -> void:
+	SkillTree.register_peer(FIGHTER_ID, "Fighter")
+	assert_eq(SkillTree.get_role(FIGHTER_ID), "Fighter")
+	# Simulate leave_game() clearing all state
+	SkillTree.clear_all()
+	# Peer rejoins next session as Supporter — must not be locked to old role
+	SkillTree.register_peer(FIGHTER_ID, "Supporter")
+	assert_eq(SkillTree.get_role(FIGHTER_ID), "Supporter")
+
 func test_get_all_peers_returns_registered() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
 	SkillTree.register_peer(SUPPORTER_ID, "Supporter")
@@ -62,8 +73,10 @@ func test_level_up_awards_one_skill_point() -> void:
 	assert_eq(SkillTree.get_skill_pts(FIGHTER_ID), 2)
 
 func test_level_up_unregistered_peer_no_crash() -> void:
+	# Unregistered peer must be silently ignored — no state created.
 	SkillTree._on_level_up(99, 2)
-	# Should not crash
+	assert_eq(SkillTree.get_skill_pts(99), 0,
+		"Unregistered peer must not have skill points created by level-up")
 
 func test_level_up_emits_skill_pts_changed() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
@@ -89,7 +102,7 @@ func test_can_unlock_tier1_with_1_point() -> void:
 
 func test_cannot_unlock_wrong_role() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
-	assert_false(SkillTree.can_unlock(FIGHTER_ID, "s_build_discount"))
+	assert_false(SkillTree.can_unlock(FIGHTER_ID, "s_minion_hp"))
 
 func test_cannot_unlock_unknown_node() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
@@ -179,12 +192,11 @@ func test_assign_active_slot_succeeds_when_unlocked() -> void:
 	assert_eq(SkillTree.get_active_slots(FIGHTER_ID)[0], "f_dash")
 
 func test_cannot_assign_non_active_node_to_slot() -> void:
-	# Use a Supporter passive — Fighters have no passives to test with
+	# s_minion_hp is type "passive" — should be rejected from active slot
 	SkillTree.register_peer(SUPPORTER_ID, "Supporter")
 	SkillTree._on_level_up(SUPPORTER_ID, 2)
-	SkillTree.unlock_node_local(SUPPORTER_ID, "s_build_discount")
-	# s_build_discount is type "passive" — should be rejected
-	SkillTree.assign_active_slot(SUPPORTER_ID, 0, "s_build_discount")
+	SkillTree.unlock_node_local(SUPPORTER_ID, "s_minion_hp")
+	SkillTree.assign_active_slot(SUPPORTER_ID, 0, "s_minion_hp")
 	assert_eq(SkillTree.get_active_slots(SUPPORTER_ID)[0], "")
 
 func test_assign_active_emits_slots_changed() -> void:
@@ -195,14 +207,22 @@ func test_assign_active_emits_slots_changed() -> void:
 	assert_signal_emitted(SkillTree, "active_slots_changed")
 
 func test_assign_active_slot_out_of_range_ignored() -> void:
+	# Slot 5 is out of range (valid: 0–1) — must be silently rejected.
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
-	SkillTree.assign_active_slot(FIGHTER_ID, 5, "f_dash")  # should not crash
+	var slots_before: Array = SkillTree.get_active_slots(FIGHTER_ID)
+	SkillTree.assign_active_slot(FIGHTER_ID, 5, "f_dash")
+	assert_eq(SkillTree.get_active_slots(FIGHTER_ID), slots_before,
+		"Out-of-range slot assignment must not mutate active_slots")
 
 # ── use_active / cooldown ─────────────────────────────────────────────────────
 
 func test_use_active_empty_slot_no_crash() -> void:
+	# Slot 1 is empty by default — using it must be a silent no-op.
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
-	SkillTree.use_active_local(FIGHTER_ID, 0)
+	SkillTree.use_active_local(FIGHTER_ID, 1)
+	# Empty slot has no node_id → no cooldown entry should be created.
+	assert_almost_eq(SkillTree.get_cooldown(FIGHTER_ID, ""), 0.0, 0.001,
+		"Using an empty slot must not start any cooldown")
 
 func test_use_active_starts_cooldown() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
@@ -262,17 +282,17 @@ func test_second_wind_unregistered_returns_true_safely() -> void:
 
 # ── Supporter passive bonus ───────────────────────────────────────────────────
 
-func test_supporter_respawn_reduction_passive() -> void:
+func test_supporter_minion_hp_passive() -> void:
 	SkillTree.register_peer(SUPPORTER_ID, "Supporter")
 	SkillTree._on_level_up(SUPPORTER_ID, 2)
-	SkillTree.unlock_node_local(SUPPORTER_ID, "s_fast_respawn")
-	assert_almost_eq(SkillTree.get_passive_bonus(SUPPORTER_ID, "respawn_reduction"), 2.0, 0.001)
+	SkillTree.unlock_node_local(SUPPORTER_ID, "s_minion_hp")
+	assert_almost_eq(SkillTree.get_passive_bonus(SUPPORTER_ID, "minion_hp_bonus"), 0.25, 0.001)
 
-func test_supporter_build_discount_passive() -> void:
+func test_supporter_minion_damage_passive() -> void:
 	SkillTree.register_peer(SUPPORTER_ID, "Supporter")
 	SkillTree._on_level_up(SUPPORTER_ID, 2)
-	SkillTree.unlock_node_local(SUPPORTER_ID, "s_build_discount")
-	assert_almost_eq(SkillTree.get_passive_bonus(SUPPORTER_ID, "build_discount"), 2.0, 0.001)
+	SkillTree.unlock_node_local(SUPPORTER_ID, "s_minion_damage")
+	assert_almost_eq(SkillTree.get_passive_bonus(SUPPORTER_ID, "minion_damage_bonus"), 0.20, 0.001)
 
 # ── Explicit slot targeting (Q=0, E=1) ───────────────────────────────────────
 

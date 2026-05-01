@@ -8,7 +8,6 @@ const RED_SPAWN     := Vector3(0.0, 10.0, -84.0)
 
 enum GameState { MENU, PLAYING, PAUSED }
 var game_state: GameState = GameState.MENU
-var _is_singleplayer := true
 
 # Weapon pickup spawns: 3 lane midpoints + 6 mountain positions
 const MOUNTAIN_PICKUP_POSITIONS: Array = [
@@ -34,8 +33,6 @@ var _respawning  := false
 var _respawn_timer: float = 0.0
 var player_start_team: int = 0
 var player_role: Role = Role.FIGHTER
-var _death_count: int = 0
-var _role_slots: Dictionary = { Role.FIGHTER: false, Role.SUPPORTER: false }
 var time_seed: int = 1  # 0=sunrise 1=noon 2=sunset 3=night
 var _blue_minion_char: String = ""
 var _red_minion_char: String = ""
@@ -68,7 +65,7 @@ var _ping_hud: Control    = null
 var _compass_hud: Control = null
 var _level_up_dialog: Control = null  # retired — kept to avoid parse errors on any stale refs; remove after full cleanup
 
-@onready var rts_camera:         Camera3D        = $RTSCamera
+@onready var rts_camera:         Node        = $RTSCamera
 @onready var vignette_rect:      ColorRect       = $HUD/VignetteRect
 @onready var damage_flash_rect:  ColorRect       = $HUD/DamageFlashRect
 
@@ -122,47 +119,28 @@ var fps_player: CharacterBody3D = null
 const WeaponPickupScene := preload("res://scenes/WeaponPickup.tscn")
 const PortalGoalScene   := preload("res://scenes/PortalGoal.tscn")
 const PickupSoundPath   := "res://assets/kenney_ui-audio/Audio/switch1.ogg"
-const StartMenuScene    := preload("res://scenes/ui/StartMenu.tscn")
 const PauseMenuScene    := preload("res://scenes/ui/PauseMenu.tscn")
 const LoadingScreenScene := preload("res://scenes/ui/LoadingScreen.tscn")
 
-var _start_menu: Control
 var _pause_menu: Control
 var _role_dialog: Control
 var _char_screen: Control = null
 
 func _ready() -> void:
-	var _has_network_peer: bool = NetworkManager._peer != null
 	# Pause wave spawning until the world is fully generated.
 	$MinionSpawner.set_process(false)
 	$MinionSpawner.set_physics_process(false)
-	if _has_network_peer:
-		_is_singleplayer = false
-		_setup_multiplayer_game()
-	else:
-		_is_singleplayer = true
-		_setup_singleplayer_game()
-		_on_start_game()
+	_setup_game()
 	GraphicsSettings.settings_changed.connect(_apply_fog_settings)
 	GraphicsSettings.settings_changed.connect(_apply_shadow_settings)
 	TeamLives.life_lost.connect(_on_life_lost)
 	TeamLives.game_over.connect(_on_team_lives_game_over)
 
-func _setup_singleplayer_game() -> void:
-	_start_menu = StartMenuScene.instantiate()
-	add_child(_start_menu)
-	_start_menu.connect("start_game", _on_start_game)
-	_start_menu.connect("quit_game", _on_quit_from_menu)
+func _setup_game() -> void:
 	_pause_menu = PauseMenuScene.instantiate()
 	$HUD.add_child(_pause_menu)
-	_HUD_set_visible(false)
 	_randomize_time_of_day()
-
-func _setup_multiplayer_game() -> void:
-	_pause_menu = PauseMenuScene.instantiate()
-	$HUD.add_child(_pause_menu)
 	_spawn_remote_player_manager()
-	_randomize_time_of_day()
 	_pick_minion_characters()
 	LobbyManager.kicked_from_server.connect(_on_kicked_from_server)
 	_start_multiplayer_game()
@@ -249,7 +227,6 @@ func _start_multiplayer_game() -> void:
 
 	player_role = selected_role as Role
 	rts_camera.player_role = player_role
-	_death_count = 0
 	game_state = GameState.PLAYING
 	_setup_event_feed()
 	_register_skill_tree_peer(multiplayer.get_unique_id(), player_role)
@@ -275,10 +252,6 @@ func _start_multiplayer_game() -> void:
 		ammo_label.visible = false
 		reload_prompt.visible = false
 		$HUD/MinimapPanel.visible = false
-		# Hide XP/level widgets — Supporter doesn't earn XP via kills
-		xp_bar.visible = false
-		level_label.visible = false
-		pending_button.visible = false
 		# PointsLabel and LivesBar remain visible for Supporter
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 		# Spawn SupporterHUD toolbar
@@ -307,6 +280,14 @@ func _start_multiplayer_game() -> void:
 		_entity_hud = $HUD/HUDOverlay
 		_entity_hud.set_script(EntityHUDScript)
 		_entity_hud.setup(player_start_team)
+		# Build-limit line — shows world z=0 placement boundary in RTS view
+		var build_limit_line := Control.new()
+		build_limit_line.set_script(load("res://scripts/ui/BuildLimitLine.gd"))
+		build_limit_line.name = "BuildLimitLine"
+		$HUD.add_child(build_limit_line)
+		build_limit_line.setup(rts_camera)
+		# Wire leveling HUD — Supporter earns XP from tower/minion kills
+		_setup_level_hud()
 
 	# Wire PingHUD — blinking diamond overlay for all roles
 	_setup_ping_hud()
@@ -468,6 +449,7 @@ func _register_skill_tree_peer(peer_id: int, role: Role) -> void:
 		_char_screen = CharacterScreenScene.instantiate()
 		$HUD.add_child(_char_screen)
 		_char_screen.setup(peer_id, multiplayer.has_multiplayer_peer())
+		_char_screen.set_role(role == Role.FIGHTER)
 		_char_screen.connect("opened", _on_char_screen_opened)
 		_char_screen.connect("closed", _on_char_screen_closed)
 	# Connect SP badge notification on the pending_button (reuse existing button)
@@ -595,7 +577,7 @@ func _pick_minion_characters() -> void:
 	_player_avatar_char = shuffled[2]
 	MinionAI.set_model_characters(_blue_minion_char, _red_minion_char)
 	# Send avatar char to server so all peers can look it up via LobbyManager.players
-	if not _is_singleplayer and multiplayer.has_multiplayer_peer():
+	if multiplayer.has_multiplayer_peer():
 		if multiplayer.is_server():
 			var my_id: int = multiplayer.get_unique_id()
 			if LobbyManager.players.has(my_id):
@@ -737,187 +719,6 @@ func _input(event: InputEvent) -> void:
 				_char_screen.toggle()
 				return
 
-func _on_start_game() -> void:
-	# Show loading screen immediately — terrain, trees, and walls all run async.
-	var loading_screen = LoadingScreenScene.instantiate()
-	add_child(loading_screen)
-	loading_screen.set_status("Building terrain...")
-	loading_screen.set_progress(10.0)
-
-	# Tear down the menu simulation before it mutates any more autoload state
-	# (TeamData, LevelSystem, etc.). Free the whole StartMenu subtree — it
-	# won't be needed again; returning to menu uses change_scene_to_file.
-	if _start_menu:
-		_start_menu.call("_stop_menu_simulation")
-		_start_menu.queue_free()
-		_start_menu = null
-
-	await get_tree().process_frame
-
-	# Wait for terrain thread to finish and apply mesh + collision shape.
-	# TreePlacer raycasts against terrain collision, so terrain must be ready first.
-	if not $World/Terrain.generation_done:
-		await $World/Terrain.done
-
-	loading_screen.set_status("Placing trees...")
-	loading_screen.set_progress(35.0)
-	if not $World/TreePlacer.generation_done:
-		await $World/TreePlacer.done
-
-	loading_screen.set_status("Placing cover objects...")
-	loading_screen.set_progress(55.0)
-	if not $World/WallPlacer.generation_done:
-		await $World/WallPlacer.done
-
-	# World is fully generated — start wave timer now.
-	$MinionSpawner.set_process(true)
-	$MinionSpawner.set_physics_process(true)
-
-	loading_screen.set_status("Waiting for role selection...")
-	loading_screen.set_progress(62.0)
-	await get_tree().process_frame
-
-	# Hide loading screen so the role dialog is clickable
-	loading_screen.visible = false
-
-	# Show role select dialog — wait for player to pick
-	_role_dialog = RoleSelectDialogScene.instantiate()
-	$HUD.add_child(_role_dialog)
-	_role_dialog.set_slots(_role_slots)
-	_role_dialog.visible = true
-	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-	var selected_role: int = await _role_dialog.role_selected
-	player_role = selected_role as Role
-	rts_camera.player_role = player_role
-	_role_slots[player_role] = true
-	_role_dialog.visible = false
-	_register_skill_tree_peer(1, player_role)
-
-	# Bring loading screen back for remaining setup
-	loading_screen.visible = true
-
-	# Assign random team
-	player_start_team = randi() % 2
-	# Pick character models before spawning player so avatar_char is ready
-	_pick_minion_characters()
-
-	loading_screen.set_status("Spawning player...")
-	loading_screen.set_progress(65.0)
-	await get_tree().process_frame
-
-	if player_role == Role.FIGHTER:
-		var my_id := multiplayer.get_unique_id()
-		fps_player = FPSPlayerScene.instantiate()
-		fps_player.name = "FPSPlayer_%d" % my_id
-		fps_player.setup(my_id, player_start_team, true, _player_avatar_char)
-		add_child(fps_player)
-		fps_player.add_to_group("player")
-
-	loading_screen.set_status("Placing portals...")
-	loading_screen.set_progress(72.0)
-	await get_tree().process_frame
-
-	_setup_portals()
-
-	loading_screen.set_status("Loading audio & HUD...")
-	loading_screen.set_progress(82.0)
-	await get_tree().process_frame
-
-	game_state = GameState.PLAYING
-	_death_count = 0
-	get_tree().set_auto_accept_quit(true)
-	wave_announce_panel.visible = false
-	wave_info_label.text = "Wave: 0 | First wave in: 10s"
-	audio_mode_switch.stream = load("res://assets/kenney_ui-audio/Audio/switch1.ogg")
-	audio_wave.stream        = load("res://assets/kenney_ui-audio/Audio/switch5.ogg")
-	audio_respawn.stream     = load("res://assets/kenney_ui-audio/Audio/click1.ogg")
-
-	rts_camera.setup(player_start_team)
-	_setup_event_feed()
-
-	if player_role == Role.FIGHTER:
-		_setup_hud_for_player()
-		var spawn_z: float = 84.0 if player_start_team == 0 else -84.0
-		fps_player.global_position = Vector3(0.0, 10.0, spawn_z)
-		# Blue spawns at +Z faces -Z (toward red base); red spawns at -Z faces +Z (toward blue base).
-		fps_player.rotation.y = 0.0 if player_start_team == 0 else PI
-		_HUD_set_visible(true)
-		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
-		_set_mode(true)
-	else:
-		# Supporter: RTS-only
-		_HUD_set_visible(true)
-		_set_mode(false)
-		# Hide fighter-specific HUD elements
-		crosshair.visible = false
-		vitals_panel.visible = false
-		ammo_label.visible = false
-		reload_prompt.visible = false
-		$HUD/MinimapPanel.visible = false
-		# Hide XP/level widgets — Supporter doesn't earn XP via kills
-		xp_bar.visible = false
-		level_label.visible = false
-		pending_button.visible = false
-		# PointsLabel and LivesBar remain visible for Supporter
-		# Spawn SupporterHUD toolbar
-		_supporter_hud = SupporterHUDScene.instantiate()
-		$HUD.add_child(_supporter_hud)
-		_supporter_hud.setup(player_start_team)
-		rts_camera.set_supporter_hud(_supporter_hud)
-		# Spawn LauncherHUD — left-edge launcher toolbar (singleplayer)
-		_launcher_hud = CanvasLayer.new()
-		_launcher_hud.set_script(LauncherHUDScript)
-		_launcher_hud.name = "LauncherHUD"
-		$HUD.add_child(_launcher_hud)
-		_launcher_hud.setup(player_start_team)
-		rts_camera.set_launcher_hud(_launcher_hud)
-		LobbyManager.item_spawned.connect(_launcher_hud._on_item_spawned)
-		LobbyManager.tower_despawned.connect(_launcher_hud._on_tower_despawned)
-		# Spawn LaneBoostHUD — right-edge reinforce toolbar (singleplayer)
-		_lane_boost_hud = CanvasLayer.new()
-		_lane_boost_hud.set_script(LaneBoostHUDScript)
-		_lane_boost_hud.name = "LaneBoostHUD"
-		$HUD.add_child(_lane_boost_hud)
-		_lane_boost_hud.setup(player_start_team)
-		LobbyManager.lane_boosts_synced.connect(_lane_boost_hud.apply_boost_sync)
-
-		# Wire EntityHUD — player circles + tower health bars
-		_entity_hud = $HUD/HUDOverlay
-		_entity_hud.set_script(EntityHUDScript)
-		_entity_hud.setup(player_start_team)
-
-	# Wire PingHUD — blinking diamond overlay for all roles
-	_setup_ping_hud()
-	# Wire CompassHUD — CoD-style bearing strip (Fighter only)
-	if player_role == Role.FIGHTER:
-		_setup_compass_hud()
-
-	# Spawn AI Supporters for any uncovered team (singleplayer — always server)
-	_spawn_ai_supporters_singleplayer(player_role, player_start_team)
-
-	loading_screen.set_status("Spawning towers & pickups...")
-	loading_screen.set_progress(92.0)
-	await get_tree().process_frame
-
-	_spawn_weapon_pickups()
-	_setup_lane_data()
-
-	loading_screen.set_status("Ready!")
-	loading_screen.set_progress(100.0)
-	await get_tree().process_frame
-
-	# Spawn ambient wind particles — world-space, bioluminescent, gust-driven.
-	var wind_particles := Node3D.new()
-	wind_particles.set_script(WindParticlesScript)
-	wind_particles.name = "WindParticles"
-	$World.add_child(wind_particles)
-	wind_particles.set("_tree_placer", $World/TreePlacer)
-	wind_particles.set("_player", fps_player)
-
-	loading_screen.finish()
-	call_deferred("_spawn_weapon_pickups")
-	call_deferred("_setup_lane_data")
-
 func _on_resume_game() -> void:
 	toggle_pause(false)
 
@@ -935,6 +736,7 @@ func leave_game() -> void:
 	TeamData.reset()
 	TeamLives.reset()
 	LevelSystem.clear_all()
+	SkillTree.clear_all()
 	get_tree().change_scene_to_file("res://scenes/ui/StartMenu.tscn")
 
 func toggle_pause(paused: bool) -> void:
@@ -1057,13 +859,7 @@ func _on_player_died() -> void:
 		return
 	if player_role != Role.FIGHTER:
 		return
-	var respawn_time: float
-	if _is_singleplayer:
-		_death_count += 1
-		respawn_time = min(LobbyManager.RESPAWN_BASE + (_death_count * LobbyManager.RESPAWN_INCREMENT), LobbyManager.RESPAWN_CAP)
-	else:
-		var my_id := multiplayer.get_unique_id()
-		respawn_time = LobbyManager.get_respawn_time(my_id)
+	var respawn_time: float = LobbyManager.get_respawn_time(multiplayer.get_unique_id())
 	_respawning     = true
 	_respawn_timer  = respawn_time
 	respawn_label.visible = true
@@ -1169,16 +965,6 @@ func _place_pickup(pos: Vector3, pickup_sound: AudioStream) -> void:
 
 # ── AI Supporter spawning ─────────────────────────────────────────────────────
 
-# Singleplayer: always server. Spawn AI for enemy team, and for player's team
-# if the player chose Fighter.
-func _spawn_ai_supporters_singleplayer(p_role: Role, p_team: int) -> void:
-	var enemy_team: int = 1 - p_team
-	# Always give enemy an AI Supporter
-	_spawn_ai_supporter(enemy_team)
-	# Player's team gets AI Supporter only if player is Fighter
-	if p_role == Role.FIGHTER:
-		_spawn_ai_supporter(p_team)
-
 # Multiplayer: called on server only. Check LobbyManager.supporter_claimed.
 func _spawn_ai_supporters_multiplayer() -> void:
 	for t in [0, 1]:
@@ -1237,5 +1023,5 @@ func apply_recon_reveal(target_pos: Vector3, reveal_radius: float, reveal_durati
 		return
 	var vfx := Node3D.new()
 	vfx.set_script(vfx_script)
-	get_tree().root.get_child(0).add_child(vfx)
+	VfxUtils.get_scene_root(self).add_child(vfx)
 	vfx.global_position = Vector3(target_pos.x, target_pos.y + 5.0, target_pos.z)

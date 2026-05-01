@@ -159,20 +159,20 @@ func _create_ghost() -> void:
 		_range_mesh_inst = MeshInstance3D.new()
 		_range_mesh_inst.mesh = _range_imesh
 		_range_mesh_inst.material_override = _range_mat_invalid
-		get_tree().root.get_child(0).add_child(_range_mesh_inst)
+		VfxUtils.get_scene_root(self).add_child(_range_mesh_inst)
 
 		_los_imesh = ImmediateMesh.new()
 		_los_mesh_inst = MeshInstance3D.new()
 		_los_mesh_inst.mesh = _los_imesh
 		_los_mesh_inst.material_override = _los_mat
-		get_tree().root.get_child(0).add_child(_los_mesh_inst)
+		VfxUtils.get_scene_root(self).add_child(_los_mesh_inst)
 	else:
 		_range_imesh = null
 		_range_mesh_inst = null
 		_los_imesh = null
 		_los_mesh_inst = null
 
-	get_tree().root.get_child(0).add_child(_ghost)
+	VfxUtils.get_scene_root(self).add_child(_ghost)
 	_apply_ghost_material(_ghost_mat_invalid)
 
 func _destroy_ghost() -> void:
@@ -236,7 +236,7 @@ func _draw_blocker_rings(snapped: Vector3) -> void:
 		var inst := MeshInstance3D.new()
 		inst.mesh = imesh
 		inst.material_override = _range_mat_invalid
-		get_tree().root.get_child(0).add_child(inst)
+		VfxUtils.get_scene_root(self).add_child(inst)
 		_blocker_rings.append([inst, imesh])
 
 	# Draw / hide each slot
@@ -475,7 +475,8 @@ func _update_ghost() -> void:
 	var normal: Vector3 = result.normal
 	var on_flat_enough: bool = normal.dot(Vector3.UP) >= build_system.SLOPE_THRESHOLD
 
-	var valid: bool = on_flat_enough and build_system.can_place_item(snapped, _player_team, _selected_type)
+	var placer_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var valid: bool = on_flat_enough and build_system.can_place_item(snapped, _player_team, _selected_type, placer_id)
 	if valid != _ghost_valid:
 		_ghost_valid = valid
 		_apply_ghost_material(_ghost_mat_valid if valid else _ghost_mat_invalid)
@@ -527,24 +528,19 @@ func _try_place_item(_screen_pos: Vector2) -> void:
 		return
 	if build_system == null or not _ghost_valid:
 		return
-	if multiplayer.has_multiplayer_peer():
-		if multiplayer.is_server():
-			var assigned_name: String = build_system.place_item(_ghost_world_pos, _player_team, _selected_type, _selected_subtype)
-			if assigned_name != "":
-				LobbyManager.spawn_item_visuals.rpc(_ghost_world_pos, _player_team, _selected_type, _selected_subtype, assigned_name)
-				LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
-				LobbyManager.item_spawned.emit(_selected_type, _player_team)
-				if _selected_type in ["weapon", "healthpack"]:
-					LobbyManager.broadcast_ping.rpc(_ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
-		else:
-			LobbyManager.request_place_item.rpc_id(1, _ghost_world_pos, _player_team, _selected_type, _selected_subtype)
-			if _selected_type in ["weapon", "healthpack"]:
-				LobbyManager.request_ping.rpc_id(1, _ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
-	else:
-		if build_system.place_item(_ghost_world_pos, _player_team, _selected_type, _selected_subtype) != "":
+	if multiplayer.is_server():
+		var my_id: int = multiplayer.get_unique_id()
+		var assigned_name: String = build_system.place_item(_ghost_world_pos, _player_team, _selected_type, _selected_subtype, my_id)
+		if assigned_name != "":
+			LobbyManager.spawn_item_visuals.rpc(_ghost_world_pos, _player_team, _selected_type, _selected_subtype, assigned_name)
+			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
 			LobbyManager.item_spawned.emit(_selected_type, _player_team)
 			if _selected_type in ["weapon", "healthpack"]:
-				LobbyManager.ping_received.emit(_ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
+				LobbyManager.broadcast_ping.rpc(_ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
+	else:
+		LobbyManager.request_place_item.rpc_id(1, _ghost_world_pos, _player_team, _selected_type, _selected_subtype)
+		if _selected_type in ["weapon", "healthpack"]:
+			LobbyManager.request_ping.rpc_id(1, _ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
 
 func _try_fire_missile(screen_pos: Vector2) -> void:
 	if _launcher_hud == null or not is_instance_valid(_launcher_hud):
@@ -588,7 +584,7 @@ func _server_spawn_missile(fire_pos: Vector3, target_pos: Vector3, team: int, la
 		return
 	var missile: Node3D = missile_scene.instantiate() as Node3D
 	missile.configure(def, team, fire_pos, target_pos, launcher_type)
-	get_tree().root.get_child(0).add_child(missile)
+	VfxUtils.get_scene_root(self).add_child(missile)
 	missile.global_position = fire_pos
 
 func _on_reveal_requested(target_pos: Vector3, reveal_radius: float, reveal_duration: float) -> void:
@@ -723,10 +719,7 @@ func _fire_ping(screen_pos: Vector2) -> void:
 	if result.is_empty():
 		return
 	var world_pos: Vector3 = result.position as Vector3
-	if NetworkManager._peer != null:
-		if multiplayer.is_server():
-			LobbyManager.request_ping(world_pos, _player_team)
-		else:
-			LobbyManager.request_ping.rpc_id(1, world_pos, _player_team)
+	if multiplayer.is_server():
+		LobbyManager.request_ping(world_pos, _player_team)
 	else:
-		LobbyManager.ping_received.emit(world_pos, _player_team)
+		LobbyManager.request_ping.rpc_id(1, world_pos, _player_team)

@@ -4,7 +4,8 @@ extends Node
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-const DASH_DISTANCE       := 5.0     # metres teleported forward
+const DASH_DISTANCE       := 5.0     # metres moved forward
+const DASH_DURATION       := 0.5     # seconds for dash animation
 const ADRENALINE_HEAL     := 40.0
 const FIELD_MEDIC_HEAL    := 25.0
 const FIELD_MEDIC_RANGE   := 8.0
@@ -38,52 +39,25 @@ static func execute(node_id: String, peer_id: int) -> void:
 		"f_iron_skin":      _iron_skin(peer_id)
 		"f_deploy_mg":      _deploy_mg(peer_id)
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers (delegated to SkillTree shared methods) ─────────────────────
 
-static func _get_main() -> Node:
-	return Engine.get_main_loop().root.get_node_or_null("Main")
-
-static func _get_player(peer_id: int) -> Node:
-	var main: Node = _get_main()
-	if main == null:
-		return null
-	return main.get_node_or_null("FPSPlayer_%d" % peer_id)
-
-static func _get_player_team(peer_id: int) -> int:
-	return GameSync.get_player_team(peer_id)
-
-# Returns all FPSPlayer_* nodes in Main whose team matches ally_team,
-# excluding the caster's own peer (handled separately when needed).
-static func _get_ally_players(ally_team: int, exclude_id: int = -1) -> Array:
-	var main: Node = _get_main()
-	if main == null:
-		return []
-	var result: Array = []
-	for child in main.get_children():
-		if not child.name.begins_with("FPSPlayer_"):
-			continue
-		var id_str: String = child.name.substr("FPSPlayer_".length())
-		if not id_str.is_valid_int():
-			continue
-		var pid: int = int(id_str)
-		if pid == exclude_id:
-			continue
-		if GameSync.get_player_team(pid) == ally_team:
-			result.append(child)
-	return result
+## Returns the player node for peer_id, or null if not found / not in tree.
+## All skill functions call this instead of repeating the null-guard inline.
+static func _resolve(peer_id: int) -> Node:
+	return SkillTree.get_player(peer_id)
 
 # ── Guardian branch ───────────────────────────────────────────────────────────
 
 static func _field_medic(peer_id: int) -> void:
-	var caster: Node = _get_player(peer_id)
+	var caster: Node = _resolve(peer_id)
 	if caster == null:
 		return
-	var team: int = _get_player_team(peer_id)
+	var team: int = SkillTree.get_player_team(peer_id)
 	# Heal self
 	if caster.has_method("heal"):
 		caster.heal(FIELD_MEDIC_HEAL)
 	# Heal nearby allies
-	for ally in _get_ally_players(team, peer_id):
+	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
 			continue
 		var dist: float = (ally as Node3D).global_position.distance_to(caster.global_position)
@@ -91,11 +65,11 @@ static func _field_medic(peer_id: int) -> void:
 			ally.heal(FIELD_MEDIC_HEAL)
 
 static func _rally_cry(peer_id: int) -> void:
-	var caster: Node = _get_player(peer_id)
+	var caster: Node = _resolve(peer_id)
 	if caster == null:
 		return
-	var team: int = _get_player_team(peer_id)
-	for ally in _get_ally_players(team, peer_id):
+	var team: int = SkillTree.get_player_team(peer_id)
+	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
 			continue
 		var dist: float = (ally as Node3D).global_position.distance_to(caster.global_position)
@@ -104,17 +78,17 @@ static func _rally_cry(peer_id: int) -> void:
 			ally.set_meta("rally_cry_timer", RALLY_CRY_DURATION)
 
 static func _revive_pulse(peer_id: int) -> void:
-	var caster: Node = _get_player(peer_id)
+	var caster: Node = _resolve(peer_id)
 	if caster == null:
 		return
-	var team: int = _get_player_team(peer_id)
+	var team: int = SkillTree.get_player_team(peer_id)
 	# Full self-heal
 	if caster.has_method("heal") and caster.has_method("_get_max_hp"):
 		caster.heal(caster._get_max_hp())
 	elif caster.has_method("heal"):
 		caster.heal(999.0)
 	# Heal allies within range
-	for ally in _get_ally_players(team, peer_id):
+	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
 			continue
 		var dist: float = (ally as Node3D).global_position.distance_to(caster.global_position)
@@ -124,18 +98,82 @@ static func _revive_pulse(peer_id: int) -> void:
 # ── DPS branch ────────────────────────────────────────────────────────────────
 
 static func _dash(peer_id: int) -> void:
-	var player: Node = _get_player(peer_id)
+	var player: Node = _resolve(peer_id)
 	if player == null or not (player is CharacterBody3D):
 		return
 	var cb := player as CharacterBody3D
-	var forward: Vector3 = -cb.global_transform.basis.z
-	forward.y = 0.0
-	if forward.length_squared() < 0.001:
-		return
-	cb.global_position += forward.normalized() * DASH_DISTANCE
+	# Use movement direction if moving, else fall back to facing direction
+	var forward: Vector3
+	var horiz_vel: Vector3 = Vector3(cb.velocity.x, 0.0, cb.velocity.z)
+	if horiz_vel.length_squared() > 0.01:
+		forward = horiz_vel.normalized()
+	else:
+		forward = -cb.global_transform.basis.z
+		forward.y = 0.0
+		if forward.length_squared() < 0.001:
+			return
+		forward = forward.normalized()
+
+	# Play dash sound
+	if SoundManager != null:
+		SoundManager.play_3d(
+			"res://assets/kenney_impact-sounds/Audio/impactMetal_light_002.ogg",
+			cb.global_position, 0.0, randf_range(0.9, 1.1))
+
+	# VFX — particle trail attached to player so it follows during the slide
+	var effect: GPUParticles3D = GPUParticles3D.new()
+	var pm: ParticleProcessMaterial = ParticleProcessMaterial.new()
+	pm.direction = Vector3(0.0, 1.0, 0.0)
+	pm.spread = 60.0
+	pm.initial_velocity_min = 2.0
+	pm.initial_velocity_max = 6.0
+	pm.gravity = Vector3(0.0, -4.0, 0.0)
+	pm.scale_min = 0.08
+	pm.scale_max = 0.25
+	var mesh: QuadMesh = QuadMesh.new()
+	mesh.size = Vector2(0.2, 0.2)
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(0.3, 0.7, 1.0, 0.9)
+	mat.emission_enabled = true
+	mat.emission = Color(0.1, 0.5, 1.0)
+	mat.emission_energy_multiplier = 3.0
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mesh.material = mat
+	effect.draw_pass_1 = mesh
+	effect.process_material = pm
+	effect.amount = 40
+	effect.lifetime = 0.4
+	effect.one_shot = true
+	effect.emitting = true
+	effect.position = Vector3(0.0, 0.5, 0.0)
+	cb.add_child(effect)
+
+	# Store dash state on the player — FPSController reads these each physics frame
+	# dash_origin / dash_target drive lerp-based movement in _physics_process
+	var target: Vector3 = cb.global_position + forward.normalized() * DASH_DISTANCE
+	cb.set_meta("dash_origin",    cb.global_position)
+	cb.set_meta("dash_target",    target)
+	cb.set_meta("dash_elapsed",   0.0)
+	cb.set_meta("dash_duration",  DASH_DURATION)
+	cb.set_meta("dash_effect",    effect)
+
+	# Auto-cleanup timer (failsafe if the player dies mid-dash)
+	# Captures only peer_id (int) — no Node references — to avoid freed-capture errors.
+	var cleanup_timer: SceneTreeTimer = Engine.get_main_loop().create_timer(DASH_DURATION + 0.1)
+	cleanup_timer.timeout.connect(func() -> void:
+		var p: Node = SkillTree.get_player(peer_id)
+		if p != null and is_instance_valid(p):
+			if p.has_meta("dash_effect"):
+				var eff: Node = p.get_meta("dash_effect") as Node
+				if is_instance_valid(eff):
+					eff.queue_free()
+			for key in ["dash_origin", "dash_target", "dash_elapsed", "dash_duration", "dash_effect"]:
+				if p.has_meta(key):
+					p.remove_meta(key))
 
 static func _rapid_fire(peer_id: int) -> void:
-	var player: Node = _get_player(peer_id)
+	var player: Node = _resolve(peer_id)
 	if player == null:
 		return
 	# Store current weapon type so FPSController can scope the boost
@@ -146,11 +184,11 @@ static func _rapid_fire(peer_id: int) -> void:
 	player.set_meta("rapid_fire_weapon", weapon_type)
 
 static func _rocket_barrage(peer_id: int) -> void:
-	var player: Node = _get_player(peer_id)
+	var player: Node = _resolve(peer_id)
 	if player == null or not (player is Node3D):
 		return
 	var caster_pos: Vector3 = (player as Node3D).global_position
-	var team: int = _get_player_team(peer_id)
+	var team: int = SkillTree.get_player_team(peer_id)
 
 	# Collect enemy towers within range
 	var targets: Array = []
@@ -193,24 +231,24 @@ static func _rocket_barrage(peer_id: int) -> void:
 # ── Tank branch ───────────────────────────────────────────────────────────────
 
 static func _adrenaline(peer_id: int) -> void:
-	var player: Node = _get_player(peer_id)
+	var player: Node = _resolve(peer_id)
 	if player == null:
 		return
 	if player.has_method("heal"):
 		player.heal(ADRENALINE_HEAL)
 
 static func _iron_skin(peer_id: int) -> void:
-	var player: Node = _get_player(peer_id)
+	var player: Node = _resolve(peer_id)
 	if player == null:
 		return
 	player.set_meta("shield_hp",    IRON_SKIN_HP)
 	player.set_meta("shield_timer", IRON_SKIN_DURATION)
 
 static func _deploy_mg(peer_id: int) -> void:
-	var player: Node = _get_player(peer_id)
+	var player: Node = _resolve(peer_id)
 	if player == null or not (player is Node3D):
 		return
-	var team: int = _get_player_team(peer_id)
+	var team: int = SkillTree.get_player_team(peer_id)
 	var pos: Vector3 = (player as Node3D).global_position
 
 	var mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
@@ -231,7 +269,7 @@ static func _deploy_mg(peer_id: int) -> void:
 		if mg_scene == null:
 			return
 		var mg: Node = mg_scene.instantiate()
-		var main: Node = _get_main()
+		var main: Node = SkillTree.get_main()
 		if main == null:
 			return
 		main.add_child(mg)

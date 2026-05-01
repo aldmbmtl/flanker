@@ -117,7 +117,7 @@ func _place_lane_fences(pts: Array, lane_i: int) -> void:
 func _spawn_fence(pos: Vector3, seg_dir: Vector2) -> void:
 	# Collision-only StaticBody3D (no visual mesh child)
 	var body := StaticBody3D.new()
-	body.collision_layer = 2
+	body.collision_layer = 4  # layer 3 — passable by rockets/missiles
 	body.collision_mask = 1
 	body.position = pos
 

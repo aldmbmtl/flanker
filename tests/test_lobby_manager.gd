@@ -185,3 +185,26 @@ func test_get_players_by_team_empty_team() -> void:
 	LobbyManager.register_player_local(1, "Alice")
 	LobbyManager.players[1]["team"] = 0
 	assert_eq(LobbyManager.get_players_by_team(1).size(), 0)
+
+# ── get_supporter_peer ────────────────────────────────────────────────────────
+
+func test_get_supporter_peer_returns_id_when_supporter_present() -> void:
+	LobbyManager.register_player_local(1, "Alice")
+	LobbyManager.players[1]["team"] = 0
+	LobbyManager.players[1]["role"] = 1  # Supporter
+	assert_eq(LobbyManager.get_supporter_peer(0), 1, "Should return Supporter's peer_id")
+
+func test_get_supporter_peer_returns_minus_one_when_no_supporter() -> void:
+	LobbyManager.register_player_local(1, "Alice")
+	LobbyManager.players[1]["team"] = 0
+	LobbyManager.players[1]["role"] = 0  # Fighter, not Supporter
+	assert_eq(LobbyManager.get_supporter_peer(0), -1, "No Supporter on team should return -1")
+
+func test_get_supporter_peer_returns_minus_one_for_empty_team() -> void:
+	assert_eq(LobbyManager.get_supporter_peer(0), -1, "Empty lobby should return -1")
+
+func test_get_supporter_peer_ignores_other_team() -> void:
+	LobbyManager.register_player_local(1, "Alice")
+	LobbyManager.players[1]["team"] = 1  # red team
+	LobbyManager.players[1]["role"] = 1  # Supporter on red
+	assert_eq(LobbyManager.get_supporter_peer(0), -1, "Blue team has no Supporter")

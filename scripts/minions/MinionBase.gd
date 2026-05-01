@@ -22,8 +22,9 @@ class_name MinionBase
 extends CharacterBody3D
 
 const GRAVITY            := 20.0
-const SEPARATION_DIST    := 2.2
-const SEPARATION_FORCE   := 6.0
+const SEPARATION_DIST    := 3.0
+const SEPARATION_FORCE   := 14.0
+const LANE_OFFSET_RADIUS := 6.0
 
 const MINION_SHOOT_SOUND := "res://assets/kenney_sci-fi-sounds/Audio/laserSmall_002.ogg"
 const MINION_DEATH_SOUND := "res://assets/kenney_sci-fi-sounds/Audio/impactMetal_000.ogg"
@@ -81,14 +82,18 @@ var _cached_bases: Array  = []
 var _enemy_base: Node3D   = null
 
 var _killer_peer_id: int = -1
+var _attacker_team: int = -1
 
 # Animation / visuals
 var _active_char: Node3D     = null
 var _anim: AnimationPlayer   = null
+var _hit_overlay_mat: StandardMaterial3D = null
+var _hit_flash_tween: Tween = null
+var _flash_mesh_instances: Array[MeshInstance3D] = []
 
 # Throttle counters
 const TARGET_INTERVAL     := 15
-const SEPARATION_INTERVAL := 3
+const SEPARATION_INTERVAL := 1
 const TOWER_CACHE_INTERVAL := 120   # re-cache towers/bases every ~2s at 60fps
 var _target_frame: int = 0
 var _sep_frame: int    = 0
@@ -160,7 +165,7 @@ func _fire_at(target: Node3D) -> void:
 	bullet.source       = "minion"
 	bullet.shooter_team = team
 	bullet.velocity     = dir * bullet_speed
-	get_tree().root.get_child(0).add_child(bullet)
+	VfxUtils.get_scene_root(self).add_child(bullet)
 	bullet.global_position = spawn_pos
 
 	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
@@ -211,11 +216,62 @@ func _build_visuals() -> void:
 
 	_play_anim("idle")
 	_add_shadow_proxy()
+	
+	# Cache all mesh instances for potential flash effect
+	_flash_mesh_instances.clear()
+	if _active_char != null:
+		_collect_mesh_instances(_active_char)
+	
+	# Create the hit overlay material for flash effect
+	_build_hit_overlay()
 
 ## Called just before the death tween and queue_free.
 ## Override to spawn VFX, drop items, award bonus points, etc.
 func _on_death() -> void:
 	pass
+
+# ─── Flash helpers ────────────────────────────────────────────────────────────
+
+func _collect_mesh_instances(root: Node3D) -> void:
+	if root is MeshInstance3D:
+		_flash_mesh_instances.append(root)
+	for child in root.get_children():
+		if child is Node3D:
+			_collect_mesh_instances(child)
+
+func _build_hit_overlay() -> void:
+	if _flash_mesh_instances.is_empty():
+		return
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(1.0, 0.2, 0.2, 0.8)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.2, 0.2, 1.0)
+	mat.emission_energy_multiplier = 3.0
+	_hit_overlay_mat = mat
+
+func _flash_hit() -> void:
+	if _flash_mesh_instances.is_empty() or _hit_overlay_mat == null:
+		return
+	if _hit_flash_tween and _hit_flash_tween.is_valid():
+		_hit_flash_tween.kill()
+	# Reset emission energy before applying (previous tween may have left it at 0)
+	_hit_overlay_mat.emission_energy_multiplier = 3.0
+	# Apply overlay to all mesh surfaces
+	for mi in _flash_mesh_instances:
+		if not is_instance_valid(mi) or mi.mesh == null:
+			continue
+		for i in mi.mesh.get_surface_count():
+			mi.set_surface_override_material(i, _hit_overlay_mat)
+	_hit_flash_tween = create_tween()
+	_hit_flash_tween.tween_property(_hit_overlay_mat, "emission_energy_multiplier", 0.0, 0.3)
+	_hit_flash_tween.tween_callback(func() -> void:
+		for mi in _flash_mesh_instances:
+			if not is_instance_valid(mi) or mi.mesh == null:
+				continue
+			for i in mi.mesh.get_surface_count():
+				mi.set_surface_override_material(i, null)
+	)
 
 # ─── Visuals helpers ──────────────────────────────────────────────────────────
 
@@ -377,27 +433,33 @@ func _approach_with_strafe(target: Node3D, _delta: float) -> void:
 	to_target.y = 0.0
 	var forward := to_target.normalized()
 	var right := Vector3(-forward.z, 0.0, forward.x)
-	var strafe := sin(_time * 2.2 + _strafe_phase)
-	var move_dir := (forward + right * strafe * 0.55).normalized()
+	var strafe := sin(_time * 2.2 + _strafe_phase) * 0.35 + sin(_strafe_phase) * 0.25
+	var move_dir := (forward + right * strafe).normalized()
 	velocity.x = move_dir.x * speed * _slow_mult
 	velocity.z = move_dir.z * speed * _slow_mult
 	_face(target.global_position)
 
 func _apply_separation() -> void:
 	var push := Vector3.ZERO
+	var sep_radius_sq := SEPARATION_DIST * SEPARATION_DIST
 	for m in _get_minion_cache():
-		if m == self:
+		if m == self or m._dead:
 			continue
 		var diff: Vector3 = global_position - m.global_position
 		diff.y = 0.0
-		if diff.length_squared() >= 16.0:  # skip minions > 4 m away
+		var d_sq := diff.length_squared()
+		if d_sq >= sep_radius_sq or d_sq < 0.001:
 			continue
-		var d: float = diff.length()
-		if d < SEPARATION_DIST and d > 0.01:
-			push += diff.normalized() * (SEPARATION_DIST - d) / SEPARATION_DIST
+		var d: float = sqrt(d_sq)
+		var proximity_factor: float = SEPARATION_DIST / max(d, 0.1)
+		var push_magnitude: float = (SEPARATION_DIST - d) / SEPARATION_DIST * proximity_factor
+		push += diff.normalized() * push_magnitude
 	if push.length_squared() > 0.0001:
-		velocity.x += push.x * SEPARATION_FORCE
-		velocity.z += push.z * SEPARATION_FORCE
+		var max_push: float = SEPARATION_FORCE * 0.5
+		if push.length() > max_push:
+			push = push.normalized() * max_push
+		velocity.x += push.x
+		velocity.z += push.z
 
 func _march(_delta: float) -> void:
 	if current_waypoint < waypoints.size():
@@ -407,7 +469,11 @@ func _march(_delta: float) -> void:
 		if dir.length_squared() < 0.25:
 			current_waypoint += 1
 			return
-		var horiz: Vector3 = dir.normalized()
+		var fwd: Vector3 = dir.normalized()
+		var right: Vector3 = Vector3(-fwd.z, 0.0, fwd.x)
+		var blend: float = clamp(_time, 0.0, 1.0)
+		var perp_offset: float = sin(_strafe_phase) * 0.35 * blend
+		var horiz: Vector3 = (fwd + right * perp_offset).normalized()
 		velocity.x = horiz.x * speed * _slow_mult
 		velocity.z = horiz.z * speed * _slow_mult
 		_face(dest)
@@ -438,6 +504,16 @@ func _face(target: Vector3) -> void:
 
 # ─── Targeting ────────────────────────────────────────────────────────────────
 
+func _same_team_attackers_on(target: Node3D) -> int:
+	var count: int = 0
+	for m in _get_minion_cache():
+		if m == self or m.team != team or m._dead or m.is_puppet:
+			continue
+		var other_target: Node3D = m.get("_target")
+		if is_instance_valid(other_target) and other_target == target:
+			count += 1
+	return count
+
 func _find_target() -> Node3D:
 	var best: Node3D   = null
 	var best_dist: float = detect_range
@@ -446,9 +522,10 @@ func _find_target() -> Node3D:
 			continue
 		var d: float = global_position.distance_to(m.global_position)
 		if d < detect_range and d < best_dist:
-			best_dist = d
-			best = m
-	for player in get_tree().get_nodes_in_group("player"):
+			if _same_team_attackers_on(m) < 2:
+				best_dist = d
+				best = m
+	for player in get_tree().get_nodes_in_group("players"):
 		if not player.has_method("get"):
 			continue
 		var p_team: int = player.get("player_team") if player.get("player_team") != null else -1
@@ -456,8 +533,9 @@ func _find_target() -> Node3D:
 			continue
 		var d: float = global_position.distance_to(player.global_position)
 		if d < detect_range and d < best_dist:
-			best_dist = d
-			best = player
+			if _same_team_attackers_on(player) < 2:
+				best_dist = d
+				best = player
 	for ghost in get_tree().get_nodes_in_group("remote_players"):
 		var ghost_peer: int = ghost.get("peer_id") if ghost.get("peer_id") != null else -1
 		if ghost_peer < 0:
@@ -469,15 +547,17 @@ func _find_target() -> Node3D:
 			continue
 		var d: float = global_position.distance_to(ghost.global_position)
 		if d < detect_range and d < best_dist:
-			best_dist = d
-			best = ghost
+			if _same_team_attackers_on(ghost) < 2:
+				best_dist = d
+				best = ghost
 	for t in _cached_towers:
 		if not is_instance_valid(t) or t.team == team:
 			continue
 		var d: float = global_position.distance_to(t.global_position)
 		if d < best_dist:
-			best_dist = d
-			best = t
+			if _same_team_attackers_on(t) < 2:
+				best_dist = d
+				best = t
 	return best
 
 # ─── Darkness query ───────────────────────────────────────────────────────────
@@ -506,7 +586,17 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_
 	if _killer_team >= 0 and _killer_team == team:
 		return
 	_killer_peer_id = killer_peer_id
+	_attacker_team = _killer_team
+	# s_minion_armor: damage reduction passive from Supporter on this minion's team
+	var sup: int = LobbyManager.get_supporter_peer(team)
+	if sup > 0:
+		var dr: float = SkillTree.get_passive_bonus(sup, "minion_damage_reduction")
+		if dr > 0.0:
+			amount = amount * (1.0 - clampf(dr, 0.0, 1.0))
 	health -= amount
+	_flash_hit()
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		LobbyManager.notify_minion_hit.rpc(_minion_id)
 	if health <= 0.0:
 		_die()
 		var awarding_team: int = _killer_team if _killer_team >= 0 else 0
@@ -532,6 +622,20 @@ func _die() -> void:
 	if _dead:
 		return
 	_dead = true
+
+	# s_minion_revive: once-per-wave revival — check before committing death
+	if multiplayer.is_server() or not multiplayer.has_multiplayer_peer():
+		var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
+		if spawner != null:
+			var revive_used: Dictionary = spawner.get("_revive_used") if spawner.get("_revive_used") != null else {}
+			var sup: int = LobbyManager.get_supporter_peer(team)
+			if sup > 0 and SkillTree.get_passive_bonus(sup, "minion_revive") > 0.0 and not revive_used.get(team, false):
+				revive_used[team] = true
+				spawner.set("_revive_used", revive_used)
+				health = maxf(1.0, get("max_health") * 0.30)
+				_dead = false
+				return
+
 	remove_from_group("minions")
 	_play_anim("death")
 	death_audio.play()
@@ -547,10 +651,25 @@ func _die() -> void:
 		if spawner != null:
 			spawner.get("_minion_node_cache").erase(_minion_id)
 		if _killer_peer_id > 0:
-			LevelSystem.award_xp(_killer_peer_id, LevelSystem.XP_MINION)
+			var xp_amt: int = _xp_with_bonus(_killer_peer_id, LevelSystem.XP_MINION)
+			LevelSystem.award_xp(_killer_peer_id, xp_amt)
+		else:
+			# No player peer fired the killing blow (e.g. a tower or another minion).
+			# Credit the Supporter on the attacking team.
+			var sup: int = LobbyManager.get_supporter_peer(_attacker_team)
+			if sup > 0:
+				LevelSystem.award_xp(sup, LevelSystem.XP_MINION)
 	elif not multiplayer.has_multiplayer_peer():
 		var sp_killer: int = _killer_peer_id if _killer_peer_id > 0 else 1
-		LevelSystem.award_xp(sp_killer, LevelSystem.XP_MINION)
+		var xp_amt: int = _xp_with_bonus(sp_killer, LevelSystem.XP_MINION)
+		LevelSystem.award_xp(sp_killer, xp_amt)
+
+## Returns XP amount scaled by s_minion_xp passive of the Supporter on the
+## dead minion's *own* team — killer earns more XP when they've upgraded minions.
+func _xp_with_bonus(killer_peer: int, base_xp: int) -> int:
+	var sup: int = LobbyManager.get_supporter_peer(team)
+	var bonus: float = SkillTree.get_passive_bonus(sup, "minion_xp_bonus") if sup > 0 else 0.0
+	return int(ceil(float(base_xp) * (1.0 + bonus)))
 
 func force_die() -> void:
 	_die()

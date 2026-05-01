@@ -16,12 +16,22 @@ const XP_PLAYER  := 100
 const XP_TOWER   := 200
 
 # Stat bonus per attribute point invested
-const HP_PER_POINT     := 15.0
-const SPEED_PER_POINT  := 0.15
-const DAMAGE_PER_POINT := 0.10
+const HP_PER_POINT      := 15.0
+const SPEED_PER_POINT   := 0.15
+const DAMAGE_PER_POINT  := 0.10
+const STAMINA_PER_POINT := 2.0
+
+# Supporter stat bonus per attribute point invested
+const TOWER_HP_PER_POINT           := 0.05   # +5% tower spawn HP per point
+const PLACEMENT_RANGE_PER_POINT    := 0.10   # -10% spacing radius per point
+const TOWER_FIRE_RATE_PER_POINT    := 0.05   # -5% attack_interval per point
 
 # Max points that can go into any single attribute
 const ATTR_CAP := 6
+
+# Role-gated attribute sets
+const FIGHTER_ATTRS   := ["hp", "speed", "damage", "stamina"]
+const SUPPORTER_ATTRS := ["tower_hp", "placement_range", "tower_fire_rate"]
 
 # ── Per-peer state ─────────────────────────────────────────────────────────────
 # All dicts keyed by peer_id (int)
@@ -48,7 +58,8 @@ func register_peer(peer_id: int) -> void:
 	_xp[peer_id]     = 0
 	_level[peer_id]  = 1
 	_points[peer_id] = 0
-	_attrs[peer_id]  = {"hp": 0, "speed": 0, "damage": 0}
+	_attrs[peer_id]  = {"hp": 0, "speed": 0, "damage": 0, "stamina": 0,
+			"tower_hp": 0, "placement_range": 0, "tower_fire_rate": 0}
 
 func clear_peer(peer_id: int) -> void:
 	_xp.erase(peer_id)
@@ -97,14 +108,8 @@ func award_xp(peer_id: int, amount: int) -> void:
 # In MP this RPC is sent client→server; server validates + syncs back.
 @rpc("any_peer", "reliable")
 func request_spend_point(attr: String) -> void:
-	var peer_id: int
-	if multiplayer.has_multiplayer_peer():
-		peer_id = multiplayer.get_remote_sender_id()
-		if peer_id == 0:
-			peer_id = 1
-	else:
-		peer_id = 1
-	_do_spend_point(peer_id, attr)
+	var id: int = multiplayer.get_remote_sender_id()
+	_do_spend_point(id if id != 0 else 1, attr)
 
 func spend_point_local(peer_id: int, attr: String) -> void:
 	_do_spend_point(peer_id, attr)
@@ -114,7 +119,14 @@ func _do_spend_point(peer_id: int, attr: String) -> void:
 		return
 	if _points.get(peer_id, 0) <= 0:
 		return
-	if attr not in ["hp", "speed", "damage"]:
+	if attr not in ["hp", "speed", "damage", "stamina",
+			"tower_hp", "placement_range", "tower_fire_rate"]:
+		return
+	# Role gate: Fighters may not spend Supporter attrs and vice versa
+	var role: String = SkillTree.get_role(peer_id)
+	if role == "Fighter" and attr in SUPPORTER_ATTRS:
+		return
+	if role == "Supporter" and attr in FIGHTER_ATTRS:
 		return
 	var cur: int = _attrs[peer_id].get(attr, 0)
 	if cur >= ATTR_CAP:
@@ -139,6 +151,22 @@ func get_bonus_damage_mult(peer_id: int) -> float:
 	var a: Dictionary = _attrs.get(peer_id, {})
 	return float(a.get("damage", 0)) * DAMAGE_PER_POINT
 
+func get_bonus_stamina(peer_id: int) -> float:
+	var a: Dictionary = _attrs.get(peer_id, {})
+	return float(a.get("stamina", 0)) * STAMINA_PER_POINT
+
+func get_bonus_tower_hp_mult(peer_id: int) -> float:
+	var a: Dictionary = _attrs.get(peer_id, {})
+	return float(a.get("tower_hp", 0)) * TOWER_HP_PER_POINT
+
+func get_bonus_placement_range_mult(peer_id: int) -> float:
+	var a: Dictionary = _attrs.get(peer_id, {})
+	return float(a.get("placement_range", 0)) * PLACEMENT_RANGE_PER_POINT
+
+func get_bonus_tower_fire_rate_mult(peer_id: int) -> float:
+	var a: Dictionary = _attrs.get(peer_id, {})
+	return float(a.get("tower_fire_rate", 0)) * TOWER_FIRE_RATE_PER_POINT
+
 func get_level(peer_id: int) -> int:
 	return _level.get(peer_id, 1)
 
@@ -152,7 +180,8 @@ func get_unspent_points(peer_id: int) -> int:
 	return _points.get(peer_id, 0)
 
 func get_attrs(peer_id: int) -> Dictionary:
-	return _attrs.get(peer_id, {"hp": 0, "speed": 0, "damage": 0}).duplicate()
+	return _attrs.get(peer_id, {"hp": 0, "speed": 0, "damage": 0, "stamina": 0,
+			"tower_hp": 0, "placement_range": 0, "tower_fire_rate": 0}).duplicate()
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
 
@@ -171,7 +200,8 @@ func _sync_level_state_to_peer(peer_id: int) -> void:
 	var xp_val: int = _xp.get(peer_id, 0)
 	var lvl: int    = _level.get(peer_id, 1)
 	var pts: int    = _points.get(peer_id, 0)
-	var a: Dictionary = _attrs.get(peer_id, {"hp": 0, "speed": 0, "damage": 0})
+	var a: Dictionary = _attrs.get(peer_id, {"hp": 0, "speed": 0, "damage": 0, "stamina": 0,
+			"tower_hp": 0, "placement_range": 0, "tower_fire_rate": 0})
 	sync_level_state.rpc_id(peer_id, peer_id, xp_val, lvl, pts, a)
 
 # ── RPCs ───────────────────────────────────────────────────────────────────────

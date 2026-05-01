@@ -113,7 +113,7 @@ func _on_ping_received(world_pos: Vector3, team: int, color: Color = COL_PING) -
 # ── 3D beam ───────────────────────────────────────────────────────────────────
 
 func _spawn_ping_beam(world_pos: Vector3, color: Color = COL_PING) -> void:
-	var scene_root: Node = get_tree().root.get_child(0)
+	var scene_root: Node = VfxUtils.get_scene_root(self)
 
 	# Root node for the whole beam — add to tree first, then set position
 	var beam_node: Node3D = Node3D.new()

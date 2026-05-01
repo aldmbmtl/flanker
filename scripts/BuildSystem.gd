@@ -1,22 +1,23 @@
 extends Node
 
 # ── Placeable definitions ─────────────────────────────────────────────────────
-# Each entry: { cost, scene, attack_range, is_tower, lane_setback, [spacing] }
+# Each entry: { cost, scene, attack_range, is_tower, lane_setback, [spacing], [attack_interval_base] }
 # Towers: spacing is computed in _ready() from attack_range (see SPACING_* constants).
 #   Attacking towers: spacing = attack_range * SPACING_FACTOR (75% of range)
 #   Passive towers (attack_range 0): spacing = SPACING_PASSIVE
 # Non-tower drops: spacing is set explicitly here and left unchanged.
 # "weapon" cost is 0 — actual cost comes from WEAPON_COSTS keyed by subtype.
+# attack_interval_base: mirrors the .tscn export; used for retroactive fire-rate recalculation.
 var PLACEABLE_DEFS := {
-	"cannon":           { "cost": 25, "scene": "res://scenes/towers/Tower.tscn",           "attack_range": 30.0, "is_tower": true,  "lane_setback": true  },
-	"mortar":           { "cost": 35, "scene": "res://scenes/towers/MortarTower.tscn",     "attack_range": 50.0, "is_tower": true,  "lane_setback": true  },
-	"slow":             { "cost": 30, "scene": "res://scenes/towers/SlowTower.tscn",       "attack_range": 18.0, "is_tower": true,  "lane_setback": true  },
-	"machinegun":       { "cost": 40, "scene": "res://scenes/towers/MachineGunTower.tscn", "attack_range": 22.0, "is_tower": true,  "lane_setback": true  },
+	"cannon":           { "cost": 25, "scene": "res://scenes/towers/Tower.tscn",           "attack_range": 30.0, "attack_interval_base": 1.0,  "is_tower": true,  "lane_setback": true  },
+	"mortar":           { "cost": 35, "scene": "res://scenes/towers/MortarTower.tscn",     "attack_range": 50.0, "attack_interval_base": 3.5,  "is_tower": true,  "lane_setback": true  },
+	"slow":             { "cost": 30, "scene": "res://scenes/towers/SlowTower.tscn",       "attack_range": 18.0, "attack_interval_base": 1.0,  "is_tower": true,  "lane_setback": true  },
+	"machinegun":       { "cost": 40, "scene": "res://scenes/towers/MachineGunTower.tscn", "attack_range": 22.0, "attack_interval_base": 0.5,  "is_tower": true,  "lane_setback": true  },
 	"weapon":           { "cost":  0, "scene": "res://scenes/WeaponPickup.tscn",           "spacing":  5.0,      "is_tower": false, "lane_setback": false },
 	"healthpack":       { "cost": 15, "scene": "res://scenes/HealthPackPickup.tscn",       "spacing":  5.0,      "is_tower": false, "lane_setback": false },
 	"healstation":      { "cost": 25, "scene": "res://scenes/HealStation.tscn",            "spacing": 10.0,      "is_tower": false, "lane_setback": false },
 	# ── Launcher towers — one entry per type in LauncherDefs ─────────────────
-	"launcher_missile": { "cost": 50, "scene": "res://scenes/towers/LauncherTower.tscn",  "attack_range":  0.0, "is_tower": true,  "lane_setback": true, "is_launcher": true, "launcher_type": "launcher_missile" },
+	"launcher_missile": { "cost": 50, "scene": "res://scenes/towers/LauncherTower.tscn",  "attack_range":  0.0, "attack_interval_base": 0.0,  "is_tower": true,  "lane_setback": true, "is_launcher": true, "launcher_type": "launcher_missile" },
 }
 
 const WEAPON_COSTS := { "pistol": 10, "rifle": 20, "heavy": 30, "rocket_launcher": 60 }
@@ -45,6 +46,8 @@ func _ready() -> void:
 	for key in PLACEABLE_DEFS:
 		var path: String = PLACEABLE_DEFS[key]["scene"]
 		_loaded_scenes[key] = load(path)
+	# Retroactive fire-rate update when a Supporter spends into tower_fire_rate
+	LevelSystem.attribute_spent.connect(_on_attribute_spent)
 
 # ── Placement validation ──────────────────────────────────────────────────────
 
@@ -54,7 +57,6 @@ func get_item_cost(item_type: String, subtype: String) -> int:
 		base = WEAPON_COSTS.get(subtype, 0)
 		# f_explosive: rocket launcher costs 30 less for an unlocked Fighter
 		if subtype == "rocket_launcher":
-			var discount: int = _get_skill_build_discount(0)  # team 0 as fallback; actual discount checked per-placer
 			base = max(0, base - 30) if _any_team_has_explosive() else base
 	else:
 		var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
@@ -68,15 +70,7 @@ func _any_team_has_explosive() -> bool:
 			return true
 	return false
 
-func _get_skill_build_discount(team: int) -> int:
-	# Sum build_discount passive from all peers on that team
-	var total: int = 0
-	for peer_id in SkillTree.get_all_peers():
-		if SkillTree.get_role(peer_id) == "supporter":
-			total += int(SkillTree.get_passive_bonus(peer_id, "build_discount"))
-	return total
-
-func can_place_item(world_pos: Vector3, team: int, item_type: String) -> bool:
+func can_place_item(world_pos: Vector3, team: int, item_type: String, placer_peer_id: int = -1) -> bool:
 	var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
 	if def.is_empty():
 		return false
@@ -109,12 +103,16 @@ func can_place_item(world_pos: Vector3, team: int, item_type: String) -> bool:
 
 	# Spacing — towers check "towers" group, drops check "supporter_drops" group
 	var spacing: float = def.get("spacing", 5.0)
+	var range_mult: float = 1.0 - LevelSystem.get_bonus_placement_range_mult(placer_peer_id)
 	var group: String = "towers" if def.get("is_tower", false) else "supporter_drops"
 	for node in get_tree().get_nodes_in_group(group):
 		var existing_def: Dictionary = PLACEABLE_DEFS.get(node.get("tower_type") if node.get("tower_type") != null else "", {})
 		var existing_spacing: float = existing_def.get("spacing", 5.0)
-		var effective: float = maxf(spacing, existing_spacing)
-		if world_pos.distance_to(node.global_position) < effective:
+		var effective: float = maxf(spacing, existing_spacing) * range_mult
+		# Floor at SPACING_PASSIVE so towers can never fully overlap
+		effective = maxf(effective, SPACING_PASSIVE)
+		var dist: float = world_pos.distance_to(node.global_position)
+		if dist < effective:
 			return false
 
 	return true
@@ -125,24 +123,24 @@ func can_place(world_pos: Vector3, team: int) -> bool:
 
 # ── Placement execution ───────────────────────────────────────────────────────
 
-func place_item(world_pos: Vector3, team: int, item_type: String, subtype: String) -> String:
+func place_item(world_pos: Vector3, team: int, item_type: String, subtype: String, placer_peer_id: int = -1) -> String:
 	world_pos.x = snappedf(world_pos.x, 2.0)
 	world_pos.z = snappedf(world_pos.z, 2.0)
 
-	if not can_place_item(world_pos, team, item_type):
+	if not can_place_item(world_pos, team, item_type, placer_peer_id):
 		return ""
 
 	var cost: int = get_item_cost(item_type, subtype)
 	if not TeamData.spend_points(team, cost):
 		return ""
 
-	return spawn_item_local(world_pos, team, item_type, subtype)
+	return spawn_item_local(world_pos, team, item_type, subtype, "", placer_peer_id)
 
 # Legacy shim
 func place_tower(world_pos: Vector3, team: int) -> bool:
 	return place_item(world_pos, team, "cannon", "") != ""
 
-func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype: String, forced_name: String = "") -> String:
+func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype: String, forced_name: String = "", placer_peer_id: int = -1) -> String:
 	var scene: PackedScene = _loaded_scenes.get(item_type)
 	if scene == null:
 		scene = load(PLACEABLE_DEFS[item_type]["scene"])
@@ -211,8 +209,12 @@ func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype:
 					node.setup(team, item_type)
 			elif node.has_method("setup"):
 				node.setup(team)
-			# Apply Supporter skill tree tower HP bonuses (server/singleplayer only)
-			_apply_tower_hp_bonuses(node, item_type, team)
+			# Store who placed this tower (for per-placer bonuses)
+			node.set("placer_peer_id", placer_peer_id)
+			# Apply Supporter attribute and skill tree tower HP bonuses (server/singleplayer only)
+			_apply_tower_hp_bonuses(node, item_type, placer_peer_id)
+			# Apply Supporter attribute fire rate bonus
+			_apply_tower_fire_rate_bonus(node, placer_peer_id)
 
 	# Clear nearby trees for all placements
 	var tree_placer: Node = main.get_node_or_null("World/TreePlacer")
@@ -230,16 +232,10 @@ func spawn_tower_local(world_pos: Vector3, team: int) -> void:
 func get_tower_cost() -> int:
 	return TOWER_COST
 
-func _apply_tower_hp_bonuses(node: Node, item_type: String, team: int) -> void:
-	# Sum tower_hp_bonus and barrier_hp_mult from all Supporter peers on this team
-	var hp_bonus_pct: float = 0.0
+func _apply_tower_hp_bonuses(node: Node, item_type: String, placer_peer_id: int) -> void:
+	# Attr bonus: from the placing Supporter's tower_hp attribute
+	var hp_bonus_pct: float = LevelSystem.get_bonus_tower_hp_mult(placer_peer_id)
 	var barrier_mult: float = 1.0
-	for peer_id in SkillTree.get_all_peers():
-		if SkillTree.get_role(peer_id) != "supporter":
-			continue
-		hp_bonus_pct += SkillTree.get_passive_bonus(peer_id, "tower_hp_bonus")
-		if item_type == "barrier":
-			barrier_mult = maxf(barrier_mult, 1.0 + SkillTree.get_passive_bonus(peer_id, "barrier_hp_mult"))
 	if hp_bonus_pct == 0.0 and barrier_mult == 1.0:
 		return
 	var current_hp: float = node.get("_health") if node.get("_health") != null else 0.0
@@ -248,3 +244,27 @@ func _apply_tower_hp_bonuses(node: Node, item_type: String, team: int) -> void:
 	var new_hp: float = current_hp * (1.0 + hp_bonus_pct) * barrier_mult
 	node.set("_health", new_hp)
 	node.set("max_health", new_hp)
+
+func _apply_tower_fire_rate_bonus(node: Node, placer_peer_id: int) -> void:
+	var mult: float = LevelSystem.get_bonus_tower_fire_rate_mult(placer_peer_id)
+	if mult == 0.0:
+		return
+	var interval: float = node.get("attack_interval") if node.get("attack_interval") != null else 0.0
+	if interval <= 0.0:
+		return  # passive tower — no attack timer
+	node.set("attack_interval", interval * (1.0 - mult))
+
+# Called when any peer spends an attribute point.
+# When a Supporter spends into tower_fire_rate, retroactively update all towers they placed.
+func _on_attribute_spent(peer_id: int, attr: String, _new_attrs: Dictionary) -> void:
+	if attr != "tower_fire_rate":
+		return
+	var mult: float = LevelSystem.get_bonus_tower_fire_rate_mult(peer_id)
+	for tower in get_tree().get_nodes_in_group("towers"):
+		if tower.get("placer_peer_id") != peer_id:
+			continue
+		var tower_type: String = tower.get("tower_type") if tower.get("tower_type") != null else ""
+		var base_interval: float = PLACEABLE_DEFS.get(tower_type, {}).get("attack_interval_base", 0.0)
+		if base_interval <= 0.0:
+			continue
+		tower.set("attack_interval", base_interval * (1.0 - mult))
