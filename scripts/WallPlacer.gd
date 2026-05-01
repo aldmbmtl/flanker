@@ -2,20 +2,40 @@ extends Node3D
 
 signal done
 
-# Preload all asset scenes so no synchronous disk I/O occurs during placement.
-const WALL_SCENE_PATHS: Array[PackedScene] = [
-	preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/wall.glb"),
-	preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/wall-wood.glb"),
-	preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/wall-block.glb"),
-	preload("res://assets/kenney_fantasy-town-kit/Models/GLB format/wall-corner.glb"),
-	preload("res://assets/kenney_blaster-kit/Models/GLB format/crate-medium.glb"),
-	preload("res://assets/kenney_blaster-kit/Models/GLB format/crate-small.glb"),
-	preload("res://assets/kenney_blaster-kit/Models/GLB format/crate-wide.glb"),
+# Rock assets from kenney_pirate-kit — placed in jungle clearings with collision.
+const ROCK_SCENE_PATHS: Array[PackedScene] = [
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-a.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-b.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-c.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-sand-a.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-sand-b.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-sand-c.glb"),
 ]
+
+# Grass/bush assets from kenney_pirate-kit — scattered on the green biome side only,
+# purely decorative (no collision).
+const GRASS_SCENE_PATHS: Array[PackedScene] = [
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/grass.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/grass-patch.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/grass-plant.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/patch-grass.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/patch-grass-foliage.glb"),
+]
+
+# Sand patch assets from kenney_pirate-kit — scattered on the desert biome side only,
+# purely decorative (no collision). Uses the sandy rock variants as desert ground scatter.
+const SAND_SCENE_PATHS: Array[PackedScene] = [
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-sand-a.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-sand-b.glb"),
+	preload("res://assets/kenney_pirate-kit/Models/GLB format/rocks-sand-c.glb"),
+]
+
+const SAND_COUNT := 375
 
 const GRID_SIZE := 200
 const GRID_STEPS := 200
 const CLEARING_COUNT := 20
+const GRASS_COUNT := 750  # target number of grass scatter placements across the jungle
 
 const BASE_CLEAR_RADIUS := 12.0
 const BLUE_BASE_CENTER := Vector3(0.0, 0.0, 82.0)
@@ -74,16 +94,15 @@ func _generate_random_clearings() -> void:
 	print("WallPlacer: generated ", _random_clearing_centers.size(), " random clearings")
 
 func _place_walls() -> void:
-	if WALL_SCENE_PATHS.is_empty():
-		print("WallPlacer: no wall scenes found!")
+	if ROCK_SCENE_PATHS.is_empty():
+		print("WallPlacer: no rock scenes found!")
 		generation_done = true
 		done.emit()
 		return
 
-	var placed_walls: int = 0
-	var placed_crates: int = 0
+	var placed_rocks: int = 0
 
-	# Place walls in random clearings — yield every clearing so the loading
+	# Place rocks in random clearings — yield every clearing so the loading
 	# screen remains responsive.
 	for i in range(_random_clearing_centers.size()):
 		var center := _random_clearing_centers[i]
@@ -95,99 +114,184 @@ func _place_walls() -> void:
 		if center.distance_to(Vector2(RED_BASE_CENTER.x, RED_BASE_CENTER.z)) < BASE_CLEAR_RADIUS + radius:
 			continue
 
-		# Place walls in this clearing with some chance
-		if randf() < WALL_DENSITY:
+		# Place 1 or 2 rocks in this clearing with some chance
+		var rock_count: int = 1 if randf() < WALL_DENSITY else 0
+		if randf() < 0.4:
+			rock_count += 1  # 40% chance for an extra rock
+
+		for _r in range(rock_count):
 			var angle: float = randf() * TAU
 			var distance: float = randf_range(0.3, 0.7) * radius
-			var wall_pos := Vector3(center.x + cos(angle) * distance, 0.0, center.y + sin(angle) * distance)
+			var rock_pos := Vector3(center.x + cos(angle) * distance, 0.0, center.y + sin(angle) * distance)
 
-			# Raycast to find terrain height
-			var terrain_y: float = _get_terrain_height(wall_pos)
-			wall_pos.y = terrain_y + 0.5  # Slightly above ground
+			var terrain_y: float = _get_terrain_height(rock_pos)
+			rock_pos.y = terrain_y + 0.5
 
-			_place_wall(wall_pos)
-			placed_walls += 1
-		# Sometimes place crates instead
-		else:
-			if randf() < 0.4:  # 40% chance to place a crate
-				var angle: float = randf() * TAU
-				var distance: float = randf_range(0.3, 0.7) * radius
-				var crate_pos := Vector3(center.x + cos(angle) * distance, 0.0, center.y + sin(angle) * distance)
-
-				# Raycast to find terrain height
-				var terrain_y: float = _get_terrain_height(crate_pos)
-				crate_pos.y = terrain_y + 0.5
-
-				_place_crate(crate_pos)
-				placed_crates += 1
+			_place_rock(rock_pos)
+			placed_rocks += 1
 
 		# Yield every clearing to keep the loading screen responsive
 		await get_tree().process_frame
 
-	print("WallPlacer: placed ", placed_walls, " walls and ", placed_crates, " crates")
+	await _scatter_grass()
+	await _scatter_sand()
+
+	print("WallPlacer: placed ", placed_rocks, " rocks, ", GRASS_COUNT, " grass patches, and ", SAND_COUNT, " sand patches")
 	LoadingState.report("Placing cover objects...", 55.0)
 	generation_done = true
 	done.emit()
 
-func _place_wall(pos: Vector3) -> void:
-	var wall_scene: PackedScene = WALL_SCENE_PATHS[randi() % WALL_SCENE_PATHS.size()]
-	var wall: Node3D = wall_scene.instantiate()
-	wall.position = pos
-	add_child(wall)
+func _place_rock(pos: Vector3) -> void:
+	var rock_scene: PackedScene = ROCK_SCENE_PATHS[randi() % ROCK_SCENE_PATHS.size()]
+	var rock: Node3D = rock_scene.instantiate()
+	rock.position = pos
+	add_child(rock)
 
-	# Rotate wall randomly
 	var angle: float = randf() * TAU
-	wall.rotate_y(angle)
+	rock.rotate_y(angle)
 
-	# Scale the wall
-	var scale: float = randf_range(WALL_SCALE_MIN, WALL_SCALE_MAX)
-	wall.scale = Vector3(scale, scale, scale)
+	var scale: float = randf_range(1.0, 2.5)
+	rock.scale = Vector3(scale, scale, scale)
 
-	# Add simple collision to this wall
+	# Collision box sized to rock geometry (~3.6-5.1 wide/deep, ~2.3-3.7 tall at scale 1).
+	# 3.2 x/z gives a snug fit without the large invisible margin of 4.0.
+	# Layer 2 so CharacterBody3D players (collision_mask=7 = layers 1+2+4) are blocked.
 	var col_shape: BoxShape3D = BoxShape3D.new()
-	col_shape.size = Vector3(2.0 * scale, 3.0 * scale, 0.5)
+	col_shape.size = Vector3(3.2 * scale, 2.0 * scale, 3.2 * scale)
 
 	var col_node: CollisionShape3D = CollisionShape3D.new()
 	col_node.shape = col_shape
-	col_node.position = Vector3(0.0, 1.5 * scale, 0.0)
+	col_node.position = Vector3(0.0, 1.0 * scale, 0.0)
 
 	var collision: StaticBody3D = StaticBody3D.new()
 	collision.add_child(col_node)
 	collision.position = pos
-	collision.collision_layer = 4  # layer 3 — passable by rockets/missiles
+	collision.collision_layer = 2
 	collision.collision_mask = 1
 
 	add_child(collision)
 
-func _place_crate(pos: Vector3) -> void:
-	var crate_scene: PackedScene = WALL_SCENE_PATHS[randi() % WALL_SCENE_PATHS.size()]
-	var crate: Node3D = crate_scene.instantiate()
-	crate.position = pos
-	add_child(crate)
+func _scatter_grass() -> void:
+	if GRASS_SCENE_PATHS.is_empty():
+		return
 
-	# Rotate crate randomly
-	var angle: float = randf() * TAU
-	crate.rotate_y(angle)
+	# Grass only appears on the green biome side, past the blend zone (±10 units).
+	var grass_left: bool = (GameSync.game_seed % 2 == 0)
+	var grass_sign: float = -1.0 if grass_left else 1.0  # green side is x<0 or x>0
 
-	# Scale the crate
-	var scale: float = randf_range(1.5, 2.0)
-	crate.scale = Vector3(scale, scale, scale)
+	var half_size: float = GRID_SIZE / 2.0
+	var edge_margin: float = 20.0
+	var placed: int = 0
+	var attempts: int = 0
+	var max_attempts: int = GRASS_COUNT * 3
 
-	# Add simple collision to this crate
-	var col_shape: BoxShape3D = BoxShape3D.new()
-	col_shape.size = Vector3(1.5 * scale, 1.5 * scale, 1.5 * scale)
+	while placed < GRASS_COUNT and attempts < max_attempts:
+		attempts += 1
+		var wx: float = randf_range(-half_size + edge_margin, half_size - edge_margin)
+		var wz: float = randf_range(-half_size + edge_margin, half_size - edge_margin)
 
-	var col_node: CollisionShape3D = CollisionShape3D.new()
-	col_node.shape = col_shape
-	col_node.position = Vector3(0.0, 0.75 * scale, 0.0)
+		# Skip if not past the biome blend zone on the green side
+		if wx * grass_sign <= 10.0:
+			continue
 
-	var collision: StaticBody3D = StaticBody3D.new()
-	collision.add_child(col_node)
-	collision.position = pos
-	collision.collision_layer = 4  # layer 3 — passable by rockets/missiles
-	collision.collision_mask = 1
+		var pos2d := Vector2(wx, wz)
 
-	add_child(collision)
+		if _is_on_lane_area(pos2d) or _is_on_secret_path(pos2d) or _is_in_base_area(pos2d):
+			continue
+
+		var terrain_result: Dictionary = _query_terrain(Vector3(wx, 0.0, wz))
+
+		# Skip hills and plateau areas — anything above 3.5 units is on or
+		# approaching a plateau (base terrain max is 4.0, plateaus top at 6.0).
+		if terrain_result.get("y", 0.0) >= 3.5:
+			continue
+
+		var grass_pos := Vector3(wx, terrain_result.get("y", 0.0), wz)
+
+		var grass_scene: PackedScene = GRASS_SCENE_PATHS[randi() % GRASS_SCENE_PATHS.size()]
+		var grass: Node3D = grass_scene.instantiate()
+		grass.position = grass_pos
+		grass.rotate_y(randf() * TAU)
+		var scale: float = randf_range(0.8, 1.8)
+		grass.scale = Vector3(scale, scale, scale)
+		add_child(grass)
+
+		placed += 1
+
+		# Yield every 20 placements to keep the loading screen responsive
+		if placed % 20 == 0:
+			await get_tree().process_frame
+
+func _scatter_sand() -> void:
+	if SAND_SCENE_PATHS.is_empty():
+		return
+
+	# Sand only appears on the desert biome side, past the blend zone (±10 units).
+	var grass_left: bool = (GameSync.game_seed % 2 == 0)
+	var desert_sign: float = 1.0 if grass_left else -1.0  # desert side is x>0 or x<0
+
+	var half_size: float = GRID_SIZE / 2.0
+	var edge_margin: float = 20.0
+	var placed: int = 0
+	var attempts: int = 0
+	var max_attempts: int = SAND_COUNT * 3
+
+	while placed < SAND_COUNT and attempts < max_attempts:
+		attempts += 1
+		var wx: float = randf_range(-half_size + edge_margin, half_size - edge_margin)
+		var wz: float = randf_range(-half_size + edge_margin, half_size - edge_margin)
+
+		# Skip if not past the biome blend zone on the desert side
+		if wx * desert_sign <= 10.0:
+			continue
+
+		var pos2d := Vector2(wx, wz)
+
+		if _is_on_lane_area(pos2d) or _is_on_secret_path(pos2d) or _is_in_base_area(pos2d):
+			continue
+
+		var terrain_result: Dictionary = _query_terrain(Vector3(wx, 0.0, wz))
+
+		# Skip hills and plateau areas
+		if terrain_result.get("y", 0.0) >= 3.5:
+			continue
+
+		var sand_pos := Vector3(wx, terrain_result.get("y", 0.0), wz)
+
+		var sand_scene: PackedScene = SAND_SCENE_PATHS[randi() % SAND_SCENE_PATHS.size()]
+		var sand: Node3D = sand_scene.instantiate()
+		sand.position = sand_pos
+		sand.rotate_y(randf() * TAU)
+		var scale: float = randf_range(0.8, 1.8)
+		sand.scale = Vector3(scale, scale, scale)
+		add_child(sand)
+
+		placed += 1
+
+		# Yield every 20 placements to keep the loading screen responsive
+		if placed % 20 == 0:
+			await get_tree().process_frame
+
+func _query_terrain(pos: Vector3) -> Dictionary:
+	if terrain_body == null:
+		return {"y": 0.0, "normal": Vector3.UP}
+
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if space == null:
+		return {"y": 0.0, "normal": Vector3.UP}
+
+	var from: Vector3 = Vector3(pos.x, 50.0, pos.z)
+	var to: Vector3 = Vector3(pos.x, -10.0, pos.z)
+
+	var query := PhysicsRayQueryParameters3D.create(from, to)
+	query.collide_with_bodies = true
+	query.collision_mask = 1
+
+	var result: Dictionary = space.intersect_ray(query)
+	if result.is_empty():
+		return {"y": 0.0, "normal": Vector3.UP}
+
+	return {"y": result.position.y, "normal": result.normal}
 
 func _get_terrain_height(pos: Vector3) -> float:
 	if terrain_body == null:

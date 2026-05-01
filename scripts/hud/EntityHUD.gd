@@ -19,6 +19,8 @@ const BAR_Y_OFFSET  := -14.0   # pixels above the projected tower position
 const CIRCLE_W      := 52.0    # circle diameter in pixels
 const CIRCLE_H      := 52.0    # equal to CIRCLE_W for a true circle
 const CIRCLE_THICK  := 2.5     # outline stroke width
+const NAME_FONT_SIZE := 12      # px — name label above circle
+const NAME_Y_OFFSET  := 10.0   # extra gap between top of circle and name baseline
 
 const COL_BAR_BG    := Color(0.1, 0.1, 0.1, 0.75)
 const COL_HP_HIGH   := Color(0.18, 0.85, 0.22, 0.90)
@@ -111,7 +113,7 @@ func _draw_tower_bars() -> void:
 # ── Player ground circles ─────────────────────────────────────────────────────
 
 func _draw_player_circles() -> void:
-	# Local FPS player (Fighter role only)
+	# Local FPS player (Fighter role only) — no name label for own circle
 	var local_players: Array = get_tree().get_nodes_in_group("player")
 	for p in local_players:
 		if not is_instance_valid(p):
@@ -121,9 +123,9 @@ func _draw_player_circles() -> void:
 			p_team = p.player_team
 		if p_team != _player_team and not _is_revealed(p.global_position):
 			continue
-		_draw_circle_for_pos(p.global_position, p_team)
+		_draw_circle_for_pos(p.global_position, p_team, "")
 
-	# Remote player ghosts (multiplayer only)
+	# Remote player ghosts (multiplayer only) — show name above circle
 	var ghosts: Array = get_tree().get_nodes_in_group("remote_players")
 	for ghost in ghosts:
 		if not is_instance_valid(ghost):
@@ -140,7 +142,8 @@ func _draw_player_circles() -> void:
 				g_team = info["team"]
 		if g_team != _player_team and not _is_revealed(ghost.global_position):
 			continue
-		_draw_circle_for_pos(ghost.global_position, g_team)
+		var g_name: String = LobbyManager.players.get(peer_id, {}).get("name", "")
+		_draw_circle_for_pos(ghost.global_position, g_team, g_name)
 
 # ── Fog visibility check ──────────────────────────────────────────────────────
 
@@ -194,7 +197,7 @@ func _is_revealed(world_pos: Vector3) -> bool:
 
 # ── Draw ellipse ──────────────────────────────────────────────────────────────
 
-func _draw_circle_for_pos(world_pos: Vector3, entity_team: int) -> void:
+func _draw_circle_for_pos(world_pos: Vector3, entity_team: int, label: String = "") -> void:
 	var foot: Vector3 = world_pos + Vector3(0.0, 0.15, 0.0)
 	if _camera.is_position_behind(foot):
 		return
@@ -223,3 +226,13 @@ func _draw_circle_for_pos(world_pos: Vector3, entity_team: int) -> void:
 		)
 		draw_line(prev, next, col, CIRCLE_THICK, true)
 		prev = next
+
+	# Draw name label above the circle
+	if label != "":
+		var font: Font = ThemeDB.fallback_font
+		var text_size: Vector2 = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, NAME_FONT_SIZE)
+		var label_pos: Vector2 = Vector2(
+			screen_pos.x - text_size.x * 0.5,
+			screen_pos.y - CIRCLE_H * 0.5 - NAME_Y_OFFSET
+		)
+		draw_string(font, label_pos, label, HORIZONTAL_ALIGNMENT_LEFT, -1, NAME_FONT_SIZE, col)

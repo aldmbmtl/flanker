@@ -20,11 +20,6 @@ const PLATEAU_COUNT  := 5
 const PLATEAU_HEIGHT := 6.0
 const PLATEAU_BLEND  := 4.0
 
-# Peaks
-const PEAK_COUNT  := 5
-const PEAK_HEIGHT := 22.0
-const SNOW_LINE   := 15.0
-
 # Biome
 const BIOME_BLEND_X := 10.0
 
@@ -57,18 +52,17 @@ func _ready() -> void:
 	var secret_paths: Array = _gen_secret_paths(seed_val)
 	secret_paths_cache = secret_paths
 	var plateaus: Array     = _gen_plateaus(seed_val, lane_polylines)
-	var peaks: Array        = _gen_peaks(seed_val, lane_polylines)
 
 	LoadingState.report("Building terrain...", 10.0)
 
 	# Run the heavy CPU math on a background thread.
 	# All data accessed inside the thread is plain Arrays/primitives — no Node calls.
 	_thread = Thread.new()
-	_thread.start(_build_terrain_data.bind(seed_val, lane_polylines, secret_paths, plateaus, peaks))
+	_thread.start(_build_terrain_data.bind(seed_val, lane_polylines, secret_paths, plateaus))
 
 
 func _build_terrain_data(seed_val: int, lane_polylines: Array, secret_paths: Array,
-		plateaus: Array, peaks: Array) -> void:
+		plateaus: Array) -> void:
 	var noise := FastNoiseLite.new()
 	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 	noise.seed = seed_val
@@ -95,12 +89,8 @@ func _build_terrain_data(seed_val: int, lane_polylines: Array, secret_paths: Arr
 	heights.resize(verts_per_side * verts_per_side)
 	var plateau_weights: Array = []
 	plateau_weights.resize(verts_per_side * verts_per_side)
-	var peak_weights: Array = []
-	peak_weights.resize(verts_per_side * verts_per_side)
 	var lane_blends: Array = []
 	lane_blends.resize(verts_per_side * verts_per_side)
-	var snow_ts: Array = []
-	snow_ts.resize(verts_per_side * verts_per_side)
 
 	for zi in range(verts_per_side):
 		for xi in range(verts_per_side):
@@ -161,22 +151,9 @@ func _build_terrain_data(seed_val: int, lane_polylines: Array, secret_paths: Arr
 					var target_h: float = best_plat[4]
 					h = lerp(h, max(h, target_h), plat_w)
 
-			# Peak lift
-			var pk_w := 0.0
-			if total_flat < 0.1:
-				for peak in peaks:
-					var pw: float = _peak_weight(Vector2(wx, wz), peak)
-					if pw > pk_w:
-						pk_w = pw
-				if pk_w > 0.0:
-					var peak_h: float = PEAK_HEIGHT * pow(pk_w, 0.6)
-					h = max(h, peak_h)
-
 			heights[zi * verts_per_side + xi] = h
 			plateau_weights[zi * verts_per_side + xi] = plat_w
-			peak_weights[zi * verts_per_side + xi] = pk_w
 			lane_blends[zi * verts_per_side + xi] = lane_blend
-			snow_ts[zi * verts_per_side + xi] = smoothstep(SNOW_LINE, PEAK_HEIGHT, h)
 
 	# ── Build ArrayMesh arrays ─────────────────────────────────────────────────
 	var verts   := PackedVector3Array()
@@ -191,7 +168,6 @@ func _build_terrain_data(seed_val: int, lane_polylines: Array, secret_paths: Arr
 			var wz := -half + zi * step
 			var h: float  = heights[zi * verts_per_side + xi]
 			var plat_w: float = plateau_weights[zi * verts_per_side + xi]
-			var pk_w: float   = peak_weights[zi * verts_per_side + xi]
 
 			verts.append(Vector3(wx, h, wz))
 			uvs.append(Vector2(float(xi) / GRID_STEPS, float(zi) / GRID_STEPS))
@@ -206,13 +182,6 @@ func _build_terrain_data(seed_val: int, lane_polylines: Array, secret_paths: Arr
 
 			# Step 2 — rocky plateau overlay
 			base_col = base_col.lerp(Color(0.52, 0.46, 0.38), plat_w)
-
-			# Step 3 — peak rocky slope
-			base_col = base_col.lerp(Color(0.46, 0.42, 0.40), pk_w)
-
-			# Step 4 — snow cap
-			var snow_t: float = snow_ts[zi * verts_per_side + xi]
-			base_col = base_col.lerp(Color(0.96, 0.97, 1.0), snow_t)
 
 			colors.append(base_col)
 			normals.append(Vector3.UP)
@@ -249,8 +218,7 @@ func _build_terrain_data(seed_val: int, lane_polylines: Array, secret_paths: Arr
 			var wx := -half + xi * step
 			var wz := -half + zi * step
 			var lb: float = lane_blends[idx]
-			var st: float = snow_ts[idx]
-			var bump_str: float = lb * (1.0 - st) * 0.6
+			var bump_str: float = lb * 0.6
 			if bump_str < 0.001:
 				continue
 			var eps: float = step
@@ -267,14 +235,14 @@ func _build_terrain_data(seed_val: int, lane_polylines: Array, secret_paths: Arr
 
 	# Hand results back to main thread
 	call_deferred("_apply_terrain_data", verts, normals, colors, uvs, indices,
-			hmap_data, verts_per_side, step, seed_val, plateaus.size(), peaks.size(),
+			hmap_data, verts_per_side, step, seed_val, plateaus.size(),
 			secret_paths.size(), grass_left)
 
 
 func _apply_terrain_data(verts: PackedVector3Array, normals: PackedVector3Array,
 		colors: PackedColorArray, uvs: PackedVector2Array, indices: PackedInt32Array,
 		hmap_data: PackedFloat32Array, verts_per_side: int, step: float,
-		seed_val: int, plateau_count: int, peak_count: int,
+		seed_val: int, plateau_count: int,
 		secret_path_count: int, grass_left: bool) -> void:
 
 	# Must be called on the main thread — joins the worker thread first.
@@ -315,8 +283,8 @@ func _apply_terrain_data(verts: PackedVector3Array, normals: PackedVector3Array,
 		col_shape.scale = Vector3(step, 1.0, step)
 		add_child(col_shape)
 
-	print("Terrain: verts=%d seed=%d plateaus=%d peaks=%d secret_paths=%d grass_left=%s" \
-		% [verts.size(), seed_val, plateau_count, peak_count, secret_path_count, str(grass_left)])
+	print("Terrain: verts=%d seed=%d plateaus=%d secret_paths=%d grass_left=%s" \
+		% [verts.size(), seed_val, plateau_count, secret_path_count, str(grass_left)])
 	LoadingState.report("Building terrain...", 25.0)
 	generation_done = true
 	done.emit()
@@ -366,44 +334,6 @@ func _gen_plateaus(seed_val: int, lane_polylines: Array) -> Array:
 		if overlap: continue
 		plateaus.append([cx, cz, rng.randf_range(10.0, 18.0), rng.randf_range(8.0, 14.0), rng.randf_range(5.0, 7.0)])
 	return plateaus
-
-# ── Peak generation ────────────────────────────────────────────────────────────
-func _gen_peaks(seed_val: int, lane_polylines: Array) -> Array:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed_val + 77777
-	var peaks: Array = []
-	var attempts := 0
-	while peaks.size() < PEAK_COUNT and attempts < 200:
-		attempts += 1
-		var side := 1.0 if rng.randf() > 0.5 else -1.0
-		var cx := side * rng.randf_range(20.0, 78.0)
-		var cz := rng.randf_range(-68.0, 68.0)
-		var too_close := false
-		for poly in lane_polylines:
-			if LaneData.dist_to_polyline(Vector2(cx, cz), poly) < 14.0:
-				too_close = true; break
-		if too_close: continue
-		var overlap := false
-		for p in peaks:
-			var dx: float = cx - p[0]; var dz: float = cz - p[1]
-			if sqrt(dx*dx + dz*dz) < 25.0:
-				overlap = true; break
-		if overlap: continue
-		# Also keep peaks away from plateaus — checked later via height logic
-		peaks.append([cx, cz, rng.randf_range(8.0, 14.0), rng.randf_range(7.0, 12.0)])
-	return peaks
-
-# Returns 0..1 weight for peak influence; steep falloff for sharp spires
-func _peak_weight(pos: Vector2, peak: Array) -> float:
-	var cx: float = peak[0]; var cz: float = peak[1]
-	var rx: float = peak[2]; var rz: float = peak[3]
-	var dx := (pos.x - cx) / rx
-	var dz := (pos.y - cz) / rz
-	var dist: float = sqrt(dx*dx + dz*dz)
-	if dist >= 1.0:
-		return 0.0
-	# Exponential-ish falloff: steep sides, sharp peak
-	return pow(1.0 - dist, 1.8)
 
 func _plateau_weight(pos: Vector2, plat: Array) -> float:
 	var cx: float = plat[0]; var cz: float = plat[1]
@@ -456,7 +386,6 @@ func bake_minimap_image(img_size: int) -> Image:
 	for i in range(3):
 		lane_polylines.append(LaneData.get_lane_points(i))
 	var plateaus: Array = _gen_plateaus(seed_val, lane_polylines)
-	var peaks: Array    = _gen_peaks(seed_val, lane_polylines)
 
 	var img := Image.create(img_size, img_size, false, Image.FORMAT_RGBA8)
 	for yi in range(img_size):
@@ -505,17 +434,6 @@ func bake_minimap_image(img_size: int) -> Image:
 					var target_h: float = PLATEAU_HEIGHT
 					h = lerp(h, max(h, target_h), plat_w)
 
-			# Peak lift
-			var pk_w: float = 0.0
-			if total_flat < 0.1:
-				for peak in peaks:
-					var pw: float = _peak_weight(Vector2(wx, wz), peak)
-					if pw > pk_w:
-						pk_w = pw
-				if pk_w > 0.0:
-					var peak_h: float = PEAK_HEIGHT * pow(pk_w, 0.6)
-					h = max(h, peak_h)
-
 			# Biome color
 			var x_norm: float = clamp(wx / BIOME_BLEND_X, -1.0, 1.0)
 			var biome_t: float = smoothstep(-1.0, 1.0, x_norm if grass_left else -x_norm)
@@ -524,9 +442,6 @@ func bake_minimap_image(img_size: int) -> Image:
 			var desert_col: Color = Color(0.62, 0.48, 0.22).lerp(Color(0.52, 0.36, 0.14), ht)
 			var base_col: Color = grass_col.lerp(desert_col, biome_t)
 			base_col = base_col.lerp(Color(0.52, 0.46, 0.38), plat_w)
-			base_col = base_col.lerp(Color(0.46, 0.42, 0.40), pk_w)
-			var snow_t: float = smoothstep(SNOW_LINE, PEAK_HEIGHT, h)
-			base_col = base_col.lerp(Color(0.96, 0.97, 1.0), snow_t)
 
 			# Lane path tint (dirt colour, slightly brightened for minimap legibility)
 			if lane_blend < 1.0:
