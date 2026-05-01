@@ -15,6 +15,9 @@ var _lobby: Node
 var _join_overlay: Control
 var _host_overlay: Control
 var _graphics_panel: Control
+var _host_btn: Button
+var _join_btn: Button
+var _name_edit: LineEdit
 
 # Shared style constants
 const BG_COLOR        := Color(0.04, 0.05, 0.06, 0.92)
@@ -25,6 +28,14 @@ const LABEL_COLOR     := Color(0.55, 0.45, 0.35, 1.0)
 func _ready() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	_build_dialogs()
+	# Cache button and name field references from the .tscn
+	_host_btn  = $MenuPanel/VBox/HostButton
+	_join_btn  = $MenuPanel/VBox/JoinButton
+	_name_edit = $MenuPanel/VBox/NameEdit
+	# Pre-fill saved name and apply initial button state
+	_name_edit.text = GameSettings.player_name
+	_update_name_buttons()
+	_name_edit.text_changed.connect(_on_name_changed)
 	# Only spawn the background simulation when we are the root scene.
 	# When Main adds us as a child (singleplayer flow) it calls _on_start_game()
 	# immediately — spawning a world here would overwrite GameSync.game_seed and
@@ -33,6 +44,16 @@ func _ready() -> void:
 		_spawn_menu_world()
 	_graphics_panel = $SettingsPanelInstance
 	_graphics_panel.back_pressed.connect(_on_graphics_settings_back)
+
+func _on_name_changed(new_text: String) -> void:
+	GameSettings.player_name = new_text.strip_edges()
+	GameSettings.save_settings()
+	_update_name_buttons()
+
+func _update_name_buttons() -> void:
+	var has_name: bool = _name_edit.text.strip_edges().length() > 0
+	_host_btn.disabled = not has_name
+	_join_btn.disabled = not has_name
 
 func _build_dialogs() -> void:
 	var ui_theme: Theme = load("res://assets/ui_theme.tres")
@@ -292,7 +313,7 @@ func _on_host_confirmed(overlay: Control) -> void:
 	_reset_autoloads_for_new_game()
 	overlay.visible = false
 	# Host registers itself directly — no RPC needed, peer id 1 is always the server
-	LobbyManager.register_player_local(1, "Host")
+	LobbyManager.register_player_local(1, GameSettings.player_name)
 	_show_lobby()
 
 func _on_join_confirmed(overlay: Control) -> void:
@@ -323,8 +344,8 @@ func _on_join_confirmed(overlay: Control) -> void:
 	NetworkManager.connection_failed.connect(_on_connection_failed, CONNECT_ONE_SHOT)
 
 func _on_connected_to_lobby() -> void:
-	# Send a default name to the server — server uses get_remote_sender_id() to know who we are
-	LobbyManager.register_player.rpc_id(1, "Player")
+	# Send the player's chosen name to the server
+	LobbyManager.register_player.rpc_id(1, GameSettings.player_name)
 	_show_lobby()
 
 func _on_connection_failed() -> void:

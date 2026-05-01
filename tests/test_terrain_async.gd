@@ -31,7 +31,7 @@ class FastTerrain:
 	# Replace the full thread payload with a no-op that immediately calls
 	# _apply_terrain_data with empty arrays so the done path runs.
 	func _build_terrain_data(_seed_val: int, _lane_polylines: Array,
-			_secret_paths: Array, _plateaus: Array, _peaks: Array) -> void:
+			_secret_paths: Array, _plateaus: Array) -> void:
 		var verts_per_side: int = GRID_STEPS + 1
 		var step: float = float(GRID_SIZE) / float(GRID_STEPS)
 		# Pass empty-but-valid arrays so _apply_terrain_data doesn't crash.
@@ -40,7 +40,7 @@ class FastTerrain:
 			PackedColorArray(),   PackedVector2Array(),
 			PackedInt32Array(),   PackedFloat32Array(),
 			verts_per_side, step,
-			1, 0, 0, 0, true)
+			1, 0, 0, true)
 
 # Minimal TreePlacer subclass that skips the grid scan — just emits done.
 class FastTreePlacer:

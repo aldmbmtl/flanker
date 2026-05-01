@@ -70,8 +70,22 @@ theme_override_colors/font_color = Color(0.55, 0.45, 0.35, 1)
 theme_override_font_sizes/font_size = 13
 
 [node name="Spacer1" type="Control" parent="MenuPanel/VBox"]
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 16)
 layout_mode = 2
+
+[node name="NameLabel" type="Label" parent="MenuPanel/VBox"]
+layout_mode = 2
+text = "YOUR NAME"
+horizontal_alignment = 0
+theme_override_colors/font_color = Color(0.55, 0.45, 0.35, 1)
+theme_override_font_sizes/font_size = 13
+
+[node name="NameEdit" type="LineEdit" parent="MenuPanel/VBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(260, 38)
+theme = ExtResource("4")
+placeholder_text = "Enter your name..."
+max_length = 24
 
 [node name="Spacer2" type="Control" parent="MenuPanel/VBox"]
 custom_minimum_size = Vector2(0, 8)
