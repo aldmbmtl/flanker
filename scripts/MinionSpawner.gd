@@ -3,7 +3,7 @@ extends Node
 const MINION_SCENE := "res://scenes/minions/Minion.tscn"
 const WAVE_INTERVAL := 20.0
 const MAX_WAVE_SIZE := 6
-const MINION_STAGGER := 0.5  # seconds between each minion in a wave
+const MINION_STAGGER := 0.0  # seconds between each minion in a wave
 const SYNC_INTERVAL := 3     # physics frames between position broadcasts
 
 var wave_number := 0

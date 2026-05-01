@@ -219,6 +219,136 @@ text = "+"
 theme_override_font_sizes/font_size = 14
 theme_override_colors/font_color = Color(0.85, 0.75, 0.1, 1.0)
 
+; ── Fighter-only rows (hidden for Supporter) ────────────────────────────────
+[node name="StaminaRow" type="HBoxContainer" parent="Panel/HSplit/LeftPanel/VBox"]
+theme_override_constants/separation = 6
+visible = false
+
+[node name="StaminaLabel" type="Label" parent="Panel/HSplit/LeftPanel/VBox/StaminaRow"]
+custom_minimum_size = Vector2(54, 0)
+text = "Stamina"
+theme_override_font_sizes/font_size = 14
+vertical_alignment = 1
+
+[node name="StaminaBar" type="ProgressBar" parent="Panel/HSplit/LeftPanel/VBox/StaminaRow"]
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+max_value = 6.0
+value = 0.0
+show_percentage = false
+theme_override_styles/background = SubResource("StyleBoxFlat_attr_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_attr_fill")
+
+[node name="StaminaFrac" type="Label" parent="Panel/HSplit/LeftPanel/VBox/StaminaRow"]
+custom_minimum_size = Vector2(28, 0)
+text = "0/6"
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1.0)
+horizontal_alignment = 1
+
+[node name="StaminaBtn" type="Button" parent="Panel/HSplit/LeftPanel/VBox/StaminaRow"]
+custom_minimum_size = Vector2(26, 26)
+text = "+"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.75, 0.1, 1.0)
+
+; ── Supporter-only rows (hidden for Fighter) ─────────────────────────────────
+[node name="TowerHPRow" type="HBoxContainer" parent="Panel/HSplit/LeftPanel/VBox"]
+theme_override_constants/separation = 6
+visible = false
+
+[node name="TowerHPLabel" type="Label" parent="Panel/HSplit/LeftPanel/VBox/TowerHPRow"]
+custom_minimum_size = Vector2(54, 0)
+text = "Tower HP"
+theme_override_font_sizes/font_size = 14
+vertical_alignment = 1
+
+[node name="TowerHPBar" type="ProgressBar" parent="Panel/HSplit/LeftPanel/VBox/TowerHPRow"]
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+max_value = 6.0
+value = 0.0
+show_percentage = false
+theme_override_styles/background = SubResource("StyleBoxFlat_attr_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_attr_fill")
+
+[node name="TowerHPFrac" type="Label" parent="Panel/HSplit/LeftPanel/VBox/TowerHPRow"]
+custom_minimum_size = Vector2(28, 0)
+text = "0/6"
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1.0)
+horizontal_alignment = 1
+
+[node name="TowerHPBtn" type="Button" parent="Panel/HSplit/LeftPanel/VBox/TowerHPRow"]
+custom_minimum_size = Vector2(26, 26)
+text = "+"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.75, 0.1, 1.0)
+
+[node name="PlacementRangeRow" type="HBoxContainer" parent="Panel/HSplit/LeftPanel/VBox"]
+theme_override_constants/separation = 6
+visible = false
+
+[node name="PlacementRangeLabel" type="Label" parent="Panel/HSplit/LeftPanel/VBox/PlacementRangeRow"]
+custom_minimum_size = Vector2(54, 0)
+text = "Spacing"
+theme_override_font_sizes/font_size = 14
+vertical_alignment = 1
+
+[node name="PlacementRangeBar" type="ProgressBar" parent="Panel/HSplit/LeftPanel/VBox/PlacementRangeRow"]
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+max_value = 6.0
+value = 0.0
+show_percentage = false
+theme_override_styles/background = SubResource("StyleBoxFlat_attr_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_attr_fill")
+
+[node name="PlacementRangeFrac" type="Label" parent="Panel/HSplit/LeftPanel/VBox/PlacementRangeRow"]
+custom_minimum_size = Vector2(28, 0)
+text = "0/6"
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1.0)
+horizontal_alignment = 1
+
+[node name="PlacementRangeBtn" type="Button" parent="Panel/HSplit/LeftPanel/VBox/PlacementRangeRow"]
+custom_minimum_size = Vector2(26, 26)
+text = "+"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.75, 0.1, 1.0)
+
+[node name="FireRateRow" type="HBoxContainer" parent="Panel/HSplit/LeftPanel/VBox"]
+theme_override_constants/separation = 6
+visible = false
+
+[node name="FireRateLabel" type="Label" parent="Panel/HSplit/LeftPanel/VBox/FireRateRow"]
+custom_minimum_size = Vector2(54, 0)
+text = "Fire Rate"
+theme_override_font_sizes/font_size = 14
+vertical_alignment = 1
+
+[node name="FireRateBar" type="ProgressBar" parent="Panel/HSplit/LeftPanel/VBox/FireRateRow"]
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 18)
+max_value = 6.0
+value = 0.0
+show_percentage = false
+theme_override_styles/background = SubResource("StyleBoxFlat_attr_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_attr_fill")
+
+[node name="FireRateFrac" type="Label" parent="Panel/HSplit/LeftPanel/VBox/FireRateRow"]
+custom_minimum_size = Vector2(28, 0)
+text = "0/6"
+theme_override_font_sizes/font_size = 10
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1.0)
+horizontal_alignment = 1
+
+[node name="FireRateBtn" type="Button" parent="Panel/HSplit/LeftPanel/VBox/FireRateRow"]
+custom_minimum_size = Vector2(26, 26)
+text = "+"
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.85, 0.75, 0.1, 1.0)
+
 [node name="Spacer" type="Control" parent="Panel/HSplit/LeftPanel/VBox"]
 size_flags_vertical = 3
 

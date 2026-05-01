@@ -70,8 +70,12 @@ func test_adrenaline_caps_at_max_hp() -> void:
 	assert_almost_eq(_caster.hp, 100.0, 0.01)
 
 func test_adrenaline_no_crash_with_no_player() -> void:
-	# Execute for an unregistered peer — should silently no-op
+	# Execute for an unregistered peer — should silently no-op.
+	# Assert the known-registered caster was not touched.
+	var hp_before: float = _caster.hp
 	FighterSkills.execute("f_adrenaline", 999)
+	assert_almost_eq(_caster.hp, hp_before, 0.01,
+		"Unregistered peer must not mutate any existing player's HP")
 
 # ── f_iron_skin ───────────────────────────────────────────────────────────────
 
@@ -100,21 +104,26 @@ func test_iron_skin_absorbs_damage_before_hp() -> void:
 
 # ── f_dash ────────────────────────────────────────────────────────────────────
 
-func test_dash_moves_player_forward() -> void:
+func test_dash_sets_target_forward() -> void:
 	_caster.global_position = Vector3.ZERO
-	# Face -Z (forward = +Z in Godot's right-hand system where -basis.z is forward)
-	# basis.z points out the back, so -basis.z is forward (default orientation)
+	# Default basis: -Z is forward. Target should be ~DASH_DISTANCE units away.
 	FighterSkills.execute("f_dash", PEER_ID)
-	assert_almost_eq(_caster.global_position.length(), FighterSkills.DASH_DISTANCE, 0.1)
+	assert_true(_caster.has_meta("dash_target"), "dash_target meta should be set")
+	var target: Vector3 = _caster.get_meta("dash_target") as Vector3
+	assert_almost_eq(target.length(), FighterSkills.DASH_DISTANCE, 0.1)
 
 func test_dash_stays_horizontal() -> void:
 	_caster.global_position = Vector3.ZERO
 	FighterSkills.execute("f_dash", PEER_ID)
-	assert_almost_eq(_caster.global_position.y, 0.0, 0.01)
+	var target: Vector3 = _caster.get_meta("dash_target") as Vector3
+	assert_almost_eq(target.y, 0.0, 0.01)
 
 func test_dash_no_crash_with_no_player() -> void:
+	# Unregistered peer — _resolve returns null, function returns early.
+	# Assert the caster has no dash meta set (no side-effect bleed).
 	FighterSkills.execute("f_dash", 9999)
-	# No assert — just verifies no crash
+	assert_false(_caster.has_meta("dash_origin"),
+		"Unregistered peer must not set dash meta on any existing player")
 
 # ── f_rapid_fire ──────────────────────────────────────────────────────────────
 
@@ -184,31 +193,38 @@ func test_rally_cry_does_not_buff_enemy() -> void:
 # ── f_rocket_barrage ─────────────────────────────────────────────────────────
 
 func test_rocket_barrage_no_towers_no_crash() -> void:
-	# No towers in scene → should silently return with no projectile spawned
-	# We can't reliably count root children in headless mode, so just verify no crash.
+	# No towers in scene → targets list is empty → returns before spawning.
+	var children_before: int = _main.get_child_count()
 	FighterSkills.execute("f_rocket_barrage", PEER_ID)
+	assert_eq(_main.get_child_count(), children_before,
+		"No rockets should be spawned when there are no enemy towers in range")
 
 func test_rocket_barrage_skips_friendly_towers() -> void:
-	# Add a friendly tower in range
+	# Add a friendly tower in range — must be skipped, no rockets spawned.
 	var tower := StaticBody3D.new()
 	tower.name   = "FriendlyTower"
 	tower.set("team", 0)  # same team as caster
 	_main.add_child(tower)
 	tower.add_to_group("towers")
-	# Should silently skip — no crash
+	var children_before: int = _main.get_child_count()
 	FighterSkills.execute("f_rocket_barrage", PEER_ID)
+	assert_eq(_main.get_child_count(), children_before,
+		"Friendly tower must be skipped — no rockets spawned")
 
 # ── f_deploy_mg (singleplayer path) ──────────────────────────────────────────
 
 func test_deploy_mg_singleplayer_spawns_node() -> void:
-	# Ensure we are in singleplayer (no multiplayer peer)
-	if multiplayer.has_multiplayer_peer():
-		pending("Skipped: multiplayer peer active")
-		return
+	# Force singleplayer path by temporarily clearing the multiplayer peer.
+	# OfflineMultiplayerPeer makes has_multiplayer_peer() return true, which
+	# would send the multiplayer RPC path instead of the singleplayer branch.
 	var mg_scene: PackedScene = load("res://scenes/towers/MachineGunTower.tscn")
 	if mg_scene == null:
-		pending("MachineGunTower.tscn not loadable in headless test")
+		push_warning("MachineGunTower.tscn not loadable — skipping")
 		return
+	multiplayer.set_multiplayer_peer(null)
 	var children_before: int = _main.get_child_count()
 	FighterSkills.execute("f_deploy_mg", PEER_ID)
-	assert_gt(_main.get_child_count(), children_before)
+	# Restore OfflineMultiplayerPeer so subsequent tests run correctly.
+	multiplayer.set_multiplayer_peer(OfflineMultiplayerPeer.new())
+	assert_gt(_main.get_child_count(), children_before,
+		"Singleplayer deploy_mg must add a MachineGun node to Main")

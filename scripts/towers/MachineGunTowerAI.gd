@@ -2,6 +2,7 @@
 ## Rapid raycast fire, low damage, short range.
 ## Stats configured via @export in MachineGunTower.tscn.
 
+class_name MachineGunTowerAI
 extends TowerBase
 
 const SND_FIRE := "res://assets/kenney_sci-fi-sounds/Audio/laserSmall_002.ogg"
@@ -13,23 +14,58 @@ var attack_damage: float = 12.0
 func _do_attack(target: Node3D) -> void:
 	var from: Vector3 = get_fire_position()
 	var to: Vector3 = target.global_position + Vector3(0.0, 0.5, 0.0)
-	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(from, to)
-	var result: Dictionary = space.intersect_ray(query)
-	if result.is_empty():
-		return
-	var hit: Object = result.collider
-	var hit_pos: Vector3 = result.position
-	var hit_normal: Vector3 = result.normal
-	var hit_unit := false
-	if hit != null and hit.has_method("take_damage"):
-		var hit_team: int = _get_body_team(hit)
-		if hit_team != team:
-			hit.take_damage(attack_damage, "machinegun_tower", team)
-			hit_unit = true
-	_spawn_hit_impact(hit_pos, hit_normal, hit_unit)
+
+	# Always fire muzzle flash and sound regardless of raycast result.
 	_spawn_muzzle_flash(from)
 	SoundManager.play_3d(SND_FIRE, from, -3.0, randf_range(0.92, 1.08))
+
+	# ── Apply damage directly to the validated target ────────────────────────
+	# _find_target() already ran a LOS check, so the target is confirmed
+	# reachable. Damage is applied here unconditionally rather than relying on
+	# the VFX raycast — terrain or other geometry could intercept the ray and
+	# prevent damage from ever landing.
+	var hit_unit := false
+	var target_peer_id: int = target.get("peer_id") if target.get("peer_id") != null else -1
+	if target_peer_id > 0:
+		# BasePlayer (local or remote) — broadcast through LobbyManager so the
+		# client receives apply_player_damage.rpc + notify_player_died.rpc.
+		var target_team: int = GameSync.get_player_team(target_peer_id)
+		if target_team >= 0 and target_team != team:
+			LobbyManager.damage_player_broadcast(target_peer_id, attack_damage, team)
+			hit_unit = true
+	elif target.has_method("take_damage"):
+		var target_team: int = _get_body_team(target)
+		if target_team >= 0 and target_team != team:
+			target.take_damage(attack_damage, "machinegun_tower", team, -1)
+			hit_unit = true
+
+	# ── Raycast for VFX hit position / normal only ───────────────────────────
+	# Exclude own tower body and the target's HitBody so the ray can reach the
+	# target's CharacterBody3D capsule for an accurate impact point.
+	var hit_pos: Vector3 = to
+	var hit_normal: Vector3 = (from - to).normalized()
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, to)
+	var excluded: Array[RID] = [get_rid()]
+	var target_hit_body: Node = target.get_node_or_null("HitBody")
+	if target_hit_body != null:
+		excluded.append(target_hit_body.get_rid())
+	query.exclude = excluded
+	query.collision_mask = 0b11  # layers 1+2 — terrain + units
+	var result: Dictionary = space.intersect_ray(query)
+	if not result.is_empty():
+		hit_pos    = result.position
+		hit_normal = result.normal
+
+	_spawn_hit_impact(hit_pos, hit_normal, hit_unit)
+	_spawn_tracer(from, hit_pos)
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		LobbyManager.spawn_mg_visuals.rpc(name, from, hit_pos, hit_normal, hit_unit)
+
+## Called by TowerBase._process after turret look_at when in multiplayer.
+func _on_turret_rotated(yaw_rad: float) -> void:
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		LobbyManager.sync_mg_turret_rot.rpc(name, yaw_rad)
 
 # ── VFX ───────────────────────────────────────────────────────────────────────
 
@@ -37,157 +73,78 @@ func _spawn_hit_impact(pos: Vector3, normal: Vector3, is_unit: bool) -> void:
 	var root: Node = get_tree().root
 
 	if is_unit:
-		var p1 := GPUParticles3D.new()
-		var pm1 := ParticleProcessMaterial.new()
-		pm1.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-		pm1.emission_sphere_radius = 0.05
-		pm1.direction = normal
-		pm1.spread = 60.0
-		pm1.initial_velocity_min = 2.0
-		pm1.initial_velocity_max = 6.0
-		pm1.gravity = Vector3(0.0, -10.0, 0.0)
-		pm1.scale_min = 0.1
-		pm1.scale_max = 0.22
-		var m1 := QuadMesh.new()
-		m1.size = Vector2(0.18, 0.18)
-		var mat1 := StandardMaterial3D.new()
-		mat1.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat1.albedo_color = Color(0.9, 0.15, 0.05, 0.9)
-		mat1.emission_enabled = true
-		mat1.emission = Color(1.0, 0.1, 0.0)
-		mat1.emission_energy_multiplier = 3.0
-		mat1.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m1.material = mat1
-		p1.process_material = pm1
-		p1.draw_pass_1 = m1
-		p1.amount = 10
-		p1.lifetime = 0.3
-		p1.one_shot = true
-		p1.explosiveness = 0.9
-		root.add_child(p1)
-		p1.global_position = pos
-		p1.emitting = true
-		p1.restart()
-		p1.call_deferred("free")
+		VfxUtils.spawn_particles(root, pos, {
+			"emission_shape": ParticleProcessMaterial.EMISSION_SHAPE_SPHERE,
+			"emission_radius": 0.08, "direction": normal, "spread": 60.0,
+			"vel_min": 4.0, "vel_max": 10.0, "gravity": Vector3(0.0, -10.0, 0.0),
+			"scale_min": 0.2, "scale_max": 0.5, "quad_size": Vector2(0.45, 0.45),
+			"color": Color(0.9, 0.15, 0.05, 0.9),
+			"emission_enabled": true, "emission_color": Color(1.0, 0.1, 0.0), "emission_energy": 4.0,
+			"amount": 14, "lifetime": 0.35, "explosiveness": 0.9})
 
-		var p2 := GPUParticles3D.new()
-		var pm2 := ParticleProcessMaterial.new()
-		pm2.direction = normal
-		pm2.spread = 30.0
-		pm2.initial_velocity_min = 4.0
-		pm2.initial_velocity_max = 10.0
-		pm2.gravity = Vector3(0.0, -15.0, 0.0)
-		pm2.scale_min = 0.03
-		pm2.scale_max = 0.08
-		var m2 := QuadMesh.new()
-		m2.size = Vector2(0.08, 0.08)
-		var mat2 := StandardMaterial3D.new()
-		mat2.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat2.albedo_color = Color(1.0, 0.95, 0.7, 1.0)
-		mat2.emission_enabled = true
-		mat2.emission = Color(1.0, 0.9, 0.4)
-		mat2.emission_energy_multiplier = 8.0
-		m2.material = mat2
-		p2.process_material = pm2
-		p2.draw_pass_1 = m2
-		p2.amount = 6
-		p2.lifetime = 0.15
-		p2.one_shot = true
-		p2.explosiveness = 1.0
-		root.add_child(p2)
-		p2.global_position = pos
-		p2.emitting = true
-		p2.restart()
-		p2.call_deferred("free")
+		VfxUtils.spawn_particles(root, pos, {
+			"direction": normal, "spread": 30.0,
+			"vel_min": 6.0, "vel_max": 14.0, "gravity": Vector3(0.0, -15.0, 0.0),
+			"scale_min": 0.08, "scale_max": 0.2, "quad_size": Vector2(0.22, 0.22),
+			"color": Color(1.0, 0.95, 0.7, 1.0), "alpha": false,
+			"emission_enabled": true, "emission_color": Color(1.0, 0.9, 0.4), "emission_energy": 10.0,
+			"amount": 8, "lifetime": 0.18, "explosiveness": 1.0})
 	else:
-		var p1 := GPUParticles3D.new()
-		var pm1 := ParticleProcessMaterial.new()
-		pm1.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-		pm1.emission_sphere_radius = 0.05
-		pm1.direction = normal
-		pm1.spread = 55.0
-		pm1.initial_velocity_min = 1.5
-		pm1.initial_velocity_max = 4.5
-		pm1.gravity = Vector3(0.0, -8.0, 0.0)
-		pm1.scale_min = 0.08
-		pm1.scale_max = 0.22
-		var m1 := QuadMesh.new()
-		m1.size = Vector2(0.2, 0.2)
-		var mat1 := StandardMaterial3D.new()
-		mat1.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat1.albedo_color = Color(0.62, 0.5, 0.35, 0.85)
-		mat1.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat1.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-		m1.material = mat1
-		p1.process_material = pm1
-		p1.draw_pass_1 = m1
-		p1.amount = 12
-		p1.lifetime = 0.4
-		p1.one_shot = true
-		p1.explosiveness = 0.85
-		root.add_child(p1)
-		p1.global_position = pos
-		p1.emitting = true
-		p1.restart()
-		p1.call_deferred("free")
+		VfxUtils.spawn_particles(root, pos, {
+			"emission_shape": ParticleProcessMaterial.EMISSION_SHAPE_SPHERE,
+			"emission_radius": 0.08, "direction": normal, "spread": 55.0,
+			"vel_min": 3.0, "vel_max": 8.0, "gravity": Vector3(0.0, -8.0, 0.0),
+			"scale_min": 0.15, "scale_max": 0.45, "quad_size": Vector2(0.45, 0.45),
+			"color": Color(0.62, 0.5, 0.35, 0.85),
+			"amount": 16, "lifetime": 0.45, "explosiveness": 0.85})
 
-		var p2 := GPUParticles3D.new()
-		var pm2 := ParticleProcessMaterial.new()
-		pm2.direction = normal
-		pm2.spread = 40.0
-		pm2.initial_velocity_min = 3.0
-		pm2.initial_velocity_max = 8.0
-		pm2.gravity = Vector3(0.0, -15.0, 0.0)
-		pm2.scale_min = 0.03
-		pm2.scale_max = 0.07
-		var m2 := QuadMesh.new()
-		m2.size = Vector2(0.08, 0.08)
-		var mat2 := StandardMaterial3D.new()
-		mat2.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat2.albedo_color = Color(1.0, 0.95, 0.6, 1.0)
-		mat2.emission_enabled = true
-		mat2.emission = Color(1.0, 0.85, 0.2)
-		mat2.emission_energy_multiplier = 7.0
-		m2.material = mat2
-		p2.process_material = pm2
-		p2.draw_pass_1 = m2
-		p2.amount = 8
-		p2.lifetime = 0.2
-		p2.one_shot = true
-		p2.explosiveness = 1.0
-		root.add_child(p2)
-		p2.global_position = pos
-		p2.emitting = true
-		p2.restart()
-		p2.call_deferred("free")
+		VfxUtils.spawn_particles(root, pos, {
+			"direction": normal, "spread": 40.0,
+			"vel_min": 5.0, "vel_max": 12.0, "gravity": Vector3(0.0, -15.0, 0.0),
+			"scale_min": 0.06, "scale_max": 0.16, "quad_size": Vector2(0.2, 0.2),
+			"color": Color(1.0, 0.95, 0.6, 1.0), "alpha": false,
+			"emission_enabled": true, "emission_color": Color(1.0, 0.85, 0.2), "emission_energy": 9.0,
+			"amount": 10, "lifetime": 0.25, "explosiveness": 1.0})
 
 func _spawn_muzzle_flash(pos: Vector3) -> void:
-	var p := GPUParticles3D.new()
-	var pm := ParticleProcessMaterial.new()
-	pm.direction = Vector3.UP
-	pm.spread = 80.0
-	pm.initial_velocity_min = 2.0
-	pm.initial_velocity_max = 5.0
-	pm.gravity = Vector3.ZERO
-	pm.scale_min = 0.05
-	pm.scale_max = 0.15
-	var mesh := QuadMesh.new()
-	mesh.size = Vector2(0.1, 0.1)
+	VfxUtils.spawn_particles(get_tree().root, pos, {
+		"direction": Vector3.UP, "spread": 80.0,
+		"vel_min": 4.0, "vel_max": 10.0, "gravity": Vector3.ZERO,
+		"scale_min": 0.15, "scale_max": 0.45, "quad_size": Vector2(0.4, 0.4),
+		"color": Color(1.0, 0.9, 0.3, 1.0), "alpha": false,
+		"emission_enabled": true, "emission_color": Color(1.0, 0.8, 0.0), "emission_energy": 6.0,
+		"amount": 12, "lifetime": 0.14, "explosiveness": 1.0})
+
+## Frees a GPUParticles3D node after its lifetime expires so particles fully play.
+## Kept for test compatibility — production code uses VfxUtils.spawn_particles.
+func _free_after_lifetime(p: GPUParticles3D) -> void:
+	get_tree().create_timer(p.lifetime + 0.1).timeout.connect(p.queue_free)
+
+## Thin stretched-box tracer from muzzle to hit point.
+## Visible at full 22 m attack range.
+func _spawn_tracer(from: Vector3, to: Vector3) -> void:
+	var length: float = from.distance_to(to)
+	if length < 0.1:
+		return
+	var mid: Vector3 = (from + to) * 0.5
+	var dir: Vector3 = (to - from).normalized()
+
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.06, 0.06, length)
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(1.0, 0.9, 0.3, 1.0)
+	mat.albedo_color = Color(1.0, 0.95, 0.55, 1.0)
 	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.8, 0.0)
-	mat.emission_energy_multiplier = 4.0
-	mesh.material = mat
-	p.process_material = pm
-	p.draw_pass_1 = mesh
-	p.amount = 8
-	p.lifetime = 0.12
-	p.one_shot = true
-	p.explosiveness = 1.0
-	get_tree().root.add_child(p)
-	p.global_position = pos
-	p.emitting = true
-	p.restart()
-	p.call_deferred("free")
+	mat.emission = Color(1.0, 0.85, 0.2)
+	mat.emission_energy_multiplier = 5.0
+	bm.material = mat
+	mi.mesh = bm
+	# Orient box along shot direction: default box Z-axis → dir
+	if dir.abs() != Vector3.UP:
+		mi.basis = Basis.looking_at(dir, Vector3.UP)
+	else:
+		mi.basis = Basis.looking_at(dir, Vector3.RIGHT)
+	get_tree().root.add_child(mi)
+	mi.global_position = mid
+	get_tree().create_timer(0.08).timeout.connect(mi.queue_free)

@@ -75,6 +75,8 @@ func _ready() -> void:
 		" team=", player_team,
 		" avatar_char='", avatar_char, "'")
 	add_to_group("players")
+	if not is_local:
+		add_to_group("remote_players")
 
 	# Wire HitBody so raycasts can identify which peer this node represents.
 	var hit_body: StaticBody3D = get_node_or_null("HitBody")

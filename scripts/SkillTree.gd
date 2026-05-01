@@ -110,6 +110,47 @@ func get_passive_bonus(peer_id: int, passive_key: String) -> float:
 			total += float(def.get("passive_val", 0.0))
 	return total
 
+# ── Shared helpers (used by FighterSkills and SupporterSkills) ────────────
+
+func get_main() -> Node:
+	return Engine.get_main_loop().root.get_node_or_null("Main")
+
+func get_player(peer_id: int) -> Node:
+	var main: Node = get_main()
+	if main == null:
+		return null
+	return main.get_node_or_null("FPSPlayer_%d" % peer_id)
+
+func get_player_team(peer_id: int) -> int:
+	return GameSync.get_player_team(peer_id)
+
+func get_ally_players(team: int, exclude_id: int = -1) -> Array:
+	var main: Node = get_main()
+	if main == null:
+		return []
+	var result: Array = []
+	for child in main.get_children():
+		if not child.name.begins_with("FPSPlayer_"):
+			continue
+		var id_str: String = child.name.substr("FPSPlayer_".length())
+		if not id_str.is_valid_int():
+			continue
+		var pid: int = int(id_str)
+		if pid == exclude_id:
+			continue
+		if GameSync.get_player_team(pid) == team:
+			result.append(child)
+	return result
+
+func get_supporter_position(peer_id: int) -> Vector3:
+	var main: Node = get_main()
+	if main == null:
+		return Vector3.ZERO
+	var rts: Node = main.get_node_or_null("RTSCamera")
+	if rts != null and rts is Node3D:
+		return (rts as Node3D).global_position
+	return Vector3.ZERO
+
 # Reset per-life state (second_wind). Called by Main/GameSync on respawn.
 func get_all_peers() -> Array:
 	return _states.keys()
@@ -269,32 +310,24 @@ func sync_skill_state(pts: int, unlocked: Array, slots: Array, cooldowns: Dictio
 	s.cooldowns = cooldowns.duplicate()
 	skill_pts_changed.emit(my_id, pts)
 
+func _sender_id() -> int:
+	var id: int = multiplayer.get_remote_sender_id()
+	return id if id != 0 else 1
+
 # Client → server: request to unlock a node.
 @rpc("any_peer", "reliable")
 func request_unlock(node_id: String) -> void:
-	if not multiplayer.is_server():
-		return
-	var sender: int = multiplayer.get_remote_sender_id()
-	if sender == 0:
-		sender = 1
-	unlock_node_local(sender, node_id)
+	if not multiplayer.is_server(): return
+	unlock_node_local(_sender_id(), node_id)
 
 # Client → server: assign active slot.
 @rpc("any_peer", "reliable")
 func request_assign_active(slot: int, node_id: String) -> void:
-	if not multiplayer.is_server():
-		return
-	var sender: int = multiplayer.get_remote_sender_id()
-	if sender == 0:
-		sender = 1
-	assign_active_slot(sender, slot, node_id)
+	if not multiplayer.is_server(): return
+	assign_active_slot(_sender_id(), slot, node_id)
 
 # Client → server: use active ability.
 @rpc("any_peer", "reliable")
 func request_use_active(slot: int) -> void:
-	if not multiplayer.is_server():
-		return
-	var sender: int = multiplayer.get_remote_sender_id()
-	if sender == 0:
-		sender = 1
-	use_active_local(sender, slot)
+	if not multiplayer.is_server(): return
+	use_active_local(_sender_id(), slot)

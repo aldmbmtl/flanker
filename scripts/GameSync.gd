@@ -51,7 +51,7 @@ func damage_player(peer_id: int, amount: float, source_team: int, killer_peer_id
 		player_died.emit(peer_id)
 		player_dead[peer_id] = true
 		var deaths: int = LobbyManager.increment_death_count(peer_id)
-		var respawn_time: float = min(deaths * LobbyManager.RESPAWN_INCREMENT + LobbyManager.RESPAWN_BASE, LobbyManager.RESPAWN_CAP)
+		var respawn_time: float = LobbyManager.get_respawn_time(peer_id)
 		respawn_countdown[peer_id] = respawn_time
 		# Award XP to killer (server-authoritative)
 		if killer_peer_id > 0:

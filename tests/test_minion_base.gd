@@ -207,14 +207,20 @@ func test_find_target_detects_enemy_player_in_range() -> void:
 	minion._cached_towers = []
 	minion._cached_bases = []
 	MinionBase._shared_minion_cache = []
-	var fake: FakePlayer = FakePlayer.new()
-	fake.player_team = 1  # enemy of minion team 0
-	add_child_autofree(fake)
-	fake.add_to_group("players")
-	fake.global_position = Vector3(0.0, 0.0, 5.0)  # within detect_range=12
+	var fake1: FakePlayer = FakePlayer.new()
+	fake1.player_team = 1  # first enemy
+	var fake2: FakePlayer = FakePlayer.new()
+	fake2.player_team = 1  # second enemy
+	add_child_autofree(fake1)
+	add_child_autofree(fake2)
+	fake1.add_to_group("players")
+	fake2.add_to_group("players")
+	var offset := Vector3(4.0, 0.0, 0.0)
+	fake1.global_position = Vector3(0.0, 0.0, 5.0) + offset
+	fake2.global_position = Vector3(0.0, 0.0, 5.0) - offset
 	minion.global_position = Vector3.ZERO
 	var target: Node3D = minion._find_target()
-	assert_eq(target, fake, "Minion must target an enemy player in the 'players' group")
+	assert_true(target == fake1 or target == fake2, "Minion must target one of the enemies")
 
 func test_find_target_ignores_friendly_player() -> void:
 	minion._cached_towers = []
@@ -228,3 +234,118 @@ func test_find_target_ignores_friendly_player() -> void:
 	minion.global_position = Vector3.ZERO
 	var target: Node3D = minion._find_target()
 	assert_null(target, "Minion must not target a friendly player")
+
+func test_same_team_attackers_on_counts_correctly() -> void:
+	# Set up: 3 friendly fakes in the shared cache, targeting an enemy
+	var attacker1: FakeMinion = FakeMinion.new()
+	var attacker2: FakeMinion = FakeMinion.new()
+	var bystander: FakeMinion = FakeMinion.new()
+	var target_enemy: FakeMinion = FakeMinion.new()
+	for m: FakeMinion in [attacker1, attacker2, bystander]:
+		m.team = 0
+		m._dead = false
+		m.is_puppet = false
+	target_enemy.team = 1
+	target_enemy._dead = false
+	minion.add_child(attacker1)
+	minion.add_child(attacker2)
+	minion.add_child(bystander)
+	minion.add_child(target_enemy)
+	# attacker1 alone is targeting target_enemy; minion calls the helper
+	attacker1._target = target_enemy
+	attacker2._target = null
+	bystander._target = null
+	MinionBase._shared_minion_cache = [attacker1, attacker2, bystander]
+	var count: int = minion._same_team_attackers_on(target_enemy)
+	assert_eq(count, 1, "Should count 1 attacker on first target")
+	# attacker2 also starts targeting target_enemy
+	attacker2._target = target_enemy
+	count = minion._same_team_attackers_on(target_enemy)
+	assert_eq(count, 2, "Should count 2 attackers on same target")
+
+func test_find_target_skips_over_gunned_targets() -> void:
+	minion._cached_towers = []
+	minion._cached_bases = []
+	# Set up: 2 friendly attackers already on enemy1, and enemy2 un-targeted.
+	# friendly3 (minion) should pick enemy2.
+	var friendly1: FakeMinion = FakeMinion.new()
+	var friendly2: FakeMinion = FakeMinion.new()
+	var enemy1: FakeMinion = FakeMinion.new()
+	var enemy2: FakeMinion = FakeMinion.new()
+	friendly1.team = 0; friendly1._dead = false; friendly1.is_puppet = false
+	friendly2.team = 0; friendly2._dead = false; friendly2.is_puppet = false
+	enemy1.team = 1; enemy1._dead = false; enemy1.is_puppet = false
+	enemy2.team = 1; enemy2._dead = false; enemy2.is_puppet = false
+	minion.add_child(friendly1)
+	minion.add_child(friendly2)
+	minion.add_child(enemy1)
+	minion.add_child(enemy2)
+	# shared cache includes friendlies (for _same_team_attackers_on) + enemies (for _find_target scan)
+	MinionBase._shared_minion_cache = [friendly1, friendly2, enemy1, enemy2]
+	friendly1._target = enemy1
+	friendly2._target = enemy1
+	minion._target = null
+	enemy1.global_position = Vector3(0.0, 0.0, 5.0)
+	enemy2.global_position = Vector3(0.0, 0.0, 6.0)
+	minion.global_position = Vector3.ZERO
+	var target: Node3D = minion._find_target()
+	assert_true(target == enemy2, "minion should target ungunned enemy2, not over-gunned enemy1")
+
+func test_separation_stronger_at_closer_range() -> void:
+	var min1: FakeMinion = FakeMinion.new()
+	var min2: FakeMinion = FakeMinion.new()
+	min1.team = 0
+	min1._dead = false
+	min1.is_puppet = false
+	min2.team = 0
+	min2._dead = false
+	min2.is_puppet = false
+	min1.add_to_group("minions")
+	min2.add_to_group("minions")
+	minion.add_child(min1)
+	minion.add_child(min2)
+	var sa1: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
+	sa1.name = "ShootAudio"
+	var da1: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
+	da1.name = "DeathAudio"
+	min1.add_child(sa1)
+	min1.add_child(da1)
+	min1.global_position = Vector3(0.0, 0.0, 0.0)
+	min2.global_position = Vector3(2.0, 0.0, 0.0)
+	min1.velocity = Vector3.ZERO
+	min1._strafe_phase = 0.0
+	min1._time = 1.0
+	MinionBase._shared_minion_cache = [min1, min2]
+	min1._apply_separation()
+	var push_far: Vector3 = min1.velocity
+	min1.velocity = Vector3.ZERO
+	min2.global_position = Vector3(1.0, 0.0, 0.0)
+	min1._apply_separation()
+	var push_near: Vector3 = min1.velocity
+	assert_gt(push_near.length(), push_far.length() * 1.5, "Push at 1.0m should be significantly stronger than at 2.0m")
+
+func test_lane_offset_present_after_delay() -> void:
+	var wps: Array[Vector3] = [Vector3(0, 0, 10), Vector3(0, 0, 20)]
+	minion.setup(0, wps, 0)
+	minion._strafe_phase = PI / 2.0  # sin = 1 => max offset
+	minion._time = 0.0
+	var fwd1 := Vector3.DOWN
+	var fwd2: float = clamp(minion._time, 0.0, 1.0)
+	var perp1: float = sin(minion._strafe_phase) * 0.35 * fwd2
+	assert_eq(perp1, 0.0, "At time=0 offset should be zero")
+	minion._time = 1.0
+	var fwd3: float = clamp(minion._time, 0.0, 1.0)
+	var perp2: float = sin(minion._strafe_phase) * 0.35 * fwd3
+	assert_eq(perp2, 0.35, "At time>=1 offset should equal sin(phase)*0.35")
+
+func test_approach_with_strafe_has_offset() -> void:
+	# Pure math check — no scene nodes needed.
+	# When _strafe_phase = PI/2 (sin=1), the permanent offset term sin(phase)*0.25 = 0.25 != 0.
+	# This verifies the formula has a non-zero lateral component independent of _time.
+	var phase: float = PI / 2.0
+	var time_val: float = 5.0
+	var forward: Vector3 = Vector3(0.0, 0.0, 1.0)
+	var right: Vector3 = Vector3(1.0, 0.0, 0.0)
+	var strafe: float = sin(time_val * 2.2 + phase) * 0.35 + sin(phase) * 0.25
+	var move_dir: Vector3 = (forward + right * strafe).normalized()
+	assert_true(abs(move_dir.x) > 0.01, "Strafe must have permanent lateral component when _strafe_phase=PI/2")

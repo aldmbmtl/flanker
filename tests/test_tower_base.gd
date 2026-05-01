@@ -416,6 +416,78 @@ func test_model_top_placed_above_mids() -> void:
 	assert_not_null(top_node, "model_top should be instantiated")
 	assert_almost_eq(top_node.position.y, 5.0, 0.001, "Top node Y should match model_top_offset")
 
+# ── LOS / puppet targeting regression tests ──────────────────────────────────
+#
+# Regression: TowerBase._has_line_of_sight() used to exclude only the
+# CharacterBody3D RID from the raycast, not the sibling HitBody StaticBody3D
+# (collision layer 1). The ray hit HitBody before reaching open sky and
+# returned false, so host towers never attacked the client puppet.
+# Fix: TowerBase.gd:336 now also appends HitBody.get_rid() to excluded.
+
+## Minimal BasePlayer subclass — skips visuals and lobby queries in headless tests.
+class FakePuppet extends BasePlayer:
+	func _init() -> void:
+		# Stub PlayerBody/CharacterMesh so @onready paths in BasePlayer don't crash.
+		var body := Node3D.new()
+		body.name = "PlayerBody"
+		var mesh := Node3D.new()
+		mesh.name = "CharacterMesh"
+		body.add_child(mesh)
+		add_child(body)
+	func _build_visuals() -> void:
+		pass
+	func _init_visuals() -> void:
+		pass  # skip LobbyManager / avatar loading entirely
+
+func test_los_not_blocked_by_target_hitbody() -> void:
+	# Tower at origin, puppet 10 m away — clear sky between them.
+	# Before the fix _has_line_of_sight returned false because the ray hit
+	# the puppet's own HitBody StaticBody3D (layer 1).
+	var t := FakeTower.new()
+	t.max_health    = 100.0
+	t.attack_range  = 0.0  # no Area3D needed for this test
+	t.attack_interval = 1.0
+	t.tower_type    = "cannon"
+	add_child_autofree(t)
+	t.setup(0)
+	t.global_position = Vector3.ZERO
+
+	var puppet := FakePuppet.new()
+	puppet.setup(2, 1, false, "a")
+	add_child_autofree(puppet)
+	puppet.global_position = Vector3(0.0, 0.0, 10.0)
+
+	# Physics needs one frame to register before we can use direct_space_state.
+	await get_tree().physics_frame
+
+	var los: bool = t._has_line_of_sight(puppet)
+	assert_true(los,
+		"_has_line_of_sight must return true when only the target's HitBody is between tower and target")
+
+func test_find_target_returns_enemy_puppet_in_range() -> void:
+	# Tower team=0, puppet team=1 at 8 m — should be selected as target.
+	# Before the fix _find_target() returned null because LOS always failed.
+	var t := FakeTower.new()
+	t.max_health    = 100.0
+	t.attack_range  = 50.0
+	t.attack_interval = 1.0
+	t.tower_type    = "cannon"
+	add_child_autofree(t)
+	t.setup(0)
+	t.global_position = Vector3.ZERO
+
+	var puppet := FakePuppet.new()
+	puppet.setup(2, 1, false, "a")
+	add_child_autofree(puppet)
+	puppet.global_position = Vector3(0.0, 0.0, 8.0)
+
+	# Wait for Area3D overlap detection.
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+
+	var target: Node3D = t._find_target()
+	assert_not_null(target, "_find_target() must return the enemy puppet when it is in range")
+
 func test_slow_tower_pulse_does_not_fire_on_client() -> void:
 	# In headless tests multiplayer.is_server() == true (OfflineMultiplayerPeer).
 	# To test the client guard we read the code path directly: _process must
@@ -439,3 +511,93 @@ func test_slow_tower_pulse_does_not_fire_on_client() -> void:
 	var timer_after: float = t.get("_pulse_timer")
 	assert_gt(timer_after, timer_before,
 		"_pulse_timer should advance on server — confirms _process runs past guard")
+
+# ── Cannon/Mortar VFX RPC: call_remote regression guards ─────────────────────
+#
+# These tests verify that spawn_cannonball_visuals and spawn_mortar_visuals are
+# call_remote — the server must NOT re-spawn a second physics projectile via the
+# RPC (it already spawned the authoritative one in _do_attack).
+#
+# Strategy: inject MockMultiplayerAPI so we can observe RPC dispatch, then call
+# the RPC function body directly to confirm it does NOT run locally on the
+# server (because call_remote suppresses local execution under MockMultiplayerAPI).
+
+func test_spawn_cannonball_visuals_rpc_is_call_remote() -> void:
+	# With call_remote, calling .rpc() on the server only dispatches to peers.
+	# The function body does NOT execute locally on the server.
+	# We verify: injecting mock + calling .rpc() records one dispatch entry but
+	# does NOT add a child to the scene root (which would happen if call_local).
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+	var root_child_count_before: int = get_tree().root.get_child_count()
+	# call .rpc() — under MockMultiplayerAPI this logs the call but never runs the body
+	LobbyManager.spawn_cannonball_visuals.rpc(
+		Vector3.ZERO, Vector3(0, 0, 10), 50.0, 0)
+	var root_child_count_after: int = get_tree().root.get_child_count()
+	# call_remote: body not executed locally → no new child added to scene root
+	assert_eq(root_child_count_after, root_child_count_before,
+		"spawn_cannonball_visuals must be call_remote: body must not run locally on server")
+	# RPC was dispatched
+	assert_true(mock.was_called("spawn_cannonball_visuals"),
+		"spawn_cannonball_visuals.rpc() must dispatch via multiplayer")
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+func test_spawn_mortar_visuals_rpc_is_call_remote() -> void:
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+	var root_child_count_before: int = get_tree().root.get_child_count()
+	LobbyManager.spawn_mortar_visuals.rpc(
+		Vector3.ZERO, Vector3(0, 0, 10), 80.0, 1)
+	var root_child_count_after: int = get_tree().root.get_child_count()
+	assert_eq(root_child_count_after, root_child_count_before,
+		"spawn_mortar_visuals must be call_remote: body must not run locally on server")
+	assert_true(mock.was_called("spawn_mortar_visuals"),
+		"spawn_mortar_visuals.rpc() must dispatch via multiplayer")
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+# ── SlowTower pulse VFX RPC broadcast regression guard ───────────────────────
+#
+# Verify that _emit_pulse() calls LobbyManager.spawn_slow_pulse_visuals.rpc()
+# when running as server in multiplayer. This ensures clients receive the pulse
+# VFX, which previously only ran server-side.
+
+func test_slow_tower_emit_pulse_dispatches_rpc_in_multiplayer() -> void:
+	var mock := MockMultiplayerAPI.new()
+	mock.set_as_server()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var t := FakeSlowTower.new()
+	t.max_health      = 500.0
+	t.attack_range    = 0.0  # passive — no Area3D
+	t.attack_interval = 1.0
+	t.tower_type      = "slow"
+	add_child_autofree(t)
+	t.setup(0)
+
+	t._emit_pulse()
+
+	assert_true(mock.was_called("spawn_slow_pulse_visuals"),
+		"_emit_pulse() must call spawn_slow_pulse_visuals.rpc() when is_server()")
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+func test_slow_tower_emit_pulse_rpc_passes_tower_name() -> void:
+	var mock := MockMultiplayerAPI.new()
+	mock.set_as_server()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var t := FakeSlowTower.new()
+	t.max_health      = 500.0
+	t.attack_range    = 0.0
+	t.attack_interval = 1.0
+	t.tower_type      = "slow"
+	t.name            = "SlowTowerTest"
+	add_child_autofree(t)
+	t.setup(0)
+
+	t._emit_pulse()
+
+	var calls: Array = mock.calls_to("spawn_slow_pulse_visuals")
+	assert_eq(calls.size(), 1)
+	assert_eq(calls[0]["args"][0], "SlowTowerTest",
+		"First arg to spawn_slow_pulse_visuals must be the tower node name")
+	get_tree().set_multiplayer(null, LobbyManager.get_path())

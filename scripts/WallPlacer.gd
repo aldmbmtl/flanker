@@ -154,7 +154,7 @@ func _place_wall(pos: Vector3) -> void:
 	var collision: StaticBody3D = StaticBody3D.new()
 	collision.add_child(col_node)
 	collision.position = pos
-	collision.collision_layer = 2
+	collision.collision_layer = 4  # layer 3 — passable by rockets/missiles
 	collision.collision_mask = 1
 
 	add_child(collision)
@@ -184,7 +184,7 @@ func _place_crate(pos: Vector3) -> void:
 	var collision: StaticBody3D = StaticBody3D.new()
 	collision.add_child(col_node)
 	collision.position = pos
-	collision.collision_layer = 2
+	collision.collision_layer = 4  # layer 3 — passable by rockets/missiles
 	collision.collision_mask = 1
 
 	add_child(collision)

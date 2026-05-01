@@ -20,17 +20,10 @@ static func execute(node_id: String, peer_id: int) -> void:
 		"s_rally":
 			_rally(peer_id)
 
-static func _turret_overdrive(peer_id: int) -> void:
-	# Find the nearest friendly tower to the Supporter's current cursor/position
-	# and halve its attack_interval for OVERDRIVE_DURATION seconds.
-	var main: Node = Engine.get_main_loop().root.get_node_or_null("Main")
-	if main == null:
-		return
-	var team: int = _get_peer_team(peer_id)
-	var origin: Vector3 = _get_supporter_position(peer_id, main)
+static func _find_nearest_friendly_tower(team: int, origin: Vector3, max_range: float) -> Node:
 	var towers: Array = Engine.get_main_loop().root.get_tree().get_nodes_in_group("towers")
 	var best: Node = null
-	var best_dist: float = 9999.0
+	var best_dist: float = max_range
 	for t in towers:
 		if t.get("team") != team:
 			continue
@@ -38,6 +31,14 @@ static func _turret_overdrive(peer_id: int) -> void:
 		if d < best_dist:
 			best_dist = d
 			best = t
+	return best
+
+static func _turret_overdrive(peer_id: int) -> void:
+	# Find the nearest friendly tower to the Supporter's current cursor/position
+	# and halve its attack_interval for OVERDRIVE_DURATION seconds.
+	var team: int = SkillTree.get_player_team(peer_id)
+	var origin: Vector3 = SkillTree.get_supporter_position(peer_id)
+	var best: Node = _find_nearest_friendly_tower(team, origin, 9999.0)
 	if best == null:
 		return
 	# Apply overdrive via a tween on the node's attack_interval
@@ -52,10 +53,7 @@ static func _turret_overdrive(peer_id: int) -> void:
 
 static func _ammo_drop(peer_id: int) -> void:
 	# Grant instant full reload to allies within AMMO_DROP_RANGE of the Supporter.
-	var main: Node = Engine.get_main_loop().root.get_node_or_null("Main")
-	if main == null:
-		return
-	var origin: Vector3 = _get_supporter_position(peer_id, main)
+	var origin: Vector3 = SkillTree.get_supporter_position(peer_id)
 	var players: Array = Engine.get_main_loop().root.get_tree().get_nodes_in_group("players")
 	for p in players:
 		if not p.has_method("_finish_reload"):
@@ -73,21 +71,9 @@ static func _ammo_drop(peer_id: int) -> void:
 
 static func _repair(peer_id: int) -> void:
 	# Restore REPAIR_FRACTION of max HP to the nearest friendly tower within REPAIR_RANGE.
-	var main: Node = Engine.get_main_loop().root.get_node_or_null("Main")
-	if main == null:
-		return
-	var team: int = _get_peer_team(peer_id)
-	var origin: Vector3 = _get_supporter_position(peer_id, main)
-	var towers: Array = Engine.get_main_loop().root.get_tree().get_nodes_in_group("towers")
-	var best: Node = null
-	var best_dist: float = REPAIR_RANGE
-	for t in towers:
-		if t.get("team") != team:
-			continue
-		var d: float = (t as Node3D).global_position.distance_to(origin)
-		if d < best_dist:
-			best_dist = d
-			best = t
+	var team: int = SkillTree.get_player_team(peer_id)
+	var origin: Vector3 = SkillTree.get_supporter_position(peer_id)
+	var best: Node = _find_nearest_friendly_tower(team, origin, REPAIR_RANGE)
 	if best == null:
 		return
 	var max_hp: float = float(best.get("max_health") if best.get("max_health") != null else 500.0)
@@ -100,10 +86,7 @@ static func _rally(peer_id: int) -> void:
 	# Implemented by setting a timed modifier via GameSync rally tracking.
 	# For now: iterate all FPSPlayer nodes on the same team and bump their
 	# speed for RALLY_DURATION via a meta flag + timer, consumed in FPSController.
-	var main: Node = Engine.get_main_loop().root.get_node_or_null("Main")
-	if main == null:
-		return
-	var team: int = _get_peer_team(peer_id)
+	var team: int = SkillTree.get_player_team(peer_id)
 	var players: Array = Engine.get_main_loop().root.get_tree().get_nodes_in_group("players")
 	for p in players:
 		var pt: int = int(p.get("player_team") if p.get("player_team") != null else -1)
@@ -112,14 +95,4 @@ static func _rally(peer_id: int) -> void:
 		p.set_meta("rally_speed_bonus", RALLY_SPEED_BONUS)
 		p.set_meta("rally_timer", RALLY_DURATION)
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-static func _get_peer_team(peer_id: int) -> int:
-	return GameSync.get_player_team(peer_id)
-
-static func _get_supporter_position(peer_id: int, main: Node) -> Vector3:
-	# Supporters don't have a FPSPlayer node — use RTS camera position as approximation.
-	var rts: Node = main.get_node_or_null("RTSCamera")
-	if rts != null:
-		return (rts as Node3D).global_position
-	return Vector3.ZERO
+# ── Helpers (delegated to SkillTree shared methods) ─────────────────────

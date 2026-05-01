@@ -37,6 +37,10 @@ var shooter_peer_id: int = -1   # -1 = minion / unknown; set for player-fired pr
 ## projectile never immediately hits its own spawn point.
 var spawner_rid: RID = RID()
 
+# Whether this projectile can destroy trees when it hits a tree trunk.
+# Default false - only specific projectiles (rockets, missiles) are allowed to.
+var can_destroy_trees: bool = false
+
 # ── Movement ──────────────────────────────────────────────────────────────────
 var max_lifetime: float  = 3.0
 var gravity: float       = 18.0   # set 0.0 for non-ballistic projectiles (rockets, missiles)
@@ -90,20 +94,51 @@ func _after_move() -> void:
 func _on_expire() -> void:
 	pass
 
+# ── Ballistic arc helper ──────────────────────────────────────────────────────
+
+## Compute velocity for a fixed-time ballistic arc to p_target.
+## Call in _ready() after global_position is set. Requires gravity != 0.
+func init_ballistic_arc(p_target: Vector3, flight_time: float) -> void:
+	var start: Vector3 = global_position
+	var dt: float = flight_time
+	velocity.x = (p_target.x - start.x) / dt
+	velocity.z = (p_target.z - start.z) / dt
+	velocity.y = (p_target.y - start.y + 0.5 * gravity * dt * dt) / dt
+
+# ── Ghost-hitbox helper ───────────────────────────────────────────────────────
+
+## Route damage through GameSync when the collider is a ghost-peer hitbox.
+## Returns true if the collider was a ghost hitbox (caller should skip further
+## damage but may still run VFX). Server-authoritative.
+func _handle_ghost_hit(collider: Object, dmg: float) -> bool:
+	if not (collider is StaticBody3D and collider.has_meta("ghost_peer_id")):
+		return false
+	var target_peer: int = collider.get_meta("ghost_peer_id")
+	if not GameSync.player_dead.get(target_peer, false):
+		var ghost_team: int = GameSync.get_player_team(target_peer)
+		var friendly: bool = (shooter_team >= 0 and ghost_team == shooter_team)
+		if not friendly and (not multiplayer.has_multiplayer_peer() or multiplayer.is_server()):
+			var new_hp: float = GameSync.damage_player(target_peer, dmg, shooter_team, shooter_peer_id)
+			if multiplayer.has_multiplayer_peer():
+				LobbyManager.apply_player_damage.rpc(target_peer, new_hp)
+				if new_hp <= 0.0:
+					LobbyManager.notify_player_died.rpc(target_peer)
+	return true
+
 # ── Tree clearing helper ──────────────────────────────────────────────────────
 
 ## Shared tree-clearing helper used by Bullet, Cannonball, and MortarShell.
 ## In multiplayer: server fans out sync_destroy_tree to all peers.
 ## In singleplayer: calls clear_trees_at directly on TreePlacer.
 func _request_destroy_tree(pos: Vector3) -> void:
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+	# Only allow tree destruction if this projectile is allowed to destroy trees
+	if not can_destroy_trees:
+		return
+
+	if multiplayer.is_server():
 		LobbyManager.sync_destroy_tree.rpc(pos)
-	elif multiplayer.has_multiplayer_peer():
-		LobbyManager.request_destroy_tree.rpc_id(1, pos)
 	else:
-		var tp: Node = get_tree().root.get_node_or_null("Main/World/TreePlacer")
-		if tp != null:
-			tp.clear_trees_at(pos, LobbyManager.TREE_DESTROY_RADIUS)
+		LobbyManager.request_destroy_tree.rpc_id(1, pos)
 
 # ── Splash helper ─────────────────────────────────────────────────────────────
 

@@ -49,8 +49,6 @@ const CAM_Y_CROUCH := 0.45
 const CAP_H_STAND  := 1.8
 const CAP_H_CROUCH := 0.9
 
-const MAX_HP := 100.0
-
 const DEFAULT_WEAPON_PATH    := "res://assets/weapons/weapon_pistol.tres"
 const DEFAULT_SECONDARY_PATH := "res://assets/weapons/weapon_rocket_launcher.tres"
 
@@ -65,7 +63,7 @@ const FOOTSTEP_INTERVAL_WALK   := 0.375
 const FOOTSTEP_INTERVAL_SPRINT := 0.24
 
 var active    := true
-var hp: float  = MAX_HP
+var hp: float  = GameSync.PLAYER_MAX_HP
 var _dead      := false
 var _crouching := false
 
@@ -153,14 +151,9 @@ func _ready() -> void:
 	super._ready()
 	_base_cam_y = camera.position.y
 	camera.far = 250.0
-	var _has_network_peer: bool = NetworkManager._peer != null
-	if _has_network_peer:
-		var my_id := multiplayer.get_unique_id()
-		is_local = (name == "FPSPlayer_%d" % my_id)
-		peer_id = name.substr(10).to_int() if name.begins_with("FPSPlayer_") else my_id
-	else:
-		peer_id = 1
-		is_local = true
+	var my_id := multiplayer.get_unique_id()
+	is_local = (name == "FPSPlayer_%d" % my_id)
+	peer_id = name.substr(10).to_int() if name.begins_with("FPSPlayer_") else my_id
 
 	print("[FPS] _ready peer_id=", peer_id,
 		" is_local=", is_local,
@@ -179,7 +172,7 @@ func _ready() -> void:
 		GameSync.player_died.connect(_on_game_sync_died)
 		GameSync.player_respawned.connect(_on_game_sync_respawned)
 		GameSync.player_health_changed.connect(_on_game_sync_health_changed)
-		if _has_network_peer and not multiplayer.is_server():
+		if not multiplayer.is_server():
 			LobbyManager.register_player_team.rpc_id(1, peer_id, player_team)
 		# Reconnect level bonuses when attributes are spent
 		LevelSystem.attribute_spent.connect(_on_level_attribute_spent)
@@ -240,6 +233,9 @@ func _on_level_attribute_spent(p_peer_id: int, _attr: String, _new_attrs: Dictio
 
 func _get_level_speed_mult() -> float:
 	return 1.0 + LevelSystem.get_bonus_speed_mult(peer_id)
+
+func _get_max_stamina() -> float:
+	return MAX_STAMINA + LevelSystem.get_bonus_stamina(peer_id)
 
 func _get_level_damage_mult() -> float:
 	return 1.0 + LevelSystem.get_bonus_damage_mult(peer_id)
@@ -436,12 +432,12 @@ func _on_death() -> void:
 func _update_health_bar() -> void:
 	if health_bar == null:
 		return
-	health_bar.value = (hp / MAX_HP) * 100.0
+	health_bar.value = (hp / GameSync.PLAYER_MAX_HP) * 100.0
 	var fill_style: StyleBoxFlat = health_bar.get_theme_stylebox("fill")
 	if fill_style == null:
 		fill_style = StyleBoxFlat.new()
 		health_bar.add_theme_stylebox_override("fill", fill_style)
-	var health_pct: float = hp / MAX_HP
+	var health_pct: float = hp / GameSync.PLAYER_MAX_HP
 	if health_pct > 0.6:
 		fill_style.bg_color = Color(0.2, 0.9, 0.2, 1)
 	elif health_pct > 0.3:
@@ -714,17 +710,61 @@ func _physics_process(delta: float) -> void:
 		_stamina = max(0.0, _stamina - drain_rate * delta)
 		_stamina_exhausted = false
 		_exhaust_timer = 0.0
-	elif not want_sprint and _stamina < MAX_STAMINA:
+	elif not want_sprint and _stamina < _get_max_stamina():
 		if _stamina_exhausted:
 			_exhaust_timer -= delta
 			if _exhaust_timer <= 0.0:
 				_stamina_exhausted = false
 		else:
-			_stamina = min(MAX_STAMINA, _stamina + STAMINA_REGEN_RATE * delta)
+			_stamina = min(_get_max_stamina(), _stamina + STAMINA_REGEN_RATE * delta)
 	elif _stamina <= 0.0 and not _stamina_exhausted:
 		_stamina_exhausted = true
 		_exhaust_timer = STAMINA_EXHAUST_CD
 	_update_stamina_bar()
+
+	# Dash animation — velocity-driven so move_and_slide() respects collision.
+	# If a wall/fence is hit mid-dash, the dash is cancelled immediately to
+	# prevent the player from being teleported through or getting stuck.
+	if has_meta("dash_elapsed"):
+		var elapsed: float  = float(get_meta("dash_elapsed")) + delta
+		var duration: float = float(get_meta("dash_duration"))
+		var origin: Vector3 = get_meta("dash_origin")  as Vector3
+		var target: Vector3 = get_meta("dash_target")  as Vector3
+		var t: float = minf(elapsed / duration, 1.0)
+		# Cubic ease-out derivative used as speed scalar so the feel is preserved.
+		var t_prev: float = minf((elapsed - delta) / duration, 1.0)
+		var ease_cur:  float = 1.0 - pow(1.0 - t, 3.0)
+		var ease_prev: float = 1.0 - pow(1.0 - t_prev, 3.0)
+		var total_dist: float = origin.distance_to(target)
+		var frame_dist: float = (ease_cur - ease_prev) * total_dist
+		var dash_dir: Vector3 = (target - origin)
+		if dash_dir.length_squared() > 0.0:
+			dash_dir = dash_dir.normalized()
+		velocity.x = dash_dir.x * (frame_dist / delta)
+		velocity.z = dash_dir.z * (frame_dist / delta)
+		velocity.y -= GRAVITY * delta
+		move_and_slide()
+
+		# Cancel dash on collision (hit a fence/wall) or when complete.
+		var finished: bool = t >= 1.0 or is_on_wall()
+		if finished:
+			velocity.x = 0.0
+			velocity.z = 0.0
+			for key in ["dash_origin", "dash_target", "dash_elapsed", "dash_duration"]:
+				if has_meta(key):
+					remove_meta(key)
+			if has_meta("dash_effect"):
+				var eff: GPUParticles3D = get_meta("dash_effect") as GPUParticles3D
+				if is_instance_valid(eff):
+					eff.emitting = false
+					var t2: SceneTreeTimer = get_tree().create_timer(0.5)
+					t2.timeout.connect(func() -> void:
+						if is_instance_valid(eff):
+							eff.queue_free())
+				remove_meta("dash_effect")
+		else:
+			set_meta("dash_elapsed", elapsed)
+		return
 
 	# Movement
 	var cur_speed: float = SPEED * player_speed_mult * _slow_mult * _get_level_speed_mult()
@@ -766,7 +806,7 @@ func _physics_process(delta: float) -> void:
 			_anim.play(want_anim)
 
 	# Broadcast transform to host every N frames (local player only)
-	if NetworkManager._peer != null and is_local:
+	if is_local:
 		_sync_frame += 1
 		if _sync_frame >= PLAYER_SYNC_INTERVAL:
 			_sync_frame = 0
@@ -831,7 +871,7 @@ func _shoot() -> void:
 		rocket.shooter_team   = player_team
 		rocket.shooter_peer_id = peer_id
 		rocket.velocity       = dir * w.bullet_speed
-		get_tree().root.get_child(0).add_child(rocket)
+		VfxUtils.get_scene_root(self).add_child(rocket)
 		rocket.global_position = shoot_from.global_position
 		# Multiplayer: server broadcasts rocket spawn to all clients
 		if multiplayer.has_multiplayer_peer():
@@ -848,7 +888,7 @@ func _shoot() -> void:
 		bullet.set_meta("shooter_peer_id", peer_id)
 		bullet.set("shooter_peer_id", peer_id)
 		bullet.velocity      = dir * w.bullet_speed
-		get_tree().root.get_child(0).add_child(bullet)
+		VfxUtils.get_scene_root(self).add_child(bullet)
 		bullet.global_position = shoot_from.global_position
 		var main: Node = get_tree().root.get_node("Main")
 		if main.has_method("_on_bullet_hit_something") and bullet.shooter_peer_id == peer_id:
@@ -999,7 +1039,7 @@ func _update_reload_bar() -> void:
 func _update_stamina_bar() -> void:
 	if stamina_bar == null:
 		return
-	stamina_bar.value = (_stamina / MAX_STAMINA) * 100.0
+	stamina_bar.value = (_stamina / _get_max_stamina()) * 100.0
 
 func _update_points_label() -> void:
 	if points_label == null:
@@ -1047,12 +1087,9 @@ func _fire_ping() -> void:
 	query.collision_mask = 1
 	var result: Dictionary = space.intersect_ray(query)
 	var world_pos: Vector3 = result.get("position", origin + dir * 100.0) as Vector3
-	if NetworkManager._peer != null:
-		print("[PING-FPS] has_multiplayer_peer=true, is_server=%s" % str(multiplayer.is_server()))
-		if multiplayer.is_server():
-			LobbyManager.request_ping(world_pos, player_team)
-		else:
-			LobbyManager.request_ping.rpc_id(1, world_pos, player_team)
+	if multiplayer.is_server():
+		print("[PING-FPS] is_server=true")
+		LobbyManager.request_ping(world_pos, player_team)
 	else:
-		print("[PING-FPS] singleplayer path — emitting directly, world_pos=%s team=%d" % [str(world_pos), player_team])
-		LobbyManager.ping_received.emit(world_pos, player_team)
+		print("[PING-FPS] client path, rpc to server")
+		LobbyManager.request_ping.rpc_id(1, world_pos, player_team)

@@ -46,6 +46,17 @@ func test_clear_all_removes_all_peers() -> void:
 	assert_eq(SkillTree.get_role(FIGHTER_ID), "")
 	assert_eq(SkillTree.get_role(SUPPORTER_ID), "")
 
+# Regression: leave_game() was missing SkillTree.clear_all(), causing stale
+# role data when a peer rejoined with a different role in the next session.
+func test_clear_all_allows_reregister_with_different_role() -> void:
+	SkillTree.register_peer(FIGHTER_ID, "Fighter")
+	assert_eq(SkillTree.get_role(FIGHTER_ID), "Fighter")
+	# Simulate leave_game() clearing all state
+	SkillTree.clear_all()
+	# Peer rejoins next session as Supporter — must not be locked to old role
+	SkillTree.register_peer(FIGHTER_ID, "Supporter")
+	assert_eq(SkillTree.get_role(FIGHTER_ID), "Supporter")
+
 func test_get_all_peers_returns_registered() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
 	SkillTree.register_peer(SUPPORTER_ID, "Supporter")
@@ -62,8 +73,10 @@ func test_level_up_awards_one_skill_point() -> void:
 	assert_eq(SkillTree.get_skill_pts(FIGHTER_ID), 2)
 
 func test_level_up_unregistered_peer_no_crash() -> void:
+	# Unregistered peer must be silently ignored — no state created.
 	SkillTree._on_level_up(99, 2)
-	# Should not crash
+	assert_eq(SkillTree.get_skill_pts(99), 0,
+		"Unregistered peer must not have skill points created by level-up")
 
 func test_level_up_emits_skill_pts_changed() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
@@ -195,14 +208,22 @@ func test_assign_active_emits_slots_changed() -> void:
 	assert_signal_emitted(SkillTree, "active_slots_changed")
 
 func test_assign_active_slot_out_of_range_ignored() -> void:
+	# Slot 5 is out of range (valid: 0–1) — must be silently rejected.
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
-	SkillTree.assign_active_slot(FIGHTER_ID, 5, "f_dash")  # should not crash
+	var slots_before: Array = SkillTree.get_active_slots(FIGHTER_ID)
+	SkillTree.assign_active_slot(FIGHTER_ID, 5, "f_dash")
+	assert_eq(SkillTree.get_active_slots(FIGHTER_ID), slots_before,
+		"Out-of-range slot assignment must not mutate active_slots")
 
 # ── use_active / cooldown ─────────────────────────────────────────────────────
 
 func test_use_active_empty_slot_no_crash() -> void:
+	# Slot 1 is empty by default — using it must be a silent no-op.
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")
-	SkillTree.use_active_local(FIGHTER_ID, 0)
+	SkillTree.use_active_local(FIGHTER_ID, 1)
+	# Empty slot has no node_id → no cooldown entry should be created.
+	assert_almost_eq(SkillTree.get_cooldown(FIGHTER_ID, ""), 0.0, 0.001,
+		"Using an empty slot must not start any cooldown")
 
 func test_use_active_starts_cooldown() -> void:
 	SkillTree.register_peer(FIGHTER_ID, "Fighter")

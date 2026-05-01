@@ -158,3 +158,99 @@ func test_xp_needed_increases_each_level() -> void:
 		if LevelSystem.get_level(PEER_A) < LevelSystem.MAX_LEVEL:
 			assert_gte(new_needed, prev, "XP required should not decrease between levels")
 		prev = new_needed
+
+# ── stamina attribute ─────────────────────────────────────────────────────────
+
+func test_get_bonus_stamina_zero_before_spending() -> void:
+	assert_eq(LevelSystem.get_bonus_stamina(PEER_A), 0.0,
+		"No stamina bonus before spending any points")
+
+func test_get_bonus_stamina_correct_after_one_spend() -> void:
+	LevelSystem.award_xp(PEER_A, 70)
+	LevelSystem.spend_point_local(PEER_A, "stamina")
+	assert_eq(LevelSystem.get_bonus_stamina(PEER_A), LevelSystem.STAMINA_PER_POINT,
+		"Bonus should be exactly STAMINA_PER_POINT after 1 spend")
+
+func test_stamina_attr_capped_at_attr_cap() -> void:
+	LevelSystem.award_xp(PEER_A, 999999)
+	for i in range(LevelSystem.ATTR_CAP + 5):
+		LevelSystem.spend_point_local(PEER_A, "stamina")
+	var attrs: Dictionary = LevelSystem.get_attrs(PEER_A)
+	assert_lte(attrs["stamina"], LevelSystem.ATTR_CAP,
+		"Stamina attribute must not exceed ATTR_CAP")
+
+func test_stamina_spend_does_not_affect_other_attrs() -> void:
+	LevelSystem.award_xp(PEER_A, 70)
+	LevelSystem.spend_point_local(PEER_A, "stamina")
+	var attrs: Dictionary = LevelSystem.get_attrs(PEER_A)
+	assert_eq(attrs["hp"], 0, "hp unchanged after stamina spend")
+	assert_eq(attrs["speed"], 0, "speed unchanged after stamina spend")
+	assert_eq(attrs["damage"], 0, "damage unchanged after stamina spend")
+
+func test_stamina_isolated_between_peers() -> void:
+	LevelSystem.award_xp(PEER_A, 70)
+	LevelSystem.spend_point_local(PEER_A, "stamina")
+	assert_eq(LevelSystem.get_bonus_stamina(PEER_B), 0.0,
+		"Peer B stamina unaffected by Peer A spend")
+
+func test_stamina_attr_in_get_attrs() -> void:
+	var attrs: Dictionary = LevelSystem.get_attrs(PEER_A)
+	assert_true(attrs.has("stamina"), "get_attrs must include 'stamina' key")
+	assert_eq(attrs["stamina"], 0, "stamina starts at 0")
+
+# ── Supporter attributes: tower_hp, placement_range, tower_fire_rate ──────────
+
+func test_get_bonus_tower_hp_mult_zero_before_spending() -> void:
+	assert_eq(LevelSystem.get_bonus_tower_hp_mult(PEER_A), 0.0,
+		"No tower_hp bonus before spending any points")
+
+func test_get_bonus_tower_hp_mult_correct_after_one_spend() -> void:
+	LevelSystem.award_xp(PEER_A, 70)
+	LevelSystem.spend_point_local(PEER_A, "tower_hp")
+	assert_almost_eq(LevelSystem.get_bonus_tower_hp_mult(PEER_A),
+		LevelSystem.TOWER_HP_PER_POINT, 0.0001,
+		"Bonus should be exactly TOWER_HP_PER_POINT after 1 spend")
+
+func test_get_bonus_placement_range_mult_zero_before_spending() -> void:
+	assert_eq(LevelSystem.get_bonus_placement_range_mult(PEER_A), 0.0,
+		"No placement_range bonus before spending any points")
+
+func test_get_bonus_placement_range_mult_correct_after_one_spend() -> void:
+	LevelSystem.award_xp(PEER_A, 70)
+	LevelSystem.spend_point_local(PEER_A, "placement_range")
+	assert_almost_eq(LevelSystem.get_bonus_placement_range_mult(PEER_A),
+		LevelSystem.PLACEMENT_RANGE_PER_POINT, 0.0001,
+		"Bonus should be exactly PLACEMENT_RANGE_PER_POINT after 1 spend")
+
+func test_get_bonus_tower_fire_rate_mult_zero_before_spending() -> void:
+	assert_eq(LevelSystem.get_bonus_tower_fire_rate_mult(PEER_A), 0.0,
+		"No tower_fire_rate bonus before spending any points")
+
+func test_get_bonus_tower_fire_rate_mult_correct_after_one_spend() -> void:
+	LevelSystem.award_xp(PEER_A, 70)
+	LevelSystem.spend_point_local(PEER_A, "tower_fire_rate")
+	assert_almost_eq(LevelSystem.get_bonus_tower_fire_rate_mult(PEER_A),
+		LevelSystem.TOWER_FIRE_RATE_PER_POINT, 0.0001,
+		"Bonus should be exactly TOWER_FIRE_RATE_PER_POINT after 1 spend")
+
+# ── Role gate tests ───────────────────────────────────────────────────────────
+
+func test_fighter_cannot_spend_supporter_attr() -> void:
+	SkillTree.clear_peer(PEER_A)
+	SkillTree.register_peer(PEER_A, "Fighter")
+	LevelSystem.award_xp(PEER_A, 70)
+	LevelSystem.spend_point_local(PEER_A, "tower_fire_rate")
+	var attrs: Dictionary = LevelSystem.get_attrs(PEER_A)
+	assert_eq(attrs.get("tower_fire_rate", 0), 0,
+		"Fighter spending tower_fire_rate must be a no-op")
+	SkillTree.clear_peer(PEER_A)
+
+func test_supporter_cannot_spend_fighter_attr() -> void:
+	SkillTree.clear_peer(PEER_A)
+	SkillTree.register_peer(PEER_A, "Supporter")
+	LevelSystem.award_xp(PEER_A, 70)
+	LevelSystem.spend_point_local(PEER_A, "stamina")
+	var attrs: Dictionary = LevelSystem.get_attrs(PEER_A)
+	assert_eq(attrs.get("stamina", 0), 0,
+		"Supporter spending stamina must be a no-op")
+	SkillTree.clear_peer(PEER_A)

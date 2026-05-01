@@ -50,7 +50,7 @@ func _on_body_entered(body: Node3D) -> void:
 			queue_free()
 
 func _detach_and_finish(asp: AudioStreamPlayer3D) -> void:
-	var root: Node = get_tree().root.get_child(0)
+	var root: Node = VfxUtils.get_scene_root(self)
 	get_parent().remove_child(self)
 	root.add_child(self)
 	await asp.finished

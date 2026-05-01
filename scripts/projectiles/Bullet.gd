@@ -27,17 +27,7 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 		return
 
 	# Ghost hitbox — remote player represented by a StaticBody3D with ghost_peer_id meta.
-	# Damage is server-authoritative: routed via GameSync RPC, not take_damage().
-	if collider is StaticBody3D and collider.has_meta("ghost_peer_id"):
-		var target_peer: int = collider.get_meta("ghost_peer_id")
-		if not GameSync.player_dead.get(target_peer, false):
-			var ghost_team: int = GameSync.get_player_team(target_peer)
-			var friendly: bool = (shooter_team >= 0 and ghost_team == shooter_team)
-			if not friendly and multiplayer.is_server():
-				var new_hp: float = GameSync.damage_player(target_peer, damage, shooter_team, shooter_peer_id)
-				LobbyManager.apply_player_damage.rpc(target_peer, new_hp)
-				if new_hp <= 0.0:
-					LobbyManager.notify_player_died.rpc(target_peer)
+	if _handle_ghost_hit(collider, damage):
 		hit_something.emit("player")
 		_spawn_sparks(pos, collider)
 		_play_hit_sound(pos, collider)

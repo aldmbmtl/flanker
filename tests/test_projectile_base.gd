@@ -163,11 +163,12 @@ func test_request_destroy_tree_calls_clear_trees_at_in_singleplayer() -> void:
 	var stub_tp: StubTreePlacer = parts[1]
 
 	var p := FakeProjectile.new()
+	p.can_destroy_trees = true
 	add_child_autofree(p)
 	p._request_destroy_tree(Vector3(5.0, 0.0, 10.0))
 
 	assert_eq(stub_tp.clear_calls.size(), 1,
-		"_request_destroy_tree must call clear_trees_at once in singleplayer")
+		"_request_destroy_tree must call clear_trees_at once in singleplayer when can_destroy_trees=true")
 	if stub_tp.clear_calls.size() > 0:
 		assert_almost_eq(float(stub_tp.clear_calls[0]["radius"]),
 			float(LobbyManager.TREE_DESTROY_RADIUS), 0.001,
@@ -180,7 +181,9 @@ func test_request_destroy_tree_calls_clear_trees_at_in_singleplayer() -> void:
 
 const BulletScene := preload("res://scenes/projectiles/Bullet.tscn")
 
-func test_bullet_on_hit_tree_triggers_clear() -> void:
+func test_bullet_on_hit_tree_does_not_clear_trees() -> void:
+	# Bullets do not have can_destroy_trees — hitting a tree is consumed (early return)
+	# but the tree itself is NOT cleared.
 	var parts: Array = _make_fake_main_with_tree_placer()
 	var fake_main: Node = parts[0]
 	var stub_tp: StubTreePlacer = parts[1]
@@ -195,15 +198,15 @@ func test_bullet_on_hit_tree_triggers_clear() -> void:
 	var tree_col: StaticBody3D = _make_tree_collider()
 	bullet._on_hit(Vector3(3.0, 0.0, 3.0), tree_col)
 
-	assert_eq(stub_tp.clear_calls.size(), 1,
-		"Bullet._on_hit on a tree must trigger clear_trees_at")
+	assert_eq(stub_tp.clear_calls.size(), 0,
+		"Bullet._on_hit on a tree must NOT call clear_trees_at (can_destroy_trees=false)")
 
 	fake_main.queue_free()
 	await get_tree().process_frame
 
 func test_bullet_on_hit_tree_does_not_call_take_damage() -> void:
-	# A collider with both tree_trunk_height meta AND a take_damage method.
-	# The tree branch must return early — take_damage must NOT be called.
+	# Bullet early-returns on tree hit — take_damage is NOT called,
+	# and clear_trees_at is also NOT called (can_destroy_trees=false).
 	var parts: Array = _make_fake_main_with_tree_placer()
 	var fake_main: Node = parts[0]
 
@@ -212,18 +215,18 @@ func test_bullet_on_hit_tree_does_not_call_take_damage() -> void:
 	bullet.damage = 10.0
 	bullet.velocity = Vector3(0.0, 0.0, -20.0)
 	add_child_autofree(bullet)
+
 	var fake_tree := Node3D.new()
 	fake_tree.set_meta("tree_trunk_height", 4.0)
-	var damage_called := false
 	# GDScript can't add methods dynamically, so verify via StubTreePlacer side-effect:
-	# If clear_trees_at was called, the tree path was taken (not the damage path).
+	# clear_trees_at must NOT be called (bullet can't destroy trees).
 	var stub_tp: StubTreePlacer = parts[1]
 
 	add_child_autofree(fake_tree)
 	bullet._on_hit(Vector3(1.0, 0.0, 1.0), fake_tree)
 
-	assert_eq(stub_tp.clear_calls.size(), 1,
-		"tree path taken → clear_trees_at called, not take_damage path")
+	assert_eq(stub_tp.clear_calls.size(), 0,
+		"bullet tree hit must early-return without calling clear_trees_at")
 
 	fake_main.queue_free()
 	await get_tree().process_frame
@@ -253,7 +256,9 @@ func test_bullet_on_hit_non_tree_does_not_clear_trees() -> void:
 
 const MortarShellScene := preload("res://scenes/projectiles/MortarShell.tscn")
 
-func test_mortar_on_hit_tree_triggers_clear() -> void:
+func test_mortar_on_hit_tree_does_not_clear_trees() -> void:
+	# MortarShell does not have can_destroy_trees — hitting a tree is consumed (early return)
+	# but the tree itself is NOT cleared.
 	var parts: Array = _make_fake_main_with_tree_placer()
 	var fake_main: Node = parts[0]
 	var stub_tp: StubTreePlacer = parts[1]
@@ -269,16 +274,15 @@ func test_mortar_on_hit_tree_triggers_clear() -> void:
 	var tree_col: StaticBody3D = _make_tree_collider()
 	shell._on_hit(Vector3(4.0, 0.0, 4.0), tree_col)
 
-	assert_eq(stub_tp.clear_calls.size(), 1,
-		"MortarShell._on_hit on a tree must trigger clear_trees_at")
+	assert_eq(stub_tp.clear_calls.size(), 0,
+		"MortarShell._on_hit on a tree must NOT call clear_trees_at (can_destroy_trees=false)")
 
 	fake_main.queue_free()
 	await get_tree().process_frame
 
 func test_mortar_on_hit_tree_does_not_apply_splash() -> void:
 	# Mortar returns early on tree hit — _apply_splash must NOT be called.
-	# We verify indirectly: splash calls take_damage on nearby colliders.
-	# With no physics world overlap, clear_calls == 1 means tree path taken.
+	# Also, clear_trees_at must NOT be called (can_destroy_trees=false).
 	var parts: Array = _make_fake_main_with_tree_placer()
 	var fake_main: Node = parts[0]
 	var stub_tp: StubTreePlacer = parts[1]
@@ -292,10 +296,9 @@ func test_mortar_on_hit_tree_does_not_apply_splash() -> void:
 	var tree_col: StaticBody3D = _make_tree_collider()
 	shell._on_hit(Vector3(0.0, 0.0, 0.0), tree_col)
 
-	# If the early return fired correctly, only clear was called (no explosion sound crash,
-	# no splash). The stub records exactly one call with no errors.
-	assert_eq(stub_tp.clear_calls.size(), 1,
-		"MortarShell tree hit must early-return before splash — one clear call only")
+	# Early return fired — no splash, no clear (can_destroy_trees=false).
+	assert_eq(stub_tp.clear_calls.size(), 0,
+		"MortarShell tree hit must early-return before splash — no clear_trees_at calls")
 
 	fake_main.queue_free()
 	await get_tree().process_frame

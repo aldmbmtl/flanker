@@ -282,7 +282,7 @@ func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_tea
 		rocket.shooter_team    = shooter_team
 		rocket.shooter_peer_id = shooter_peer_id
 		rocket.velocity        = dir * 0.1   # initial speed, Rocket.gd accelerates from here
-		get_tree().root.get_child(0).add_child(rocket)
+		VfxUtils.get_scene_root(self).add_child(rocket)
 		rocket.global_position = pos
 		return
 	if _bullet_scene == null:
@@ -293,13 +293,13 @@ func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_tea
 	bullet.shooter_team = shooter_team
 	bullet.set("shooter_peer_id", shooter_peer_id)
 	bullet.velocity = dir * 196.0
-	get_tree().root.get_child(0).add_child(bullet)
+	VfxUtils.get_scene_root(self).add_child(bullet)
 	bullet.global_position = pos
 	var main: Node = get_tree().root.get_node("Main")
 	if main.has_method("_on_bullet_hit_something") and shooter_peer_id == multiplayer.get_unique_id():
 		bullet.hit_something.connect(main._on_bullet_hit_something)
 
-@rpc("authority", "call_local", "unreliable_ordered")
+@rpc("authority", "call_remote", "unreliable_ordered")
 func spawn_cannonball_visuals(pos: Vector3, target: Vector3, damage: float, team: int) -> void:
 	if _cannonball_scene == null:
 		_cannonball_scene = preload("res://scenes/projectiles/Cannonball.tscn")
@@ -309,9 +309,10 @@ func spawn_cannonball_visuals(pos: Vector3, target: Vector3, damage: float, team
 	ball.shooter_team = team
 	ball.target_pos   = target
 	ball.position     = pos
-	get_tree().root.get_child(0).add_child(ball)
+	VfxUtils.get_scene_root(self).add_child(ball)
+	SoundManager.play_3d("res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_001.ogg", pos, 0.0, randf_range(0.9, 1.05))
 
-@rpc("authority", "call_local", "unreliable_ordered")
+@rpc("authority", "call_remote", "unreliable_ordered")
 func spawn_mortar_visuals(pos: Vector3, target: Vector3, damage: float, team: int) -> void:
 	if _mortar_scene == null:
 		_mortar_scene = preload("res://scenes/projectiles/MortarShell.tscn")
@@ -321,7 +322,8 @@ func spawn_mortar_visuals(pos: Vector3, target: Vector3, damage: float, team: in
 	shell.shooter_team = team
 	shell.target_pos   = target
 	shell.position     = pos
-	get_tree().root.get_child(0).add_child(shell)
+	VfxUtils.get_scene_root(self).add_child(shell)
+	SoundManager.play_3d("res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_004.ogg", pos, 1.0, randf_range(0.88, 1.0))
 
 var _minion_scene: PackedScene
 
@@ -422,10 +424,8 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 			if target_peer != shooter_peer and not GameSync.player_dead.get(target_peer, false):
 				var target_team: int = GameSync.get_player_team(target_peer)
 				if target_team == -1 or target_team != shooter_team:
-					var new_hp: float = GameSync.damage_player(target_peer, damage, shooter_team, shooter_peer)
-					apply_player_damage.rpc(target_peer, new_hp)
+					var new_hp: float = damage_player_broadcast(target_peer, damage, shooter_team, shooter_peer)
 					if new_hp <= 0.0:
-						notify_player_died.rpc(target_peer)
 						_apply_point_surge(shooter_peer, shooter_team)
 		spawn_bullet_visuals.rpc(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
 		# call_remote skips the server itself — spawn locally for the host
@@ -438,10 +438,8 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 
 	if hit_result.has("peer_id"):
 		var target_peer: int = hit_result.peer_id
-		var new_hp: float = GameSync.damage_player(target_peer, damage, shooter_team, shooter_peer)
-		apply_player_damage.rpc(target_peer, new_hp)
+		var new_hp: float = damage_player_broadcast(target_peer, damage, shooter_team, shooter_peer)
 		if new_hp <= 0.0:
-			notify_player_died.rpc(target_peer)
 			_apply_point_surge(shooter_peer, shooter_team)
 	elif hit_result.has("minion_path"):
 		var main: Node = get_tree().root.get_node("Main")
@@ -454,6 +452,18 @@ func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_t
 	# call_remote skips the server itself — spawn locally for the host
 	if projectile_type == "rocket":
 		spawn_bullet_visuals(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
+
+## Server-authoritative: damage a player and broadcast the result to all clients.
+## Calls GameSync.damage_player, then sends apply_player_damage.rpc (all peers)
+## and notify_player_died.rpc (clients only) when HP reaches zero.
+## Does NOT call _apply_point_surge — callers that need it add it after.
+## Must only be called on the server.
+func damage_player_broadcast(target_peer: int, amount: float, source_team: int, killer_peer: int = -1) -> float:
+	var new_hp: float = GameSync.damage_player(target_peer, amount, source_team, killer_peer)
+	apply_player_damage.rpc(target_peer, new_hp)
+	if new_hp <= 0.0:
+		notify_player_died.rpc(target_peer)
+	return new_hp
 
 @rpc("authority", "call_local", "reliable")
 func apply_player_damage(peer_id: int, new_health: float) -> void:
@@ -559,6 +569,70 @@ func sync_minion_states(ids: PackedInt32Array, positions: PackedVector3Array,
 
 # ── Tower / item sync ────────────────────────────────────────────────────────
 
+@rpc("authority", "call_remote", "unreliable")
+func notify_tower_hit(tower_name: String) -> void:
+	var main: Node = get_tree().root.get_node_or_null("Main")
+	if main == null:
+		return
+	var tower: Node = main.get_node_or_null(tower_name)
+	if tower != null and tower.has_method("_flash_hit"):
+		tower._flash_hit()
+
+@rpc("authority", "call_remote", "unreliable")
+func notify_minion_hit(minion_id: int) -> void:
+	var main: Node = get_tree().root.get_node_or_null("Main")
+	if main == null:
+		return
+	var spawner: Node = main.get_node_or_null("MinionSpawner")
+	var minion: Node = null
+	if spawner != null:
+		minion = spawner.get_minion_by_id(minion_id)
+	if minion == null:
+		minion = main.get_node_or_null("Minion_%d" % minion_id)
+	if minion != null and minion.has_method("_flash_hit"):
+		minion._flash_hit()
+
+@rpc("authority", "call_remote", "unreliable")
+func spawn_mg_visuals(tower_name: String, muzzle_pos: Vector3, hit_pos: Vector3, hit_normal: Vector3, hit_unit: bool) -> void:
+	var main: Node = get_tree().root.get_node_or_null("Main")
+	if main == null:
+		return
+	var tower: Node = main.get_node_or_null(tower_name)
+	if tower == null:
+		return
+	if tower.has_method("_spawn_muzzle_flash"):
+		tower._spawn_muzzle_flash(muzzle_pos)
+	if tower.has_method("_spawn_hit_impact"):
+		tower._spawn_hit_impact(hit_pos, hit_normal, hit_unit)
+	if tower.has_method("_spawn_tracer"):
+		tower._spawn_tracer(muzzle_pos, hit_pos)
+	SoundManager.play_3d("res://assets/kenney_sci-fi-sounds/Audio/laserSmall_002.ogg", muzzle_pos, -3.0, randf_range(0.92, 1.08))
+
+@rpc("authority", "call_remote", "unreliable")
+func spawn_slow_pulse_visuals(tower_name: String, origin: Vector3) -> void:
+	var main: Node = get_tree().root.get_node_or_null("Main")
+	if main == null:
+		return
+	var tower: Node = main.get_node_or_null(tower_name)
+	if tower != null and tower.has_method("_spawn_pulse_vfx"):
+		tower._spawn_pulse_vfx()
+	else:
+		# Fallback: tower node not found on this client (e.g. not yet spawned).
+		# Nothing to do — pulse VFX is cosmetic only.
+		pass
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func sync_mg_turret_rot(tower_name: String, yaw_rad: float) -> void:
+	var main: Node = get_tree().root.get_node_or_null("Main")
+	if main == null:
+		return
+	var tower: Node = main.get_node_or_null(tower_name)
+	if tower == null:
+		return
+	var pivot: Node3D = tower.get_node_or_null("TurretPivot")
+	if pivot != null:
+		pivot.rotation.y = yaw_rad
+
 @rpc("any_peer", "reliable")
 func request_place_item(world_pos: Vector3, team: int, item_type: String, subtype: String) -> void:
 	if not multiplayer.is_server():
@@ -573,7 +647,7 @@ func request_place_item(world_pos: Vector3, team: int, item_type: String, subtyp
 	var build_sys: Node = get_tree().root.get_node_or_null("Main/BuildSystem")
 	if build_sys == null:
 		return
-	var assigned_name: String = build_sys.place_item(world_pos, team, item_type, subtype)
+	var assigned_name: String = build_sys.place_item(world_pos, team, item_type, subtype, id)
 	if assigned_name != "":
 		spawn_item_visuals.rpc(world_pos, team, item_type, subtype, assigned_name)
 		# Server already has the node from place_item but never runs spawn_item_visuals
@@ -679,21 +753,14 @@ func spawn_missile_server(fire_pos: Vector3, target_pos: Vector3, team: int, lau
 	_spawn_missile_server(fire_pos, target_pos, team, launcher_type)
 
 func _spawn_missile_server(fire_pos: Vector3, target_pos: Vector3, team: int, launcher_type: String) -> void:
-	var def: Dictionary = LauncherDefs.DEFS.get(launcher_type, {})
-	if def.is_empty():
-		return
-	var missile_path: String = LauncherDefs.get_missile_scene(launcher_type)
-	var missile_scene: PackedScene = load(missile_path) as PackedScene
-	if missile_scene == null:
-		return
-	var missile: Node3D = missile_scene.instantiate() as Node3D
-	missile.configure(def, team, fire_pos, target_pos, launcher_type)
-	get_tree().root.get_child(0).add_child(missile)
-	missile.global_position = fire_pos
+	_do_spawn_missile_body(fire_pos, target_pos, team, launcher_type)
 
 # Executed on all remote clients — spawns the missile projectile.
 @rpc("authority", "call_remote", "reliable")
 func spawn_missile_visuals(fire_pos: Vector3, target_pos: Vector3, team: int, launcher_type: String) -> void:
+	_do_spawn_missile_body(fire_pos, target_pos, team, launcher_type)
+
+func _do_spawn_missile_body(fire_pos: Vector3, target_pos: Vector3, team: int, launcher_type: String) -> void:
 	var def: Dictionary = LauncherDefs.DEFS.get(launcher_type, {})
 	if def.is_empty():
 		return
@@ -703,7 +770,7 @@ func spawn_missile_visuals(fire_pos: Vector3, target_pos: Vector3, team: int, la
 		return
 	var missile: Node3D = missile_scene.instantiate() as Node3D
 	missile.configure(def, team, fire_pos, target_pos, launcher_type)
-	get_tree().root.get_child(0).add_child(missile)
+	VfxUtils.get_scene_root(self).add_child(missile)
 	missile.global_position = fire_pos
 
 # ── TeamData sync ─────────────────────────────────────────────────────────────
@@ -813,9 +880,7 @@ func broadcast_recon_reveal(target_pos: Vector3, reveal_radius: float, reveal_du
 # ── Game over broadcast ───────────────────────────────────────────────────────
 
 func _on_team_lives_game_over(winner_team: int) -> void:
-	# Only the server (or singleplayer) triggers this; broadcast to all clients.
-	if not multiplayer.has_multiplayer_peer():
-		return
+	# Only the server triggers this; broadcast to all clients.
 	if not multiplayer.is_server():
 		return
 	_rpc_game_over.rpc(winner_team)

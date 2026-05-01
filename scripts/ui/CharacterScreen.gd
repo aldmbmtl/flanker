@@ -18,17 +18,42 @@ const SkillNodeCardScene := preload("res://scenes/ui/SkillNodeCard.tscn")
 @onready var _xp_bar:        ProgressBar = $Panel/HSplit/LeftPanel/VBox/XPBar
 @onready var _attr_pts_label: Label      = $Panel/HSplit/LeftPanel/VBox/AttrPtsLabel
 
+@onready var _hp_row:    HBoxContainer = $Panel/HSplit/LeftPanel/VBox/HPRow
 @onready var _hp_bar:    ProgressBar = $Panel/HSplit/LeftPanel/VBox/HPRow/HPBar
 @onready var _hp_frac:   Label       = $Panel/HSplit/LeftPanel/VBox/HPRow/HPFrac
 @onready var _hp_btn:    Button      = $Panel/HSplit/LeftPanel/VBox/HPRow/HPBtn
 
+@onready var _spd_row:   HBoxContainer = $Panel/HSplit/LeftPanel/VBox/SpeedRow
 @onready var _spd_bar:   ProgressBar = $Panel/HSplit/LeftPanel/VBox/SpeedRow/SpeedBar
 @onready var _spd_frac:  Label       = $Panel/HSplit/LeftPanel/VBox/SpeedRow/SpeedFrac
 @onready var _spd_btn:   Button      = $Panel/HSplit/LeftPanel/VBox/SpeedRow/SpeedBtn
 
+@onready var _dmg_row:   HBoxContainer = $Panel/HSplit/LeftPanel/VBox/DamageRow
 @onready var _dmg_bar:   ProgressBar = $Panel/HSplit/LeftPanel/VBox/DamageRow/DamageBar
 @onready var _dmg_frac:  Label       = $Panel/HSplit/LeftPanel/VBox/DamageRow/DamageFrac
 @onready var _dmg_btn:   Button      = $Panel/HSplit/LeftPanel/VBox/DamageRow/DamageBtn
+
+@onready var _stam_row:  HBoxContainer = $Panel/HSplit/LeftPanel/VBox/StaminaRow
+@onready var _stam_bar:  ProgressBar   = $Panel/HSplit/LeftPanel/VBox/StaminaRow/StaminaBar
+@onready var _stam_frac: Label         = $Panel/HSplit/LeftPanel/VBox/StaminaRow/StaminaFrac
+@onready var _stam_btn:  Button        = $Panel/HSplit/LeftPanel/VBox/StaminaRow/StaminaBtn
+
+@onready var _tower_hp_row:  HBoxContainer = $Panel/HSplit/LeftPanel/VBox/TowerHPRow
+@onready var _tower_hp_bar:  ProgressBar   = $Panel/HSplit/LeftPanel/VBox/TowerHPRow/TowerHPBar
+@onready var _tower_hp_frac: Label         = $Panel/HSplit/LeftPanel/VBox/TowerHPRow/TowerHPFrac
+@onready var _tower_hp_btn:  Button        = $Panel/HSplit/LeftPanel/VBox/TowerHPRow/TowerHPBtn
+
+@onready var _placement_row:  HBoxContainer = $Panel/HSplit/LeftPanel/VBox/PlacementRangeRow
+@onready var _placement_bar:  ProgressBar   = $Panel/HSplit/LeftPanel/VBox/PlacementRangeRow/PlacementRangeBar
+@onready var _placement_frac: Label         = $Panel/HSplit/LeftPanel/VBox/PlacementRangeRow/PlacementRangeFrac
+@onready var _placement_btn:  Button        = $Panel/HSplit/LeftPanel/VBox/PlacementRangeRow/PlacementRangeBtn
+
+@onready var _fire_rate_row:  HBoxContainer = $Panel/HSplit/LeftPanel/VBox/FireRateRow
+@onready var _fire_rate_bar:  ProgressBar   = $Panel/HSplit/LeftPanel/VBox/FireRateRow/FireRateBar
+@onready var _fire_rate_frac: Label         = $Panel/HSplit/LeftPanel/VBox/FireRateRow/FireRateFrac
+@onready var _fire_rate_btn:  Button        = $Panel/HSplit/LeftPanel/VBox/FireRateRow/FireRateBtn
+
+var _is_fighter: bool = false
 
 # ── Right panel @onready ──────────────────────────────────────────────────────
 @onready var _role_label:    Label         = $Panel/HSplit/RightPanel/VBox/Header/RoleLabel
@@ -47,11 +72,43 @@ func setup(peer_id: int, is_mp: bool) -> void:
 	visible  = false
 	call_deferred("_init_ui")
 
+func set_role(is_fighter: bool) -> void:
+	_is_fighter = is_fighter
+	# Fighter-only rows
+	if _hp_row != null:
+		_hp_row.visible = _is_fighter
+	if _spd_row != null:
+		_spd_row.visible = _is_fighter
+	if _dmg_row != null:
+		_dmg_row.visible = _is_fighter
+	if _stam_row != null:
+		_stam_row.visible = _is_fighter
+	# Supporter-only rows
+	if _tower_hp_row != null:
+		_tower_hp_row.visible = not _is_fighter
+	if _placement_row != null:
+		_placement_row.visible = not _is_fighter
+	if _fire_rate_row != null:
+		_fire_rate_row.visible = not _is_fighter
+
 func _init_ui() -> void:
-	# Attribute buttons
+	# Attribute buttons — Fighter
 	_hp_btn.pressed.connect(_on_hp_pressed)
 	_spd_btn.pressed.connect(_on_spd_pressed)
 	_dmg_btn.pressed.connect(_on_dmg_pressed)
+	_stam_btn.pressed.connect(_on_stam_pressed)
+	# Attribute buttons — Supporter
+	_tower_hp_btn.pressed.connect(_on_tower_hp_pressed)
+	_placement_btn.pressed.connect(_on_placement_pressed)
+	_fire_rate_btn.pressed.connect(_on_fire_rate_pressed)
+	# Fighter rows visible only for Fighters; Supporter rows visible only for Supporters
+	_hp_row.visible         = _is_fighter
+	_spd_row.visible        = _is_fighter
+	_dmg_row.visible        = _is_fighter
+	_stam_row.visible       = _is_fighter
+	_tower_hp_row.visible   = not _is_fighter
+	_placement_row.visible  = not _is_fighter
+	_fire_rate_row.visible  = not _is_fighter
 	# Signals
 	LevelSystem.attribute_spent.connect(_on_attribute_spent)
 	LevelSystem.xp_gained.connect(_on_xp_gained)
@@ -141,9 +198,10 @@ func _refresh_attrs() -> void:
 
 	_attr_pts_label.text = "%d attr pt%s" % [pts, "s" if pts != 1 else ""]
 
-	var hp_pts: int  = attrs.get("hp", 0)
-	var spd_pts: int = attrs.get("speed", 0)
-	var dmg_pts: int = attrs.get("damage", 0)
+	var hp_pts:   int = attrs.get("hp", 0)
+	var spd_pts:  int = attrs.get("speed", 0)
+	var dmg_pts:  int = attrs.get("damage", 0)
+	var stam_pts: int = attrs.get("stamina", 0)
 
 	_hp_bar.value    = hp_pts
 	_hp_frac.text    = "%d/%d" % [hp_pts, cap]
@@ -156,6 +214,27 @@ func _refresh_attrs() -> void:
 	_dmg_bar.value    = dmg_pts
 	_dmg_frac.text    = "%d/%d" % [dmg_pts, cap]
 	_dmg_btn.disabled = (dmg_pts >= cap) or (pts <= 0)
+
+	_stam_bar.value    = stam_pts
+	_stam_frac.text    = "%d/%d" % [stam_pts, cap]
+	_stam_btn.disabled = (stam_pts >= cap) or (pts <= 0)
+
+	# Supporter attrs
+	var thp_pts:  int = attrs.get("tower_hp", 0)
+	var plc_pts:  int = attrs.get("placement_range", 0)
+	var fr_pts:   int = attrs.get("tower_fire_rate", 0)
+
+	_tower_hp_bar.value    = thp_pts
+	_tower_hp_frac.text    = "%d/%d" % [thp_pts, cap]
+	_tower_hp_btn.disabled = (thp_pts >= cap) or (pts <= 0)
+
+	_placement_bar.value    = plc_pts
+	_placement_frac.text    = "%d/%d" % [plc_pts, cap]
+	_placement_btn.disabled = (plc_pts >= cap) or (pts <= 0)
+
+	_fire_rate_bar.value    = fr_pts
+	_fire_rate_frac.text    = "%d/%d" % [fr_pts, cap]
+	_fire_rate_btn.disabled = (fr_pts >= cap) or (pts <= 0)
 
 func _refresh_xp() -> void:
 	var lvl: int    = LevelSystem.get_level(_peer_id)
@@ -199,6 +278,18 @@ func _on_spd_pressed() -> void:
 
 func _on_dmg_pressed() -> void:
 	_spend_attr("damage")
+
+func _on_stam_pressed() -> void:
+	_spend_attr("stamina")
+
+func _on_tower_hp_pressed() -> void:
+	_spend_attr("tower_hp")
+
+func _on_placement_pressed() -> void:
+	_spend_attr("placement_range")
+
+func _on_fire_rate_pressed() -> void:
+	_spend_attr("tower_fire_rate")
 
 func _spend_attr(attr: String) -> void:
 	if _is_mp and multiplayer.has_multiplayer_peer() and not multiplayer.is_server():

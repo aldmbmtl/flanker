@@ -108,3 +108,69 @@ func test_fighter_role_leaves_xp_visible() -> void:
 	xp_bar.visible = true
 	# No Supporter branch applied — widget untouched
 	assert_true(xp_bar.visible, "XPBar must stay visible when Supporter branch is NOT applied (Fighter)")
+
+# ── CharacterScreen.set_role — Fighter attr rows hidden for Supporter ─────────
+
+const CharacterScreenScene := preload("res://scenes/ui/CharacterScreen.tscn")
+
+func test_character_screen_supporter_hides_fighter_rows() -> void:
+	# Regression: Fighter HP/Speed/Damage rows were never hidden when role=Supporter
+	# because set_role() only toggled StaminaRow, not the other three Fighter rows.
+	var screen: Control = CharacterScreenScene.instantiate()
+	add_child_autofree(screen)
+	await get_tree().process_frame  # let @onready refs resolve
+
+	screen.set_role(false)  # Supporter
+
+	assert_false(screen.get_node("Panel/HSplit/LeftPanel/VBox/HPRow").visible,
+		"HPRow must be hidden for Supporter")
+	assert_false(screen.get_node("Panel/HSplit/LeftPanel/VBox/SpeedRow").visible,
+		"SpeedRow must be hidden for Supporter")
+	assert_false(screen.get_node("Panel/HSplit/LeftPanel/VBox/DamageRow").visible,
+		"DamageRow must be hidden for Supporter")
+	assert_false(screen.get_node("Panel/HSplit/LeftPanel/VBox/StaminaRow").visible,
+		"StaminaRow must be hidden for Supporter")
+
+func test_character_screen_supporter_shows_supporter_rows() -> void:
+	var screen: Control = CharacterScreenScene.instantiate()
+	add_child_autofree(screen)
+	await get_tree().process_frame
+
+	screen.set_role(false)  # Supporter
+
+	assert_true(screen.get_node("Panel/HSplit/LeftPanel/VBox/TowerHPRow").visible,
+		"TowerHPRow must be visible for Supporter")
+	assert_true(screen.get_node("Panel/HSplit/LeftPanel/VBox/PlacementRangeRow").visible,
+		"PlacementRangeRow must be visible for Supporter")
+	assert_true(screen.get_node("Panel/HSplit/LeftPanel/VBox/FireRateRow").visible,
+		"FireRateRow must be visible for Supporter")
+
+func test_character_screen_fighter_shows_fighter_rows() -> void:
+	var screen: Control = CharacterScreenScene.instantiate()
+	add_child_autofree(screen)
+	await get_tree().process_frame
+
+	screen.set_role(true)  # Fighter
+
+	assert_true(screen.get_node("Panel/HSplit/LeftPanel/VBox/HPRow").visible,
+		"HPRow must be visible for Fighter")
+	assert_true(screen.get_node("Panel/HSplit/LeftPanel/VBox/SpeedRow").visible,
+		"SpeedRow must be visible for Fighter")
+	assert_true(screen.get_node("Panel/HSplit/LeftPanel/VBox/DamageRow").visible,
+		"DamageRow must be visible for Fighter")
+	assert_true(screen.get_node("Panel/HSplit/LeftPanel/VBox/StaminaRow").visible,
+		"StaminaRow must be visible for Fighter")
+
+func test_character_screen_fighter_hides_supporter_rows() -> void:
+	var screen: Control = CharacterScreenScene.instantiate()
+	add_child_autofree(screen)
+	await get_tree().process_frame
+
+	screen.set_role(true)  # Fighter
+
+	assert_false(screen.get_node("Panel/HSplit/LeftPanel/VBox/TowerHPRow").visible,
+		"TowerHPRow must be hidden for Fighter")
+	assert_false(screen.get_node("Panel/HSplit/LeftPanel/VBox/PlacementRangeRow").visible,
+		"PlacementRangeRow must be hidden for Fighter")
+	assert_false(screen.get_node("Panel/HSplit/LeftPanel/VBox/FireRateRow").visible,
+		"FireRateRow must be hidden for Fighter")

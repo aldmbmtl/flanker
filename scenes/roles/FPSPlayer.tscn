@@ -6,7 +6,7 @@
 
 [node name="FPSPlayer" instance=ExtResource("base")]
 script = ExtResource("1")
-collision_mask = 3
+collision_mask = 7
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.8, 0)

@@ -98,6 +98,8 @@ extends StaticBody3D
 
 ## Team that owns this tower. Set by BuildSystem.spawn_item_local() after add_child.
 var team: int = 0
+## Peer who placed this tower. -1 = unknown / singleplayer peer 1.
+var placer_peer_id: int = -1
 
 var _health: float = 0.0
 var _dead: bool = false
@@ -260,6 +262,7 @@ func _process(delta: float) -> void:
 		look_pos.y = _turret_pivot.global_position.y
 		if look_pos.distance_squared_to(_turret_pivot.global_position) > 0.01:
 			_turret_pivot.look_at(look_pos, Vector3.UP)
+			_on_turret_rotated(_turret_pivot.rotation.y)
 	_do_attack(target)
 	_attack_timer = attack_interval
 
@@ -334,6 +337,9 @@ func _has_line_of_sight(target: Node3D) -> bool:
 	var to: Vector3 = target.global_position + Vector3(0.0, 0.8, 0.0)
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	var excluded: Array[RID] = [get_rid(), target.get_rid()]
+	var hit_body: Node = target.get_node_or_null("HitBody")
+	if hit_body != null:
+		excluded.append(hit_body.get_rid())
 	for _attempt in range(4):
 		var query := PhysicsRayQueryParameters3D.create(from, to)
 		query.exclude = excluded
@@ -354,14 +360,32 @@ func _has_line_of_sight(target: Node3D) -> bool:
 func _do_attack(target: Node3D) -> void:
 	if projectile_scene == null:
 		return
-	var proj: Node3D = projectile_scene.instantiate() as Node3D
-	if proj == null:
-		return
-	var fire_pos: Vector3 = get_fire_position()
+
+## Shared helper for ballistic-arc towers (Cannon, Mortar).
+## Instantiates proj_scene, sets damage/source/team/spawner, adds to scene root,
+## plays sound, and calls rpc_callable on the server peer.
+## rpc_callable signature: (spawn_pos, aim_pos, dmg, team)
+func _fire_ballistic(proj_scene: PackedScene, dmg: float, source_tag: String,
+		snd: String, snd_vol: float, pitch_min: float, pitch_max: float,
+		target: Node3D, rpc_callable: Callable) -> void:
+	var spawn_pos: Vector3 = get_fire_position()
+	var aim_pos: Vector3 = target.global_position + Vector3(0.0, 0.5, 0.0)
+	var proj: Node3D = proj_scene.instantiate()
+	proj.set("damage",       dmg)
+	proj.set("source",       source_tag)
 	proj.set("shooter_team", team)
-	proj.set("spawner_rid", get_rid())
-	proj.position = fire_pos   # set before add_child so _ready() sees origin
-	get_tree().root.get_child(0).add_child(proj)
+	proj.set("spawner_rid",  get_rid())
+	proj.set("target_pos",   aim_pos)
+	proj.position = spawn_pos   # before add_child so _ready() sees origin
+	VfxUtils.get_scene_root(self).add_child(proj)
+	SoundManager.play_3d(snd, spawn_pos, snd_vol, randf_range(pitch_min, pitch_max))
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		rpc_callable.call(spawn_pos, aim_pos, dmg, team)
+
+## Called by _process after _turret_pivot.look_at() when the pivot actually moved.
+## Override in subclasses that need to broadcast the new yaw to remote peers.
+func _on_turret_rotated(_yaw_rad: float) -> void:
+	pass
 
 ## Returns world-space fire origin.
 ## Looks for a child node named "FirePoint"; falls back to global_position + fallback height.
@@ -394,6 +418,8 @@ func take_damage(amount: float, _source: String, source_team: int = -1, shooter_
 	_killer_peer_id = shooter_peer_id
 	_health -= amount
 	_flash_hit()
+	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
+		LobbyManager.notify_tower_hit.rpc(name)
 	if _health <= 0.0:
 		_die()
 
@@ -406,20 +432,12 @@ func _die() -> void:
 	var xp: int = xp_on_death if xp_on_death > 0 else LevelSystem.XP_TOWER
 	if _killer_peer_id > 0:
 		LevelSystem.award_xp(_killer_peer_id, xp)
-	elif not multiplayer.has_multiplayer_peer():
-		# Singleplayer — award to local player (peer id 1)
+	else:
+		# No known killer — award to local player (peer id 1 in SP, no-op in MP)
 		LevelSystem.award_xp(1, xp)
 
-	if multiplayer.has_multiplayer_peer():
-		# Multiplayer: server broadcasts despawn to all peers (call_local)
-		LobbyManager.despawn_tower.rpc(name)
-	else:
-		# Singleplayer: capture vars before queue_free, emit signal manually
-		var t: int = team
-		var tt: String = tower_type
-		var n: String = name
-		queue_free()
-		LobbyManager.tower_despawned.emit(tt, t, n)
+	# Broadcast despawn to all peers (call_local — runs locally in SP too)
+	LobbyManager.despawn_tower.rpc(name)
 
 # ── Hit flash ─────────────────────────────────────────────────────────────────
 
