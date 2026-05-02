@@ -5,6 +5,21 @@ Godot 4 hybrid FPS/RTS game. Single-player and multiplayer (up to 10 players via
 
 ---
 
+## MANDATORY: Read the Plans Directory Before Starting Any Task
+
+Before beginning any fix, feature, or refactor, read every `.md` file in the `plans/` directory.
+
+- Plans marked **Status: Approved, not started** or **Status: In progress** are active. Work must align with them — do not make architectural decisions that conflict with an active plan.
+- Plans marked **Status: Complete** have been fully executed and may be skipped.
+- If a plan is fully implemented, update its `Status:` line at the top of the file to `Status: Complete` before finishing your work.
+
+```bash
+# Quick check — list all plans and their current status
+grep -h "^\*\*Status:" plans/*.md
+```
+
+---
+
 ## MANDATORY: Tests Must Pass After Every Code Change
 
 **Run `make test` after every single code change — no exceptions.**
