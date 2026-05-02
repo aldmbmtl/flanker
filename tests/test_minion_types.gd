@@ -637,6 +637,117 @@ func test_cannonball_arc_wrong_when_position_set_after_add_child() -> void:
 	assert_almost_eq(ball.recorded_position.x, 0.0, 0.05,
 		"Bug confirmed: position at _ready is ZERO when set after add_child")
 
+# ─── Regression: cannon minion RPC sync uses spawn_cannonball_visuals ─────────
+# Bug: CannonMinionAI._fire_at called spawn_bullet_visuals.rpc instead of
+# spawn_cannonball_visuals.rpc — clients received a flat bullet tracer with no
+# arc, no splash VFX, and wrong lifetime instead of a proper ballistic cannonball.
+#
+# These tests call the REAL _fire_at via a thin subclass that only suppresses
+# visual/audio side-effects, then intercept RPCs via MockMultiplayerAPI.
+
+class RealFireCannonMinion extends CannonMinionAI:
+	## Suppresses visuals and audio only — _fire_at runs real production code.
+	func _build_visuals() -> void:
+		pass
+
+	func _init() -> void:
+		var sa := AudioStreamPlayer3D.new(); sa.name = "ShootAudio"; add_child(sa)
+		var da := AudioStreamPlayer3D.new(); da.name = "DeathAudio"; add_child(da)
+
+	func _ready() -> void:
+		health = max_health
+		add_to_group("minions")
+		add_to_group("minion_units")
+
+func test_cannon_minion_fire_at_calls_spawn_cannonball_visuals_rpc() -> void:
+	## Regression: _fire_at must RPC spawn_cannonball_visuals, NOT spawn_bullet_visuals.
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var cannon := RealFireCannonMinion.new()
+	cannon.max_health = 40.0
+	cannon.attack_damage = 40.0
+	cannon.shoot_range = 25.0
+	cannon.detect_range = 28.0
+	add_child_autofree(cannon)
+	cannon.setup(0, [], 0)
+	cannon.global_position = Vector3.ZERO
+
+	var target := FakeTower.new()
+	target.team = 1
+	add_child_autofree(target)
+	target.global_position = Vector3(10.0, 0.0, 0.0)
+
+	cannon._fire_at(target)
+
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+	assert_true(mock.was_called("spawn_cannonball_visuals"),
+		"_fire_at must RPC spawn_cannonball_visuals, not spawn_bullet_visuals")
+	assert_false(mock.was_called("spawn_bullet_visuals"),
+		"spawn_bullet_visuals must NOT be called by cannon minion _fire_at")
+
+func test_cannon_minion_rpc_passes_target_pos_not_direction() -> void:
+	## spawn_cannonball_visuals takes a target_pos (Vector3), not a normalised
+	## direction. Arg[1] must be the raw world-space target position.
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var cannon := RealFireCannonMinion.new()
+	cannon.max_health = 40.0
+	cannon.attack_damage = 40.0
+	cannon.shoot_range = 25.0
+	cannon.detect_range = 28.0
+	add_child_autofree(cannon)
+	cannon.setup(0, [], 0)
+	cannon.global_position = Vector3.ZERO
+
+	var target := FakeTower.new()
+	target.team = 1
+	add_child_autofree(target)
+	target.global_position = Vector3(15.0, 0.0, 0.0)
+
+	cannon._fire_at(target)
+
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+	var calls: Array = mock.calls_to("spawn_cannonball_visuals")
+	assert_eq(calls.size(), 1, "spawn_cannonball_visuals must be called exactly once")
+	if calls.size() > 0:
+		var arg1: Vector3 = calls[0]["args"][1]
+		assert_almost_eq(arg1.x, 15.0, 0.05,
+			"RPC arg[1].x must equal the tower's world x position, not a normalised direction")
+
+func test_cannon_minion_rpc_passes_correct_damage_and_team() -> void:
+	var mock := MockMultiplayerAPI.new()
+	get_tree().set_multiplayer(mock, LobbyManager.get_path())
+
+	var cannon := RealFireCannonMinion.new()
+	cannon.max_health = 40.0
+	cannon.attack_damage = 40.0
+	cannon.shoot_range = 25.0
+	cannon.detect_range = 28.0
+	add_child_autofree(cannon)
+	cannon.setup(1, [], 0)  # red team
+	cannon.global_position = Vector3.ZERO
+
+	var target := FakeTower.new()
+	target.team = 0
+	add_child_autofree(target)
+	target.global_position = Vector3(8.0, 0.0, 0.0)
+
+	cannon._fire_at(target)
+
+	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+	var calls: Array = mock.calls_to("spawn_cannonball_visuals")
+	assert_eq(calls.size(), 1, "spawn_cannonball_visuals must be called exactly once")
+	if calls.size() > 0:
+		assert_almost_eq(float(calls[0]["args"][2]), 40.0, 0.001,
+			"RPC damage arg must equal attack_damage")
+		assert_eq(int(calls[0]["args"][3]), 1,
+			"RPC team arg must equal the cannon minion's team")
+
 # ─── HealerMinionAI: player heal routing ─────────────────────────────────────
 # Regression: before fix, healer called best.heal() on the player node directly.
 # Puppet BasePlayer nodes have no heal() method — so remote players were never

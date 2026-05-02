@@ -47,7 +47,7 @@ static func _cannon_barrage(peer_id: int) -> void:
 static func _mass_heal(peer_id: int) -> void:
 	var team: int = SkillTree.get_player_team(peer_id)
 	var tree: SceneTree = Engine.get_main_loop().root.get_tree()
-	# Heal friendly minions
+	# Heal friendly minions (minion.heal() is safe — server-only, no RPC needed)
 	for m in tree.get_nodes_in_group("minions"):
 		var m_team: int = int(m.get("team") if m.get("team") != null else -1)
 		if m_team != team:
@@ -56,10 +56,10 @@ static func _mass_heal(peer_id: int) -> void:
 			continue
 		if m.has_method("heal"):
 			m.heal(30.0)
-	# Heal friendly players
-	for p in tree.get_nodes_in_group("players"):
-		var p_team: int = int(p.get("player_team") if p.get("player_team") != null else -1)
-		if p_team != team:
+	# Heal friendly players via authoritative broadcast so remote clients receive HP.
+	for pid in GameSync.player_teams:
+		if GameSync.get_player_team(pid) != team:
 			continue
-		if p.has_method("heal"):
-			p.heal(30.0)
+		if GameSync.player_dead.get(pid, false):
+			continue
+		LobbyManager.heal_player_broadcast(pid, 30.0)

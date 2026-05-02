@@ -60,6 +60,6 @@ func _fire_at(target: Node3D) -> void:
 	VfxUtils.get_scene_root(self).add_child(ball)
 
 	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		LobbyManager.spawn_bullet_visuals.rpc(fire_pos, (target_pos - fire_pos).normalized(), attack_damage, team)
+		LobbyManager.spawn_cannonball_visuals.rpc(fire_pos, target_pos, attack_damage, team)
 
 	shoot_audio.play()

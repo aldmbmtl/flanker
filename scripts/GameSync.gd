@@ -12,6 +12,8 @@ var respawn_timer: float = 0.0
 var respawn_countdown: Dictionary = {}
 var player_reserve_ammo: Dictionary = {}  # {peer_id: int}  total reserve across both slots
 var player_weapon_type: Dictionary = {}   # {peer_id: String}  active weapon name
+var player_shield_hp: Dictionary = {}     # {peer_id: float}  active Iron Skin shield HP
+var player_shield_timer: Dictionary = {}  # {peer_id: float}  remaining shield duration
 
 const PLAYER_MAX_HP: float = 100.0
 const PLAYER_SYNC_INTERVAL := 5
@@ -42,8 +44,21 @@ func set_player_team(peer_id: int, team: int) -> void:
 func damage_player(peer_id: int, amount: float, source_team: int, killer_peer_id: int = -1) -> float:
 	if player_dead.get(peer_id, false):
 		return player_healths.get(peer_id, 0.0)
+	# Drain Iron Skin shield before HP (server-authoritative, eliminates race condition
+	# where apply_iron_skin RPC and apply_player_damage RPC arrive out of order).
+	var actual: float = amount
+	var shield: float = player_shield_hp.get(peer_id, 0.0)
+	if shield > 0.0:
+		var absorbed: float = minf(actual, shield)
+		shield -= absorbed
+		actual -= absorbed
+		if shield <= 0.0:
+			player_shield_hp.erase(peer_id)
+			player_shield_timer.erase(peer_id)
+		else:
+			player_shield_hp[peer_id] = shield
 	var before: float = get_player_health(peer_id)
-	var hp: float = before - amount
+	var hp: float = before - actual
 	player_healths[peer_id] = hp
 	player_health_changed.emit(peer_id, hp)
 	
@@ -68,6 +83,14 @@ func damage_player(peer_id: int, amount: float, source_team: int, killer_peer_id
 func _process(delta: float) -> void:
 	if NetworkManager._peer != null and not multiplayer.is_server():
 		return
+	# Tick Iron Skin shield timers — expire shields when duration runs out.
+	for pid in player_shield_timer.keys():
+		var t: float = player_shield_timer.get(pid, 0.0) - delta
+		if t <= 0.0:
+			player_shield_timer.erase(pid)
+			player_shield_hp.erase(pid)
+		else:
+			player_shield_timer[pid] = t
 	for peer_id in player_dead.keys():
 		if player_dead.get(peer_id, false):
 			if respawn_countdown.has(peer_id):
@@ -98,6 +121,17 @@ func set_player_reserve_ammo(peer_id: int, reserve: int, weapon_type: String) ->
 	player_weapon_type[peer_id] = weapon_type
 	player_ammo_changed.emit(peer_id, reserve)
 
+func get_player_shield_hp(peer_id: int) -> float:
+	return player_shield_hp.get(peer_id, 0.0)
+
+func set_player_shield(peer_id: int, hp: float, duration: float) -> void:
+	if hp > 0.0:
+		player_shield_hp[peer_id] = hp
+		player_shield_timer[peer_id] = duration
+	else:
+		player_shield_hp.erase(peer_id)
+		player_shield_timer.erase(peer_id)
+
 func reset() -> void:
 	game_seed = 0
 	time_seed = -1
@@ -107,6 +141,8 @@ func reset() -> void:
 	respawn_countdown.clear()
 	player_reserve_ammo.clear()
 	player_weapon_type.clear()
+	player_shield_hp.clear()
+	player_shield_timer.clear()
 	# Restore default spawn positions
 	player_spawn_positions.clear()
 	player_spawn_positions[0] = Vector3(0.0, 0.0, 82.0)

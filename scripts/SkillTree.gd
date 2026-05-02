@@ -135,12 +135,19 @@ func get_ally_players(team: int, exclude_id: int = -1) -> Array:
 		return []
 	var result: Array = []
 	for child in main.get_children():
-		if not child.name.begins_with("FPSPlayer_"):
+		# Accept both FPSPlayer_<id> (local / server-player) and
+		# RemotePlayer_<id> (puppet nodes representing remote clients on the server).
+		var pid: int = -1
+		if child.name.begins_with("FPSPlayer_"):
+			var id_str: String = child.name.substr("FPSPlayer_".length())
+			if id_str.is_valid_int():
+				pid = int(id_str)
+		elif child.name.begins_with("RemotePlayer_"):
+			var id_str: String = child.name.substr("RemotePlayer_".length())
+			if id_str.is_valid_int():
+				pid = int(id_str)
+		if pid < 0:
 			continue
-		var id_str: String = child.name.substr("FPSPlayer_".length())
-		if not id_str.is_valid_int():
-			continue
-		var pid: int = int(id_str)
 		if pid == exclude_id:
 			continue
 		if GameSync.get_player_team(pid) == team:

@@ -53,16 +53,17 @@ static func _field_medic(peer_id: int) -> void:
 	if caster == null:
 		return
 	var team: int = SkillTree.get_player_team(peer_id)
-	# Heal self
-	if caster.has_method("heal"):
-		caster.heal(FIELD_MEDIC_HEAL)
+	# Heal self via authoritative broadcast (works for both local and remote casters).
+	LobbyManager.heal_player_broadcast(peer_id, FIELD_MEDIC_HEAL)
 	# Heal nearby allies
 	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
 			continue
 		var dist: float = (ally as Node3D).global_position.distance_to(caster.global_position)
-		if dist <= FIELD_MEDIC_RANGE and ally.has_method("heal"):
-			ally.heal(FIELD_MEDIC_HEAL)
+		if dist <= FIELD_MEDIC_RANGE:
+			var ally_pid: int = _peer_id_from_node(ally)
+			if ally_pid > 0:
+				LobbyManager.heal_player_broadcast(ally_pid, FIELD_MEDIC_HEAL)
 
 static func _rally_cry(peer_id: int) -> void:
 	var caster: Node = _resolve(peer_id)
@@ -71,6 +72,13 @@ static func _rally_cry(peer_id: int) -> void:
 	var team: int = SkillTree.get_player_team(peer_id)
 	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
 	var is_mp_server: bool = _mp.has_multiplayer_peer() and _mp.is_server()
+
+	# Apply to caster first (get_ally_players excludes caster).
+	caster.set_meta("rally_speed_bonus", RALLY_CRY_BONUS)
+	caster.set_meta("rally_cry_timer",   RALLY_CRY_DURATION)
+	if is_mp_server and peer_id != _mp.get_unique_id() and _mp.get_peers().has(peer_id):
+		SkillTree.apply_rally_cry.rpc_id(peer_id, RALLY_CRY_BONUS, RALLY_CRY_DURATION)
+
 	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
 			continue
@@ -85,34 +93,32 @@ static func _rally_cry(peer_id: int) -> void:
 						and _mp.get_peers().has(ally_peer_id):
 					SkillTree.apply_rally_cry.rpc_id(ally_peer_id, RALLY_CRY_BONUS, RALLY_CRY_DURATION)
 
-## Extract peer_id from a node named "FPSPlayer_<id>".
+## Extract peer_id from a node named "FPSPlayer_<id>" or "RemotePlayer_<id>".
 static func _peer_id_from_node(node: Node) -> int:
 	var n: String = node.name
-	var prefix: String = "FPSPlayer_"
-	if not n.begins_with(prefix):
-		return -1
-	var id_str: String = n.substr(prefix.length())
-	if not id_str.is_valid_int():
-		return -1
-	return int(id_str)
+	for prefix in ["FPSPlayer_", "RemotePlayer_"]:
+		if n.begins_with(prefix):
+			var id_str: String = n.substr(prefix.length())
+			if id_str.is_valid_int():
+				return int(id_str)
+	return -1
 
 static func _revive_pulse(peer_id: int) -> void:
 	var caster: Node = _resolve(peer_id)
 	if caster == null:
 		return
 	var team: int = SkillTree.get_player_team(peer_id)
-	# Full self-heal
-	if caster.has_method("heal") and caster.has_method("_get_max_hp"):
-		caster.heal(caster._get_max_hp())
-	elif caster.has_method("heal"):
-		caster.heal(999.0)
+	# Full self-heal via authoritative broadcast (capped at max HP inside heal_player_broadcast).
+	LobbyManager.heal_player_broadcast(peer_id, 999.0)
 	# Heal allies within range
 	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
 			continue
 		var dist: float = (ally as Node3D).global_position.distance_to(caster.global_position)
-		if dist <= REVIVE_PULSE_RANGE and ally.has_method("heal"):
-			ally.heal(REVIVE_PULSE_ALLY)
+		if dist <= REVIVE_PULSE_RANGE:
+			var ally_pid: int = _peer_id_from_node(ally)
+			if ally_pid > 0:
+				LobbyManager.heal_player_broadcast(ally_pid, REVIVE_PULSE_ALLY)
 
 # ── DPS branch ────────────────────────────────────────────────────────────────
 
@@ -201,10 +207,9 @@ static func _rapid_fire(peer_id: int) -> void:
 	var player: Node = _resolve(peer_id)
 	if player == null:
 		return
-	# Store current weapon type so FPSController can scope the boost
-	var weapon_type: String = ""
-	if player.has_method("get_current_weapon_type"):
-		weapon_type = player.get_current_weapon_type()
+	# Read weapon type from server-authoritative GameSync dict; avoids calling
+	# get_current_weapon_type() on a puppet BasePlayer node (which has no such method).
+	var weapon_type: String = GameSync.player_weapon_type.get(peer_id, "")
 	player.set_meta("rapid_fire_timer",  RAPID_FIRE_DURATION)
 	player.set_meta("rapid_fire_weapon", weapon_type)
 	# Deliver to owning client.
@@ -246,6 +251,8 @@ static func _rocket_barrage(peer_id: int) -> void:
 		return
 	var scene_root: Node = Engine.get_main_loop().root.get_child(0)
 	var fire_pos: Vector3 = caster_pos + Vector3(0.0, 1.2, 0.0)
+	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
+	var is_mp_server: bool = _mp.has_multiplayer_peer() and _mp.is_server()
 
 	for target in targets:
 		var rocket: Node3D = rocket_scene.instantiate()
@@ -257,6 +264,9 @@ static func _rocket_barrage(peer_id: int) -> void:
 		rocket.set("velocity",        dir * 49.0)
 		scene_root.add_child(rocket)
 		rocket.global_position = fire_pos
+		# Sync rocket visuals to all clients.
+		if is_mp_server:
+			LobbyManager.spawn_bullet_visuals.rpc(fire_pos, dir, 80.0, -1, peer_id, "rocket")
 
 # ── Tank branch ───────────────────────────────────────────────────────────────
 
@@ -264,16 +274,19 @@ static func _adrenaline(peer_id: int) -> void:
 	var player: Node = _resolve(peer_id)
 	if player == null:
 		return
-	if player.has_method("heal"):
-		player.heal(ADRENALINE_HEAL)
+	LobbyManager.heal_player_broadcast(peer_id, ADRENALINE_HEAL)
 
 static func _iron_skin(peer_id: int) -> void:
 	var player: Node = _resolve(peer_id)
 	if player == null:
 		return
+	# Set shield state in GameSync first (server-authoritative) — damage_player()
+	# will drain shield before HP, eliminating the RPC ordering race condition.
+	GameSync.set_player_shield(peer_id, IRON_SKIN_HP, IRON_SKIN_DURATION)
+	# Also set metas on the server-side node for any server-path reads.
 	player.set_meta("shield_hp",    IRON_SKIN_HP)
 	player.set_meta("shield_timer", IRON_SKIN_DURATION)
-	# Deliver to owning client.
+	# Deliver to owning client so FPSController can show local shield feedback.
 	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
 	if _mp.has_multiplayer_peer() and _mp.is_server() and peer_id != _mp.get_unique_id() \
 			and _mp.get_peers().has(peer_id):
