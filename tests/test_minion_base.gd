@@ -97,6 +97,36 @@ func test_take_damage_accumulates() -> void:
 	minion.take_damage(25.0, "player", 1)
 	assert_eq(minion.health, 40.0)
 
+# ── kill_points ───────────────────────────────────────────────────────────────
+
+func test_kill_points_default_is_five() -> void:
+	assert_eq(minion.kill_points, 5, "Default kill_points must be 5")
+
+func test_kill_by_player_awards_kill_points() -> void:
+	TeamData.sync_from_server(0, 0)
+	minion.kill_points = 20
+	minion.take_damage(80.0, "player", 1)  # killer_team=1
+	assert_eq(TeamData.get_points(1), 20, "Player kill must award kill_points to killer team")
+
+func test_kill_by_tower_awards_double_kill_points() -> void:
+	TeamData.sync_from_server(0, 0)
+	minion.kill_points = 20
+	minion.take_damage(80.0, "tower", -1)  # _killer_team=-1 = tower
+	assert_eq(TeamData.get_points(0), 40, "Tower kill must award kill_points*2 to team 0")
+
+func test_ram_tier0_kill_points_set_by_spawner() -> void:
+	# Verify MinionSpawner.RAM_TIER_KILL_POINTS[0] matches the expected value (20).
+	const SpawnerScript := preload("res://scripts/MinionSpawner.gd")
+	assert_eq(SpawnerScript.RAM_TIER_KILL_POINTS[0], 20, "Ram tier 0 kill_points must be 20")
+
+func test_ram_tier1_kill_points_set_by_spawner() -> void:
+	const SpawnerScript := preload("res://scripts/MinionSpawner.gd")
+	assert_eq(SpawnerScript.RAM_TIER_KILL_POINTS[1], 35, "Ram tier 1 kill_points must be 35")
+
+func test_ram_tier2_kill_points_set_by_spawner() -> void:
+	const SpawnerScript := preload("res://scripts/MinionSpawner.gd")
+	assert_eq(SpawnerScript.RAM_TIER_KILL_POINTS[2], 55, "Ram tier 2 kill_points must be 55")
+
 # ── death ─────────────────────────────────────────────────────────────────────
 
 func test_death_at_zero_hp() -> void:
@@ -291,38 +321,9 @@ func test_find_target_skips_over_gunned_targets() -> void:
 	var target: Node3D = minion._find_target()
 	assert_true(target == enemy2, "minion should target ungunned enemy2, not over-gunned enemy1")
 
-func test_separation_stronger_at_closer_range() -> void:
-	var min1: FakeMinion = FakeMinion.new()
-	var min2: FakeMinion = FakeMinion.new()
-	min1.team = 0
-	min1._dead = false
-	min1.is_puppet = false
-	min2.team = 0
-	min2._dead = false
-	min2.is_puppet = false
-	min1.add_to_group("minions")
-	min2.add_to_group("minions")
-	minion.add_child(min1)
-	minion.add_child(min2)
-	var sa1: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
-	sa1.name = "ShootAudio"
-	var da1: AudioStreamPlayer3D = AudioStreamPlayer3D.new()
-	da1.name = "DeathAudio"
-	min1.add_child(sa1)
-	min1.add_child(da1)
-	min1.global_position = Vector3(0.0, 0.0, 0.0)
-	min2.global_position = Vector3(2.0, 0.0, 0.0)
-	min1.velocity = Vector3.ZERO
-	min1._strafe_phase = 0.0
-	min1._time = 1.0
-	MinionBase._shared_minion_cache = [min1, min2]
-	min1._apply_separation()
-	var push_far: Vector3 = min1.velocity
-	min1.velocity = Vector3.ZERO
-	min2.global_position = Vector3(1.0, 0.0, 0.0)
-	min1._apply_separation()
-	var push_near: Vector3 = min1.velocity
-	assert_gt(push_near.length(), push_far.length() * 1.5, "Push at 1.0m should be significantly stronger than at 2.0m")
+func test_apply_separation_removed() -> void:
+	assert_false(minion.has_method("_apply_separation"),
+		"_apply_separation must not exist — minion-minion separation removed")
 
 func test_lane_offset_present_after_delay() -> void:
 	var wps: Array[Vector3] = [Vector3(0, 0, 10), Vector3(0, 0, 20)]
@@ -438,3 +439,25 @@ func test_heal_no_particles_when_already_full() -> void:
 	m.health = 80.0
 	m.heal(20.0)
 	assert_eq(m.particles_emitted, 0, "No particles when already at full health")
+
+# ─── Regression: freed _target does not crash _same_team_attackers_on ──────────
+
+func test_same_team_attackers_freed_target_no_crash() -> void:
+	# Two allied minions. The first one has _target pointing at a node that has
+	# been freed. Calling _same_team_attackers_on must return 0 without crashing.
+	var ally: FakeMinion = FakeMinion.new()
+	ally.max_health = 80.0
+	add_child_autofree(ally)
+	ally.setup(0, [], 0)
+
+	# Create a dummy target, let ally "acquire" it, then free it.
+	var dummy := Node3D.new()
+	add_child(dummy)
+	ally.set("_target", dummy)
+	dummy.queue_free()
+	await get_tree().process_frame  # flush queue_free
+
+	# minion is on the same team as ally; asking how many same-team attackers
+	# are on dummy must not throw "Trying to assign invalid previously freed instance".
+	var count: int = minion._same_team_attackers_on(ally)
+	assert_eq(count, 0, "Freed target counted as 0 attackers")

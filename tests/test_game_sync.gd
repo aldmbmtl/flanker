@@ -210,3 +210,8 @@ func test_no_supporter_on_team_does_not_crash_on_tower_kill() -> void:
 	# Should not crash; XP simply goes uncredited.
 	GameSync.damage_player(1, 9999.0, 0, -1)
 	assert_true(GameSync.player_dead.get(1, false), "Player should be dead after lethal damage")
+
+# ── player base HP ────────────────────────────────────────────────────────────
+
+func test_player_max_hp_is_200() -> void:
+	assert_eq(GameSync.PLAYER_MAX_HP, 200.0, "Base player HP must be 200 (2× original 100)")

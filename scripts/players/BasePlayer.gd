@@ -158,13 +158,13 @@ func update_transform(pos: Vector3, rot: Vector3) -> void:
 
 # ── Visibility / hitbox ───────────────────────────────────────────────────────
 
-## Toggle visibility and hitbox collision layers.
+## Toggle hitbox collision layers and fire lifecycle hooks.
+## Players are ALWAYS visible — this no longer sets visible=false on death.
 ## Called by PlayerManager on player_died / player_respawned signals.
 ## Override _on_died() / _on_respawned() for additional effects.
 func _set_alive(alive: bool) -> void:
 	print("[BP] _set_alive peer_id=", peer_id, " alive=", alive,
-		" prev_visible=", visible)
-	visible = alive
+		" (visible stays true)")
 	var hit_body: StaticBody3D = get_node_or_null("HitBody")
 	if hit_body != null:
 		hit_body.set_collision_layer(1 if alive else 0)

@@ -398,10 +398,49 @@ func test_validate_shot_killing_blow_awards_xp_to_killer() -> void:
 		"Killer should receive XP for killing blow")
 
 func test_notify_player_died_sets_dead_flag() -> void:
-	LobbyManager.notify_player_died(5)
+	LobbyManager.notify_player_died(5, GameSync.game_seed)
 	assert_true(GameSync.player_dead.get(5, false))
 
-func test_damage_player_broadcast_reduces_health() -> void:
+func test_notify_player_died_stale_seed_is_dropped() -> void:
+	# Regression: stale notify_player_died from a previous session's ENet reliable
+	# queue must not hide the ghost in the new game. Embedding game_seed in the RPC
+	# and discarding if it differs is the guard.
+	GameSync.game_seed = 12345
+	GameSync.player_dead[7] = false
+	watch_signals(GameSync)
+	LobbyManager.notify_player_died(7, 99999)  # wrong seed
+	assert_false(GameSync.player_dead.get(7, false),
+		"Stale notify_player_died must not set player_dead=true")
+	assert_signal_not_emitted(GameSync, "player_died",
+		"Stale notify_player_died must not emit player_died signal")
+
+func test_notify_player_died_correct_seed_is_processed() -> void:
+	GameSync.game_seed = 12345
+	LobbyManager.notify_player_died(8, 12345)
+	assert_true(GameSync.player_dead.get(8, false),
+		"notify_player_died with correct seed must set player_dead=true")
+
+func test_notify_player_respawned_stale_seed_is_dropped() -> void:
+	GameSync.game_seed = 12345
+	GameSync.player_dead[9] = true
+	GameSync.player_healths[9] = 0.0
+	watch_signals(GameSync)
+	LobbyManager.notify_player_respawned(9, Vector3.ZERO, 99999)  # wrong seed
+	assert_true(GameSync.player_dead.get(9, false),
+		"Stale notify_player_respawned must not clear player_dead flag")
+	assert_eq(GameSync.player_healths.get(9, 0.0), 0.0,
+		"Stale notify_player_respawned must not restore HP")
+	assert_signal_not_emitted(GameSync, "player_respawned",
+		"Stale notify_player_respawned must not emit player_respawned signal")
+
+func test_notify_player_respawned_correct_seed_is_processed() -> void:
+	GameSync.game_seed = 12345
+	GameSync.player_dead[10] = true
+	LobbyManager.notify_player_respawned(10, Vector3.ZERO, 12345)
+	assert_false(GameSync.player_dead.get(10, false),
+		"notify_player_respawned with correct seed must clear player_dead flag")
+
+
 	# damage_player_broadcast must apply damage via GameSync and return new HP.
 	GameSync.set_player_health(10, 100.0)
 	GameSync.set_player_team(10, 1)
@@ -601,18 +640,18 @@ func test_notify_minion_hit_calls_flash_on_minion() -> void:
 func test_notify_player_respawned_resets_health() -> void:
 	GameSync.player_healths[3] = 0.0
 	GameSync.player_dead[3] = true
-	LobbyManager.notify_player_respawned(3, Vector3.ZERO)
+	LobbyManager.notify_player_respawned(3, Vector3.ZERO, GameSync.game_seed)
 	assert_eq(GameSync.player_healths[3], GameSync.PLAYER_MAX_HP)
 
 func test_notify_player_respawned_clears_dead_flag() -> void:
 	GameSync.player_dead[3] = true
-	LobbyManager.notify_player_respawned(3, Vector3.ZERO)
+	LobbyManager.notify_player_respawned(3, Vector3.ZERO, GameSync.game_seed)
 	assert_false(GameSync.player_dead.get(3, false))
 
 func test_notify_player_respawned_emits_signal() -> void:
 	GameSync.player_dead[4] = true
 	watch_signals(GameSync)
-	LobbyManager.notify_player_respawned(4, Vector3(1, 2, 3))
+	LobbyManager.notify_player_respawned(4, Vector3(1, 2, 3), GameSync.game_seed)
 	assert_signal_emitted(GameSync, "player_respawned")
 
 func test_notify_player_respawned_includes_bonus_hp() -> void:
@@ -621,7 +660,7 @@ func test_notify_player_respawned_includes_bonus_hp() -> void:
 	LevelSystem.award_xp(1, 9999)
 	LevelSystem.spend_point_local(1, "hp")
 	var expected: float = float(GameSync.PLAYER_MAX_HP) + float(LevelSystem.get_bonus_hp(1))
-	LobbyManager.notify_player_respawned(1, Vector3.ZERO)
+	LobbyManager.notify_player_respawned(1, Vector3.ZERO, GameSync.game_seed)
 	var actual: float = float(GameSync.player_healths.get(1, -1.0))
 	assert_eq(actual, expected, "Respawn HP must include level bonus")
 
@@ -661,6 +700,18 @@ func test_report_player_transform_emits_exactly_once_on_server() -> void:
 	watch_signals(GameSync)
 	LobbyManager.report_player_transform(Vector3(5, 0, 5), Vector3.ZERO, 0)
 	assert_signal_emit_count(GameSync, "remote_player_updated", 1, "remote_player_updated must fire exactly once per transform")
+
+func test_report_player_transform_includes_sender_peer_id() -> void:
+	# Regression guard: the old FPSController host workaround called
+	# broadcast_player_transform(my_id, ...) directly, bypassing report_player_transform.
+	# The correct path is report_player_transform.rpc_id(1, ...) for both host and
+	# clients. Verify that calling report_player_transform on the server (as
+	# OfflineMultiplayerPeer returns sender=1) emits remote_player_updated with
+	# peer_id=1 (the server's own id via _sender_id()).
+	watch_signals(GameSync)
+	LobbyManager.report_player_transform(Vector3(7, 0, -3), Vector3.ZERO, 0)
+	var params: Array = get_signal_parameters(GameSync, "remote_player_updated")
+	assert_eq(params[0], 1, "peer_id in remote_player_updated must be sender id (1 on server)")
 
 # ── §8 Build system ───────────────────────────────────────────────────────────
 

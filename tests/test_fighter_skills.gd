@@ -65,9 +65,9 @@ func test_adrenaline_heals_caster() -> void:
 		50.0 + FighterSkills.ADRENALINE_HEAL, 0.01)
 
 func test_adrenaline_caps_at_max_hp() -> void:
-	GameSync.set_player_health(PEER_ID, 90.0)
+	GameSync.set_player_health(PEER_ID, GameSync.PLAYER_MAX_HP - 10.0)
 	FighterSkills.execute("f_adrenaline", PEER_ID)
-	assert_almost_eq(GameSync.get_player_health(PEER_ID), 100.0, 0.01)
+	assert_almost_eq(GameSync.get_player_health(PEER_ID), GameSync.PLAYER_MAX_HP, 0.01)
 
 func test_adrenaline_no_crash_with_no_player() -> void:
 	# Execute for an unregistered peer — should silently no-op.

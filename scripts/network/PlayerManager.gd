@@ -68,18 +68,15 @@ func _on_remote_player_updated(peer_id: int, pos: Vector3, rot: Vector3, team: i
 			" team=", team,
 			" is_dead=", is_dead,
 			" avatar_char=", avatar_char,
-			" initial_visible=", not is_dead)
+			" initial_visible=true (always)")
 
 		var player: BasePlayer = BasePlayerScene.instantiate()
 		# setup() BEFORE add_child — mirrors MinionBase pattern
 		player.setup(peer_id, team, false, avatar_char)
 		player.name = "RemotePlayer_%d" % peer_id
 
-		# FIX: initialise visibility from current death state BEFORE add_child.
-		# Stale notify_player_died RPCs from a previous session's reliable queue
-		# can arrive after the node is created. By setting visibility here the
-		# node is already in the correct state and any stale RPC is a no-op.
-		player.visible = not is_dead
+		# Players are always visible regardless of death state.
+		player.visible = true
 
 		_get_spawn_root().add_child(player)
 		_players[peer_id] = player
@@ -129,8 +126,8 @@ func _on_remote_player_updated(peer_id: int, pos: Vector3, rot: Vector3, team: i
 				" GameSync.player_dead[peer]=", GameSync.player_dead.get(capture_id, false),
 				" _players.has=", _players.has(capture_id))
 			if not dp.visible:
-				print("[PM-DIAG] WARNING: player.visible=false at 0.1s — likely stale " +
-					"notify_player_died RPC from previous session. Check [DIED:RPC] lines.")
+				print("[PM-DIAG] WARNING: player.visible=false at 0.1s — " +
+					"unexpected: players should always be visible.")
 		)
 
 	var p: BasePlayer = _players[peer_id]

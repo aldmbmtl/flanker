@@ -641,3 +641,76 @@ func test_slow_tower_emit_pulse_rpc_passes_tower_name() -> void:
 	assert_eq(calls[0]["args"][0], "SlowTowerTest",
 		"First arg to spawn_slow_pulse_visuals must be the tower node name")
 	get_tree().set_multiplayer(null, LobbyManager.get_path())
+
+# ── build_time ────────────────────────────────────────────────────────────────
+
+func test_build_time_default_is_zero() -> void:
+	var t := FakeTower.new()
+	add_child_autofree(t)
+	assert_eq(t.build_time, 0.0, "Default build_time must be 0")
+
+func test_setup_seeds_build_timer_from_build_time() -> void:
+	var t := FakeTower.new()
+	t.max_health   = 100.0
+	t.attack_range = 0.0
+	t.build_time   = 10.0
+	add_child_autofree(t)
+	t.setup(0)
+	assert_eq(t._build_timer, 10.0, "_build_timer must equal build_time after setup()")
+
+func test_tower_with_zero_build_time_has_zero_build_timer() -> void:
+	var t := FakeTower.new()
+	t.max_health   = 100.0
+	t.attack_range = 0.0
+	t.build_time   = 0.0
+	add_child_autofree(t)
+	t.setup(0)
+	assert_eq(t._build_timer, 0.0, "_build_timer must be 0 when build_time is 0")
+
+## Simulate process() manually to advance the build timer.
+## FakeTower has no Area3D (_area == null), so _process returns early after the
+## build-phase block — we never hit the attack path, which is fine for this test.
+func test_build_timer_decrements_over_time() -> void:
+	var t := FakeTower.new()
+	t.max_health   = 100.0
+	t.attack_range = 0.0
+	t.build_time   = 10.0
+	add_child_autofree(t)
+	t.setup(0)
+	# Manually call _process to simulate elapsed time
+	t._process(3.0)
+	assert_almost_eq(t._build_timer, 7.0, 0.001, "_build_timer should decrease by delta")
+
+func test_build_timer_clamps_to_zero() -> void:
+	var t := FakeTower.new()
+	t.max_health   = 100.0
+	t.attack_range = 0.0
+	t.build_time   = 5.0
+	add_child_autofree(t)
+	t.setup(0)
+	t._process(10.0)   # far past build_time
+	assert_eq(t._build_timer, 0.0, "_build_timer must not go below 0")
+
+func test_placeable_defs_have_build_time_for_all_towers() -> void:
+	const BuildSystemScript := preload("res://scripts/BuildSystem.gd")
+	var bs := Node.new()
+	bs.set_script(BuildSystemScript)
+	add_child_autofree(bs)
+	var tower_keys := ["cannon", "mortar", "slow", "machinegun", "launcher_missile"]
+	for key in tower_keys:
+		var def: Dictionary = bs.PLACEABLE_DEFS.get(key, {})
+		assert_true(def.has("build_time"),
+			"PLACEABLE_DEFS[\"%s\"] must have build_time key" % key)
+		assert_gt(def["build_time"], 0.0,
+			"PLACEABLE_DEFS[\"%s\"].build_time must be > 0" % key)
+
+func test_build_time_values_in_expected_range() -> void:
+	const BuildSystemScript := preload("res://scripts/BuildSystem.gd")
+	var bs := Node.new()
+	bs.set_script(BuildSystemScript)
+	add_child_autofree(bs)
+	var tower_keys := ["cannon", "mortar", "slow", "machinegun", "launcher_missile"]
+	for key in tower_keys:
+		var bt: float = bs.PLACEABLE_DEFS[key]["build_time"]
+		assert_true(bt >= 10.0 and bt <= 35.0,
+			"build_time for \"%s\" should be 10–35s, got %s" % [key, bt])

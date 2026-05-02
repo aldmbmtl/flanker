@@ -15,7 +15,7 @@ var player_weapon_type: Dictionary = {}   # {peer_id: String}  active weapon nam
 var player_shield_hp: Dictionary = {}     # {peer_id: float}  active Iron Skin shield HP
 var player_shield_timer: Dictionary = {}  # {peer_id: float}  remaining shield duration
 
-const PLAYER_MAX_HP: float = 100.0
+const PLAYER_MAX_HP: float = 200.0
 const PLAYER_SYNC_INTERVAL := 5
 
 signal player_health_changed(peer_id: int, health: float)

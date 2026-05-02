@@ -36,7 +36,7 @@ func _ready() -> void:
 
 func _on_game_sync_player_respawned(peer_id: int, spawn_pos: Vector3) -> void:
 	if multiplayer.is_server():
-		notify_player_respawned.rpc(peer_id, spawn_pos)
+		notify_player_respawned.rpc(peer_id, spawn_pos, GameSync.game_seed)
 
 func _process(_delta: float) -> void:
 	if not multiplayer.has_multiplayer_peer():
@@ -473,7 +473,7 @@ func damage_player_broadcast(target_peer: int, amount: float, source_team: int, 
 	var new_hp: float = GameSync.damage_player(target_peer, amount, source_team, killer_peer)
 	apply_player_damage.rpc(target_peer, new_hp)
 	if new_hp <= 0.0:
-		notify_player_died.rpc(target_peer)
+		notify_player_died.rpc(target_peer, GameSync.game_seed)
 	return new_hp
 
 @rpc("authority", "call_local", "reliable")
@@ -512,14 +512,17 @@ func apply_player_heal(new_health: float) -> void:
 		fps_node.call("heal", new_health - old_hp)
 
 @rpc("authority", "call_remote", "reliable")
-func notify_player_died(peer_id: int) -> void:
+func notify_player_died(peer_id: int, session_seed: int) -> void:
 	# VISIBILITY-CRITICAL — this RPC fires on CLIENTS only (call_remote).
-	# A stale copy of this packet can arrive at the start of a NEW session if the
-	# peer died in the previous game and ENet's reliable queue was not flushed.
-	# When that happens the ghost for this peer has already been created (visible=true)
-	# and this call immediately hides it — the player becomes invisible for the entire
-	# match. See RemotePlayerManager._on_remote_player_updated for the countermeasure
-	# (ghost visibility is initialised from GameSync.player_dead on creation).
+	# session_seed guards against stale reliable-queue packets from a previous
+	# session arriving after the new game has started. If the embedded seed does
+	# not match the current GameSync.game_seed the packet is from a previous game
+	# and must be dropped — processing it would hide the ghost for the entire match.
+	if session_seed != GameSync.game_seed:
+		print("[DIED:RPC] STALE notify_player_died dropped peer_id=", peer_id,
+			" packet_seed=", session_seed,
+			" current_seed=", GameSync.game_seed)
+		return
 	print("[DIED:RPC] notify_player_died peer_id=", peer_id,
 		" is_server=", multiplayer.is_server(),
 		" my_id=", multiplayer.get_unique_id(),
@@ -531,10 +534,14 @@ func notify_player_died(peer_id: int) -> void:
 		" GameSync.player_dead=", GameSync.player_dead)
 
 @rpc("authority", "call_remote", "reliable")
-func notify_player_respawned(peer_id: int, spawn_pos: Vector3) -> void:
+func notify_player_respawned(peer_id: int, spawn_pos: Vector3, session_seed: int) -> void:
 	# VISIBILITY-CRITICAL — fires on CLIENTS only (call_remote).
-	# Counterpart to notify_player_died. Must set player_dead=false AND emit
-	# player_respawned so RemotePlayerManager shows the ghost again.
+	# session_seed guards against stale reliable-queue packets from a previous session.
+	if session_seed != GameSync.game_seed:
+		print("[RESPAWN:RPC] STALE notify_player_respawned dropped peer_id=", peer_id,
+			" packet_seed=", session_seed,
+			" current_seed=", GameSync.game_seed)
+		return
 	print("[RESPAWN:RPC] notify_player_respawned peer_id=", peer_id,
 		" spawn_pos=", spawn_pos,
 		" is_server=", multiplayer.is_server(),

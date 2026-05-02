@@ -167,7 +167,7 @@ func test_notify_player_respawned_includes_level_bonus() -> void:
 	LevelSystem.spend_point_local(1, "hp")
 	var expected_hp: float = GameSync.PLAYER_MAX_HP + LevelSystem.get_bonus_hp(1)
 	assert_gt(expected_hp, GameSync.PLAYER_MAX_HP, "Bonus HP should be positive after spending point")
-	LobbyManager.notify_player_respawned(1, Vector3.ZERO)
+	LobbyManager.notify_player_respawned(1, Vector3.ZERO, GameSync.game_seed)
 	assert_eq(GameSync.player_healths.get(1, -1.0), expected_hp, "Respawn should restore PLAYER_MAX_HP + bonus HP")
 
 # ── get_players_by_team ───────────────────────────────────────────────────────

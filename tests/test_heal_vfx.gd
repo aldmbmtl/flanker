@@ -174,10 +174,11 @@ func test_heal_syncs_gamesync_health() -> void:
 func test_heal_gamesync_does_not_exceed_max_hp() -> void:
 	GameSync.reset()
 	var player := _make_real_fps(HEAL_SYNC_PEER)
-	GameSync.set_player_health(HEAL_SYNC_PEER, 90.0)
-	player.hp = 90.0
+	var near_max: float = GameSync.PLAYER_MAX_HP - 10.0
+	GameSync.set_player_health(HEAL_SYNC_PEER, near_max)
+	player.hp = near_max
 	player.heal(50.0)
-	assert_almost_eq(GameSync.get_player_health(HEAL_SYNC_PEER), 100.0, 0.01,
+	assert_almost_eq(GameSync.get_player_health(HEAL_SYNC_PEER), GameSync.PLAYER_MAX_HP, 0.01,
 		"heal() must clamp GameSync HP to max")
 	GameSync.reset()
 

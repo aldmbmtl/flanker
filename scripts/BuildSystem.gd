@@ -9,15 +9,15 @@ extends Node
 # "weapon" cost is 0 — actual cost comes from WEAPON_COSTS keyed by subtype.
 # attack_interval_base: mirrors the .tscn export; used for retroactive fire-rate recalculation.
 var PLACEABLE_DEFS := {
-	"cannon":           { "cost": 25, "scene": "res://scenes/towers/Tower.tscn",           "attack_range": 30.0, "attack_interval_base": 1.0,  "is_tower": true,  "lane_setback": true  },
-	"mortar":           { "cost": 35, "scene": "res://scenes/towers/MortarTower.tscn",     "attack_range": 50.0, "attack_interval_base": 3.5,  "is_tower": true,  "lane_setback": true  },
-	"slow":             { "cost": 30, "scene": "res://scenes/towers/SlowTower.tscn",       "attack_range": 18.0, "attack_interval_base": 1.0,  "is_tower": true,  "lane_setback": true  },
-	"machinegun":       { "cost": 40, "scene": "res://scenes/towers/MachineGunTower.tscn", "attack_range": 22.0, "attack_interval_base": 0.5,  "is_tower": true,  "lane_setback": true  },
+	"cannon":           { "cost": 25, "scene": "res://scenes/towers/Tower.tscn",           "attack_range": 30.0, "attack_interval_base": 1.0,  "is_tower": true,  "lane_setback": true,  "build_time": 20.0 },
+	"mortar":           { "cost": 35, "scene": "res://scenes/towers/MortarTower.tscn",     "attack_range": 50.0, "attack_interval_base": 3.5,  "is_tower": true,  "lane_setback": true,  "build_time": 30.0 },
+	"slow":             { "cost": 30, "scene": "res://scenes/towers/SlowTower.tscn",       "attack_range": 18.0, "attack_interval_base": 1.0,  "is_tower": true,  "lane_setback": true,  "build_time": 15.0 },
+	"machinegun":       { "cost": 40, "scene": "res://scenes/towers/MachineGunTower.tscn", "attack_range": 22.0, "attack_interval_base": 0.5,  "is_tower": true,  "lane_setback": true,  "build_time": 15.0 },
 	"weapon":           { "cost":  0, "scene": "res://scenes/WeaponPickup.tscn",           "spacing":  5.0,      "is_tower": false, "lane_setback": false },
 	"healthpack":       { "cost": 15, "scene": "res://scenes/HealthPackPickup.tscn",       "spacing":  5.0,      "is_tower": false, "lane_setback": false },
 	"healstation":      { "cost": 25, "scene": "res://scenes/HealStation.tscn",            "spacing": 10.0,      "is_tower": false, "lane_setback": false },
 	# ── Launcher towers — one entry per type in LauncherDefs ─────────────────
-	"launcher_missile": { "cost": 50, "scene": "res://scenes/towers/LauncherTower.tscn",  "attack_range":  0.0, "attack_interval_base": 0.0,  "is_tower": true,  "lane_setback": true, "is_launcher": true, "launcher_type": "launcher_missile" },
+	"launcher_missile": { "cost": 50, "scene": "res://scenes/towers/LauncherTower.tscn",  "attack_range":  0.0, "attack_interval_base": 0.0,  "is_tower": true,  "lane_setback": true, "is_launcher": true, "launcher_type": "launcher_missile", "build_time": 25.0 },
 }
 
 const WEAPON_COSTS := { "pistol": 10, "rifle": 20, "heavy": 30, "rocket_launcher": 60 }
@@ -204,6 +204,8 @@ func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype:
 			var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
 			if def.has("attack_range") and node.get("attack_range") != null:
 				node.set("attack_range", def["attack_range"])
+			if def.has("build_time") and node.get("build_time") != null:
+				node.set("build_time", def["build_time"])
 			# TowerBase subclasses take setup(team); launcher types take setup(team, type).
 			if LauncherDefs.is_launcher_type(item_type):
 				if node.has_method("setup"):

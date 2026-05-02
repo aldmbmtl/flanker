@@ -20,7 +20,7 @@ const ROLE_STATS := {
 	"Sniper":  {"hp": 70,  "speed_mult": 1.0, "damage_mult": 1.5},
 	"Flanker": {"hp": 90,  "speed_mult": 1.3, "damage_mult": 1.0},
 }
-const DEFAULT_HP := 100.0
+const DEFAULT_HP := 200.0
 
 var player_role: String = ""
 
@@ -831,13 +831,10 @@ func _physics_process(delta: float) -> void:
 			if pos_delta_sq >= _TRANSFORM_POS_THRESHOLD_SQ or rot_delta >= _TRANSFORM_ROT_THRESHOLD:
 				_last_sent_pos = global_position
 				_last_sent_rot = cam_rot
-				if multiplayer.is_server():
-					# Host calls broadcast directly — report_player_transform is call_remote and won't run locally
-					var my_id: int = multiplayer.get_unique_id()
-					LobbyManager.broadcast_player_transform(my_id, global_position, cam_rot, player_team)
-					LobbyManager.broadcast_player_transform.rpc(my_id, global_position, cam_rot, player_team)
-				else:
-					LobbyManager.report_player_transform.rpc_id(1, global_position, cam_rot, player_team)
+				# report_player_transform is call_local — works for both host and clients.
+				# Host calls rpc_id(1, ...) which executes locally (call_local), then
+				# broadcast_player_transform.rpc() fans out to all clients exactly once.
+				LobbyManager.report_player_transform.rpc_id(1, global_position, cam_rot, player_team)
 
 func _set_crouch(crouch: bool) -> void:
 	_crouching = crouch

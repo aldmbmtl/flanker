@@ -96,15 +96,15 @@ func test_pm4_remove_player_frees_and_erases() -> void:
 	assert_false(is_instance_valid(p),
 		"puppet node must be freed after remove_player")
 
-# ── PM5: player_died calls _set_alive(false) ─────────────────────────────────
+# ── PM5: player_died calls _set_alive(false) — player stays visible ──────────
 
 func test_pm5_player_died_calls_set_alive_false() -> void:
 	_emit_transform(2)
 	var p: Node = _players()[2]
 	p.visible = true
 	GameSync.player_died.emit(2)
-	assert_false(p.visible,
-		"puppet must be hidden after player_died signal")
+	assert_true(p.visible,
+		"puppet must stay visible after player_died signal")
 
 # ── PM6: player_died before spawn does not crash ─────────────────────────────
 
@@ -118,7 +118,6 @@ func test_pm6_player_died_before_spawn_no_crash() -> void:
 func test_pm7_player_respawned_calls_set_alive_true() -> void:
 	_emit_transform(2)
 	var p: Node = _players()[2]
-	p.visible = false
 	var spawn_pos := Vector3(3, 0, 7)
 	GameSync.player_respawned.emit(2, spawn_pos)
 	assert_true(p.visible,
@@ -133,16 +132,17 @@ func test_pm8_player_respawned_before_spawn_no_crash() -> void:
 	assert_false(_players().has(2),
 		"player_respawned before spawn must not crash and must not create a phantom entry")
 
-# ── PM9: stale-RPC guard — dead player spawned invisible ─────────────────────
+# ── PM9: players always spawn visible ────────────────────────────────────────
 
 func test_pm9_stale_rpc_guard_dead_player_spawns_invisible() -> void:
-	# Mark peer 2 as dead in GameSync before the first transform arrives.
+	# Even if GameSync marks a peer as dead, the ghost spawns visible.
+	# The session-seed guard on notify_player_died prevents stale RPCs from hiding it.
 	GameSync.player_dead[2] = true
 	_emit_transform(2)
 	var p: Node = _players()[2]
-	assert_false(p.visible,
-		"puppet spawned while GameSync.player_dead[peer]=true must start invisible " +
-		"to neutralise any stale notify_player_died RPCs")
+	assert_true(p.visible,
+		"puppet must spawn visible even if GameSync.player_dead[peer]=true — " +
+		"stale RPCs are now blocked by session seed guard")
 
 # ── PM10: freed node reference does not crash on player_died ─────────────────
 

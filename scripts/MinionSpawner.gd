@@ -9,6 +9,8 @@ const RAM_MINION_SCENE    := "res://scenes/minions/RamMinion.tscn"
 const RAM_TIER_HP: Array[float]  = [300.0, 600.0, 1000.0]
 ## Team-point cost per ram tier.
 const RAM_TIER_COSTS: Array[int] = [15, 30, 50]
+## Team points awarded to the killing team for each ram tier.
+const RAM_TIER_KILL_POINTS: Array[int] = [20, 35, 55]
 
 const WAVE_INTERVAL := 20.0
 const MAX_WAVE_SIZE := 6
@@ -244,6 +246,7 @@ func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i:
 		var tier_idx: int = int(mtype.substr(5, 1)) - 1  # "ram_t1"→0, "ram_t2"→1, "ram_t3"→2
 		minion.set("_ram_tier", tier_idx)
 		minion.set("max_health", RAM_TIER_HP[tier_idx])
+		minion.set("kill_points", RAM_TIER_KILL_POINTS[tier_idx])
 		minion.set("minion_type", "ram")
 
 	# Apply Supporter passive bonuses and model tier before add_child.

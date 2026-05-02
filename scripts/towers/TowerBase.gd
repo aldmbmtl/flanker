@@ -94,6 +94,10 @@ extends StaticBody3D
 ## Base XP awarded to the killing player on tower death (uses LevelSystem.XP_TOWER if 0).
 @export var xp_on_death: int = 0
 
+## Seconds after placement before the tower becomes active and starts attacking.
+## Tower is immediately visible; build_time only gates the first attack.
+@export var build_time: float = 0.0
+
 # ── Runtime state (set by BuildSystem after add_child, not designed in .tscn) ──
 
 ## Team that owns this tower. Set by BuildSystem.spawn_item_local() after add_child.
@@ -104,6 +108,7 @@ var placer_peer_id: int = -1
 var _health: float = 0.0
 var _dead: bool = false
 var _attack_timer: float = 0.0
+var _build_timer: float = 0.0   # counts down from build_time; 0 = active
 var _area: Area3D = null
 ## All MeshInstance3D nodes across all components — used for hit-flash.
 var _all_mesh_insts: Array[MeshInstance3D] = []
@@ -114,6 +119,10 @@ var _turret_pivot: Node3D = null
 var _killer_peer_id: int = -1
 var _hit_flash_tween: Tween = null
 var _hit_overlay_mat: StandardMaterial3D = null
+## Model component roots added by _build_visuals(), with their original scales.
+## Kept for subclass use; no longer used for build-phase animation.
+var _model_roots: Array[Node3D] = []
+var _model_root_scales: Array[Vector3] = []
 
 # ── Entry point — called by BuildSystem.spawn_item_local() ───────────────────
 
@@ -121,8 +130,12 @@ var _hit_overlay_mat: StandardMaterial3D = null
 func setup(p_team: int) -> void:
 	team = p_team
 	_health = max_health
+	_build_timer = build_time
 
 	_build_visuals()
+
+	# If build_time is set, the tower is already fully visible — build_time only
+	# gates the attack phase (tower does not fire until the timer elapses).
 
 	# Build detection area entirely in code — no .tscn dependency
 	if attack_range > 0.0:
@@ -151,6 +164,7 @@ func _build_visuals() -> void:
 			root.position = base_offset
 			add_child(root)
 			_collect_meshes(root)
+			_register_model_root(root)
 
 	# ── Mid section(s) — repeated model_mid_count times ─────────────────────────
 	if model_mid != null:
@@ -161,6 +175,7 @@ func _build_visuals() -> void:
 				mid.position = model_mid_offset + model_mid_step * i
 				add_child(mid)
 				_collect_meshes(mid)
+				_register_model_root(mid)
 
 	# ── Top cap ───────────────────────────────────────────────────────────────
 	if model_top != null:
@@ -170,12 +185,14 @@ func _build_visuals() -> void:
 			top.position = model_top_offset
 			add_child(top)
 			_collect_meshes(top)
+			_register_model_root(top)
 
 	# ── Turret pivot (always created so subclasses and _process can rely on it) ─
 	_turret_pivot = Node3D.new()
 	_turret_pivot.name = "TurretPivot"
 	_turret_pivot.position = model_turret_offset
 	add_child(_turret_pivot)
+	_register_model_root(_turret_pivot)
 
 	# ── Turret head ───────────────────────────────────────────────────────────
 	if model_turret != null:
@@ -234,7 +251,7 @@ func _build_detection_area() -> void:
 	_area.name = "DetectionArea"
 	# Collision layer 0 — only detects; does not block physics
 	_area.collision_layer = 0
-	_area.collision_mask = 0b11   # layers 1+2: terrain + units
+	_area.collision_mask = 0b101   # layers 1+3: players/terrain (1) + minions (3)
 	add_child(_area)
 
 	var shape := SphereShape3D.new()
@@ -243,6 +260,20 @@ func _build_detection_area() -> void:
 	col.shape = shape
 	_area.add_child(col)
 
+## Register a model component root for build-phase scale animation.
+## Must be called AFTER the root has been add_child'd and its final scale set.
+func _register_model_root(root: Node3D) -> void:
+	_model_roots.append(root)
+	_model_root_scales.append(root.scale)
+
+## Sets scale of all model roots (kept for subclass use; no longer called during build phase).
+## t=0.0 = scale 0; t=1.0 = original scale.
+func _set_model_alpha(t: float) -> void:
+	for i in _model_roots.size():
+		var root: Node3D = _model_roots[i]
+		if is_instance_valid(root):
+			root.scale = _model_root_scales[i] * t
+
 # ── Attack loop ───────────────────────────────────────────────────────────────
 
 func _process(delta: float) -> void:
@@ -250,6 +281,13 @@ func _process(delta: float) -> void:
 		return
 	if _dead or _area == null:
 		return
+	# ── Build phase ────────────────────────────────────────────────────────────
+	if _build_timer > 0.0:
+		_build_timer -= delta
+		if _build_timer <= 0.0:
+			_build_timer = 0.0
+		return
+	# ── Attack phase ───────────────────────────────────────────────────────────
 	_attack_timer -= delta
 	if _attack_timer > 0.0:
 		return

@@ -55,7 +55,7 @@ func test_p4_hit_body_meta_set() -> void:
 	assert_true(hit_body.has_meta("ghost_peer_id"))
 	assert_eq(int(hit_body.get_meta("ghost_peer_id")), 55)
 
-# ── P5: _set_alive(false) hides node and disables HitBody collision ───────────
+# ── P5: _set_alive(false) disables HitBody collision (player stays visible) ───
 
 func test_p5_set_alive_false_hides_and_disables_hitbox() -> void:
 	var p := _make_player()
@@ -66,17 +66,16 @@ func test_p5_set_alive_false_hides_and_disables_hitbox() -> void:
 	if hit_body != null:
 		hit_body.set_collision_layer(1)
 	p._set_alive(false)
-	assert_false(p.visible)
+	assert_true(p.visible, "_set_alive(false) must not hide player")
 	if hit_body != null:
 		assert_eq(hit_body.get_collision_layer(), 0)
 
-# ── P6: _set_alive(true) shows node and enables HitBody collision ─────────────
+# ── P6: _set_alive(true) enables HitBody collision (player stays visible) ─────
 
 func test_p6_set_alive_true_shows_and_enables_hitbox() -> void:
 	var p := _make_player()
 	p.setup(1, 0, true, "a")
 	add_child_autofree(p)
-	p.visible = false
 	var hit_body: StaticBody3D = p.get_node_or_null("HitBody") as StaticBody3D
 	if hit_body != null:
 		hit_body.set_collision_layer(0)
@@ -189,14 +188,14 @@ func test_p16_on_lobby_updated_loads_avatar() -> void:
 	assert_eq(p._current_char, "b")
 	LobbyManager.players.erase(1)
 
-# ── P17: _set_alive false then true restores visibility ───────────────────────
+# ── P17: _set_alive false then true — player always visible ───────────────────
 
 func test_p17_set_alive_toggle_restores_visible() -> void:
 	var p := _make_player()
 	p.setup(1, 0, false, "a")
 	add_child_autofree(p)
 	p._set_alive(false)
-	assert_false(p.visible)
+	assert_true(p.visible, "Player must stay visible after _set_alive(false)")
 	p._set_alive(true)
 	assert_true(p.visible)
 

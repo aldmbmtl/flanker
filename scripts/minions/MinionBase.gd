@@ -22,8 +22,6 @@ class_name MinionBase
 extends CharacterBody3D
 
 const GRAVITY            := 20.0
-const SEPARATION_DIST    := 3.0
-const SEPARATION_FORCE   := 14.0
 const LANE_OFFSET_RADIUS := 6.0
 
 const MINION_SHOOT_SOUND := "res://assets/kenney_sci-fi-sounds/Audio/laserSmall_002.ogg"
@@ -47,6 +45,11 @@ const MINION_DEATH_SOUND := "res://assets/kenney_sci-fi-sounds/Audio/impactMetal
 @export var bullet_speed: float   = 58.8
 ## Radius for target detection scans.
 @export var detect_range: float   = 12.0
+
+## Team points awarded to the killing team when this minion dies.
+## Tower kills award kill_points * 2 (consistent with base minion ratio).
+## Override per-minion via MinionSpawner.set() for special types (e.g. ram minions).
+@export var kill_points: int = 5
 
 # ─── Runtime state ────────────────────────────────────────────────────────────
 
@@ -93,10 +96,8 @@ var _flash_mesh_instances: Array[MeshInstance3D] = []
 
 # Throttle counters
 const TARGET_INTERVAL     := 15
-const SEPARATION_INTERVAL := 1
 const TOWER_CACHE_INTERVAL := 120   # re-cache towers/bases every ~2s at 60fps
 var _target_frame: int = 0
-var _sep_frame: int    = 0
 var _tower_cache_frame: int = 0
 
 # ─── Shared per-physics-frame minion list (one group query for all minions) ────
@@ -428,12 +429,6 @@ func _physics_process(delta: float) -> void:
 	else:
 		_play_anim("idle")
 
-	# Throttle separation
-	_sep_frame += 1
-	if _sep_frame >= SEPARATION_INTERVAL:
-		_sep_frame = 0
-		_apply_separation()
-
 	move_and_slide()
 
 func _process(delta: float) -> void:
@@ -464,28 +459,6 @@ func _approach_with_strafe(target: Node3D, _delta: float) -> void:
 	velocity.x = move_dir.x * speed * _slow_mult
 	velocity.z = move_dir.z * speed * _slow_mult
 	_face(target.global_position)
-
-func _apply_separation() -> void:
-	var push := Vector3.ZERO
-	var sep_radius_sq := SEPARATION_DIST * SEPARATION_DIST
-	for m in _get_minion_cache():
-		if m == self or m._dead:
-			continue
-		var diff: Vector3 = global_position - m.global_position
-		diff.y = 0.0
-		var d_sq := diff.length_squared()
-		if d_sq >= sep_radius_sq or d_sq < 0.001:
-			continue
-		var d: float = sqrt(d_sq)
-		var proximity_factor: float = SEPARATION_DIST / max(d, 0.1)
-		var push_magnitude: float = (SEPARATION_DIST - d) / SEPARATION_DIST * proximity_factor
-		push += diff.normalized() * push_magnitude
-	if push.length_squared() > 0.0001:
-		var max_push: float = SEPARATION_FORCE * 0.5
-		if push.length() > max_push:
-			push = push.normalized() * max_push
-		velocity.x += push.x
-		velocity.z += push.z
 
 func _march(_delta: float) -> void:
 	if current_waypoint < waypoints.size():
@@ -533,9 +506,11 @@ func _face(target: Vector3) -> void:
 func _same_team_attackers_on(target: Node3D) -> int:
 	var count: int = 0
 	for m in _get_minion_cache():
+		if not is_instance_valid(m):
+			continue
 		if m == self or m.team != team or m._dead or m.is_puppet:
 			continue
-		var other_target: Node3D = m.get("_target")
+		var other_target = m.get("_target")
 		if is_instance_valid(other_target) and other_target == target:
 			count += 1
 	return count
@@ -544,6 +519,8 @@ func _find_target() -> Node3D:
 	var best: Node3D   = null
 	var best_dist: float = detect_range
 	for m in _get_minion_cache():
+		if not is_instance_valid(m):
+			continue
 		if m == self or m.team == team or m._dead:
 			continue
 		var d: float = global_position.distance_to(m.global_position)
@@ -647,7 +624,7 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_
 	if health <= 0.0:
 		_die()
 		var awarding_team: int = _killer_team if _killer_team >= 0 else 0
-		var pts: int = 10 if _killer_team == -1 else 5
+		var pts: int = (kill_points * 2) if _killer_team == -1 else kill_points
 		TeamData.add_points(awarding_team, pts)
 		if multiplayer.is_server():
 			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
