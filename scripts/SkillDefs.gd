@@ -71,6 +71,14 @@ const ALL: Dictionary = {
 		"passive_key": "", "passive_val": 0.0,
 		"cooldown": 45.0,
 	},
+	"f_killstreak_heal": {
+		"role": "Fighter", "branch": "DPS", "type": "passive",
+		"tier": 2, "cost": 2, "prereqs": ["f_dash"], "level_req": 0,
+		"name": "Bloodrush",
+		"description": "Killing an enemy player restores 30 HP.",
+		"passive_key": "killstreak_heal", "passive_val": 1.0,
+		"cooldown": 0.0,
+	},
 	# ─────────────────────────────────────────────────────────────────────────
 	# FIGHTER — Tank branch (mitigation / deploy)
 	# ─────────────────────────────────────────────────────────────────────────
@@ -185,6 +193,28 @@ const ALL: Dictionary = {
 		"description": "Instantly restore 30 HP to all living friendly minions and players on the map. 60 s cooldown.",
 		"passive_key": "", "passive_val": 0.0,
 		"cooldown": 60.0,
+	},
+	# ─────────────────────────────────────────────────────────────────────────
+	# SUPPORTER — Logistics branch (minion survivability)
+	# ─────────────────────────────────────────────────────────────────────────
+	"s_minion_revive": {
+		"role": "Supporter", "branch": "Logistics", "type": "passive",
+		"tier": 2, "cost": 2, "prereqs": ["s_healer_t1"], "level_req": 0,
+		"name": "Last Stand",
+		"description": "Once per wave, the first friendly minion that would die is revived at 30% HP instead.",
+		"passive_key": "minion_revive", "passive_val": 1.0,
+		"cooldown": 0.0,
+	},
+	# ─────────────────────────────────────────────────────────────────────────
+	# SUPPORTER — Defense branch (minion damage reduction)
+	# ─────────────────────────────────────────────────────────────────────────
+	"s_minion_dmg_reduce": {
+		"role": "Supporter", "branch": "Defense", "type": "passive",
+		"tier": 2, "cost": 2, "prereqs": ["s_basic_t1"], "level_req": 0,
+		"name": "Battle Hardened",
+		"description": "All friendly minions take 15% less damage.",
+		"passive_key": "minion_damage_reduction", "passive_val": 0.15,
+		"cooldown": 0.0,
 	},
 }
 

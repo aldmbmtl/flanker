@@ -677,6 +677,14 @@ func _die() -> void:
 		if _killer_peer_id > 0:
 			var xp_amt: int = _xp_with_bonus(_killer_peer_id, LevelSystem.XP_MINION)
 			LevelSystem.award_xp(_killer_peer_id, xp_amt)
+			# ── Minion kill streak: every 5 kills boosts the strongest friendly lane ──
+			var new_streak: int = GameSync.player_minion_kill_streak.get(_killer_peer_id, 0) + 1
+			GameSync.player_minion_kill_streak[_killer_peer_id] = new_streak
+			if new_streak % 5 == 0 and spawner != null and spawner.has_method("boost_lane"):
+				var killer_team: int = GameSync.get_player_team(_killer_peer_id)
+				if killer_team >= 0:
+					var boost_lane_i: int = _find_strongest_friendly_lane(killer_team)
+					spawner.boost_lane(killer_team, boost_lane_i, 1)
 		else:
 			# No player peer fired the killing blow (e.g. a tower or another minion).
 			# Credit the Supporter on the attacking team.
@@ -687,6 +695,16 @@ func _die() -> void:
 		var sp_killer: int = _killer_peer_id if _killer_peer_id > 0 else 1
 		var xp_amt: int = _xp_with_bonus(sp_killer, LevelSystem.XP_MINION)
 		LevelSystem.award_xp(sp_killer, xp_amt)
+		# ── Minion kill streak (singleplayer path) ─────────────────────────────
+		if _killer_peer_id > 0:
+			var new_streak: int = GameSync.player_minion_kill_streak.get(_killer_peer_id, 0) + 1
+			GameSync.player_minion_kill_streak[_killer_peer_id] = new_streak
+			var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
+			if new_streak % 5 == 0 and spawner != null and spawner.has_method("boost_lane"):
+				var killer_team: int = GameSync.get_player_team(_killer_peer_id)
+				if killer_team >= 0:
+					var boost_lane_i: int = _find_strongest_friendly_lane(killer_team)
+					spawner.boost_lane(killer_team, boost_lane_i, 1)
 
 ## Returns XP amount scaled by s_minion_xp passive of the Supporter on the
 ## dead minion's *own* team — killer earns more XP when they've upgraded minions.
@@ -697,3 +715,25 @@ func _xp_with_bonus(killer_peer: int, base_xp: int) -> int:
 
 func force_die() -> void:
 	_die()
+
+## Returns the lane index (0-2) where the given team has the most alive minions.
+## Used for minion kill streak lane boost targeting.
+## Falls back to lane 0 when no live minions exist.
+func _find_strongest_friendly_lane(friendly_team: int) -> int:
+	var counts: Array = [0, 0, 0]
+	for m in get_tree().get_nodes_in_group("minions"):
+		if not is_instance_valid(m):
+			continue
+		var m_team = m.get("team")
+		if m_team != friendly_team:
+			continue
+		var li: int = m.get("_lane_index") if m.get("_lane_index") != null else -1
+		if li >= 0 and li < 3:
+			counts[li] += 1
+	var best_lane: int = 0
+	var best_count: int = counts[0]
+	for i in range(1, 3):
+		if counts[i] > best_count:
+			best_count = counts[i]
+			best_lane = i
+	return best_lane

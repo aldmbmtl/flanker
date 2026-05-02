@@ -397,9 +397,35 @@ func report_player_transform(pos: Vector3, rot: Vector3, team: int) -> void:
 		print("[TRANSFORM:REPORT] WARNING: not server, skipping broadcast — sender=", sender,
 			" my_id=", multiplayer.get_unique_id())
 
+# VISIBILITY-CRITICAL: reliable version of report_player_transform used only for
+# the initial position seed at spawn time.  The normal report_player_transform is
+# unreliable_ordered and can be silently dropped while the client is still loading
+# the game scene (WallPlacer/TreePlacer are async and hold frames during that window).
+# This must be call_local for the same reason as report_player_transform — see above.
+# Called once from FPSController._broadcast_initial_transform().
+@rpc("any_peer", "call_local", "reliable")
+func report_initial_transform(pos: Vector3, rot: Vector3, team: int) -> void:
+	var sender: int = _sender_id()
+	print("[TRANSFORM:SEED] sender=", sender,
+		" is_server=", multiplayer.is_server(),
+		" my_id=", multiplayer.get_unique_id(),
+		" pos=", pos)
+	if multiplayer.is_server():
+		seed_player_transform.rpc(sender, pos, rot, team)
+
 @rpc("authority", "call_local", "unreliable_ordered")
 func broadcast_player_transform(peer_id: int, pos: Vector3, rot: Vector3, team: int) -> void:
 	print("[BCAST] peer_id=", peer_id, " is_server=", multiplayer.is_server(), " my_id=", multiplayer.get_unique_id(), " pos=", pos)
+	GameSync.remote_player_updated.emit(peer_id, pos, rot, team)
+
+# VISIBILITY-CRITICAL: reliable version of broadcast_player_transform used only for
+# the initial position seed at spawn time.  Unlike broadcast_player_transform which is
+# unreliable_ordered (and can be dropped while the client is still loading the scene),
+# this RPC is reliable so it is guaranteed to arrive.  Called once per peer at game
+# start via FPSController._broadcast_initial_transform().
+@rpc("authority", "call_local", "reliable")
+func seed_player_transform(peer_id: int, pos: Vector3, rot: Vector3, team: int) -> void:
+	print("[SEED] peer_id=", peer_id, " is_server=", multiplayer.is_server(), " my_id=", multiplayer.get_unique_id(), " pos=", pos)
 	GameSync.remote_player_updated.emit(peer_id, pos, rot, team)
 
 @rpc("any_peer", "reliable")
@@ -479,6 +505,13 @@ func damage_player_broadcast(target_peer: int, amount: float, source_team: int, 
 @rpc("authority", "call_local", "reliable")
 func apply_player_damage(peer_id: int, new_health: float) -> void:
 	GameSync.set_player_health(peer_id, new_health)
+
+## Broadcast bounty state change to all clients (called by GameSync.damage_player).
+## is_bounty=true: player has ≥3 kills and is now a high-value target.
+## is_bounty=false: bounty was cashed (player died) or reset.
+@rpc("authority", "call_local", "reliable")
+func sync_bounty_state(peer_id: int, is_bounty: bool) -> void:
+	GameSync.player_is_bounty[peer_id] = is_bounty
 
 ## Server-authoritative: heal a player and notify the target peer's local controller.
 ## Must only be called on the server. Finds the FPS player node on the receiving

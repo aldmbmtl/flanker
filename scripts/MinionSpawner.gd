@@ -196,6 +196,17 @@ func request_ram_minion(team: int, tier: int, lane_i: int) -> bool:
 		_spawn_minion(team, li, mtype)
 	return true
 
+## Spawn a free ram minion (no team-point cost) — awarded by tower-kill streak.
+## tier: 0=tier-0, 1=tier-1, 2=tier-2. lane_i: 0-2 (must be valid).
+## Server-authoritative only.
+func spawn_free_ram(team: int, tier: int, lane_i: int) -> void:
+	if team < 0 or team > 1:
+		return
+	var t: int = clampi(tier, 0, 2)
+	var li: int = clampi(lane_i, 0, 2)
+	var mtype: String = "ram_t%d" % (t + 1)
+	_spawn_minion(team, li, mtype)
+
 func _spawn_minion_delayed(team: int, lane_i: int, delay: float, mtype: String = "basic") -> void:
 	if delay <= 0.0:
 		_spawn_minion(team, lane_i, mtype)

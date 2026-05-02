@@ -15,6 +15,21 @@ var player_weapon_type: Dictionary = {}   # {peer_id: String}  active weapon nam
 var player_shield_hp: Dictionary = {}     # {peer_id: float}  active Iron Skin shield HP
 var player_shield_timer: Dictionary = {}  # {peer_id: float}  remaining shield duration
 
+## Per-player consecutive minion kill count. Reset to 0 on player death.
+## Every 5 minion kills = 1 bonus wave minion on the strongest lane. Tracked server-side.
+var player_minion_kill_streak: Dictionary = {}   # {peer_id: int}
+## Per-player tower kill count per life. Reset on death. Determines free ram tier:
+## kill 1 = tier-0, kill 2 = tier-1, kill 3+ = tier-2 + (kill-2) rams stacked.
+var player_tower_kill_streak: Dictionary = {}    # {peer_id: int}
+## Per-player consecutive player kill count. Reset on death.
+## ≥3 kills = bounty active: grants 2× XP + kill_streak×BOUNTY_BASE team pts on death.
+var player_kill_streak: Dictionary = {}          # {peer_id: int}
+## True when the player has ≥3 consecutive player kills (bounty target).
+var player_is_bounty: Dictionary = {}            # {peer_id: bool}
+
+const BOUNTY_THRESHOLD: int = 3    # player kills needed to become a bounty target
+const BOUNTY_BASE: int = 10        # team points per kill count when bounty is cashed
+
 const PLAYER_MAX_HP: float = 200.0
 const PLAYER_SYNC_INTERVAL := 5
 
@@ -68,15 +83,54 @@ func damage_player(peer_id: int, amount: float, source_team: int, killer_peer_id
 		var deaths: int = LobbyManager.increment_death_count(peer_id)
 		var respawn_time: float = LobbyManager.get_respawn_time(peer_id)
 		respawn_countdown[peer_id] = respawn_time
-		# Award XP to killer (server-authoritative).
+
+		# ── Bounty payout: was the dead player a bounty target? ───────────────
+		var was_bounty: bool = player_is_bounty.get(peer_id, false)
+		var dead_streak: int = player_kill_streak.get(peer_id, 0)
+
+		# ── Reset all streaks for the dead player ─────────────────────────────
+		player_minion_kill_streak[peer_id] = 0
+		player_tower_kill_streak[peer_id] = 0
+		player_kill_streak[peer_id] = 0
+		player_is_bounty[peer_id] = false
+
+		# ── Award XP to killer ────────────────────────────────────────────────
 		# If no player peer fired the killing blow (e.g. a tower projectile),
 		# credit the Supporter on the attacking team instead.
+		var xp_amount: int = LevelSystem.XP_PLAYER
+		if was_bounty:
+			xp_amount *= 2  # bounty target awards double XP
 		if killer_peer_id > 0:
-			LevelSystem.award_xp(killer_peer_id, LevelSystem.XP_PLAYER)
+			LevelSystem.award_xp(killer_peer_id, xp_amount)
+			# Award team points (linear scale with bounty kill streak)
+			if was_bounty:
+				var killer_team: int = player_teams.get(killer_peer_id, -1)
+				if killer_team >= 0:
+					var bounty_pts: int = dead_streak * BOUNTY_BASE
+					TeamData.add_points(killer_team, bounty_pts)
+					if multiplayer.is_server():
+						LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+			# Update killer's player kill streak and bounty flag
+			player_kill_streak[killer_peer_id] = player_kill_streak.get(killer_peer_id, 0) + 1
+			if player_kill_streak[killer_peer_id] >= BOUNTY_THRESHOLD:
+				var was_already_bounty: bool = player_is_bounty.get(killer_peer_id, false)
+				player_is_bounty[killer_peer_id] = true
+				if not was_already_bounty and multiplayer.is_server():
+					LobbyManager.sync_bounty_state.rpc(killer_peer_id, true)
+			# Killstreak heal passive
+			var heal_bonus: float = SkillTree.get_passive_bonus(killer_peer_id, "killstreak_heal")
+			if heal_bonus > 0.0:
+				var cur_hp: float = player_healths.get(killer_peer_id, PLAYER_MAX_HP)
+				var max_hp: float = PLAYER_MAX_HP + LevelSystem.get_bonus_hp(killer_peer_id)
+				player_healths[killer_peer_id] = minf(cur_hp + 30.0, max_hp)
+				player_health_changed.emit(killer_peer_id, player_healths[killer_peer_id])
 		elif source_team >= 0:
 			var sup: int = LobbyManager.get_supporter_peer(source_team)
 			if sup > 0:
-				LevelSystem.award_xp(sup, LevelSystem.XP_PLAYER)
+				LevelSystem.award_xp(sup, xp_amount)
+		# Notify clients that the bounty target died (clear indicator)
+		if was_bounty and multiplayer.is_server():
+			LobbyManager.sync_bounty_state.rpc(peer_id, false)
 	
 	return hp
 
@@ -143,6 +197,10 @@ func reset() -> void:
 	player_weapon_type.clear()
 	player_shield_hp.clear()
 	player_shield_timer.clear()
+	player_minion_kill_streak.clear()
+	player_tower_kill_streak.clear()
+	player_kill_streak.clear()
+	player_is_bounty.clear()
 	# Restore default spawn positions
 	player_spawn_positions.clear()
 	player_spawn_positions[0] = Vector3(0.0, 0.0, 82.0)

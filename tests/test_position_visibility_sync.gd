@@ -3,12 +3,15 @@
 # Verifies that towers, minions, players and fog-of-war sources are correct
 # on BOTH the host side and the client side.
 #
+# §A  Initial player ghost creation — stationary spawn regression (Bug D)
 # §B  Minion positions — spawn, state sync, host AI vs. client puppet, kill
 # §C  Tower positions — placement consistency across host+client, despawn on both sides
 # §D  Cannonball/mortar host VFX — bug B6, confirms rocket workaround
 # §E  Minimap positions — local player drawn, remote players missing (bug B7), towers/minions
 # §F  Fog of war — update_sources args, ally visibility, minimap fog ally bug B8
 extends GutTest
+
+const PlayerManagerScript := preload("res://scripts/network/PlayerManager.gd")
 
 # ── Top-level stub classes used in §E tests ───────────────────────────────────
 
@@ -44,6 +47,110 @@ func _make_stub_main() -> Node:
 func _remove_stub_main(n: Node) -> void:
 	get_tree().root.remove_child(n)
 	n.queue_free()
+
+# ── §A  Initial ghost creation — stationary-spawn regression (Bug D) ──────────
+#
+# Without the fix: FPSController only broadcasts a transform when the player
+# moves ≥0.05 m or rotates ≥0.02 rad since the last send.  A player who stands
+# completely still after loading in never triggers a broadcast, so PlayerManager
+# never receives remote_player_updated and never spawns their ghost.  Other
+# clients see nobody until the player twitches.
+#
+# The fix: FPSController calls _broadcast_initial_transform() deferred from
+# _ready(), which sends one unconditional report_player_transform RPC regardless
+# of movement.  The test verifies that this single call causes
+# GameSync.remote_player_updated to fire, which is the signal PlayerManager
+# listens to for ghost creation.
+
+func test_A1_report_player_transform_emits_remote_player_updated_signal() -> void:
+	# Tier 1 (OfflineMultiplayerPeer): server is the local peer.
+	# broadcast_player_transform() is the function body called on every peer
+	# when a transform is reported.  Calling it directly verifies it emits
+	# GameSync.remote_player_updated — the signal PlayerManager relies on to
+	# create ghosts.  Uses watch_signals (not CONNECT_ONE_SHOT lambdas) to avoid
+	# GDScript value-capture issues with primitive variables.
+	watch_signals(GameSync)
+
+	var test_pos := Vector3(10, 0, 5)
+	LobbyManager.broadcast_player_transform(2, test_pos, Vector3.ZERO, 0)
+
+	assert_signal_emitted(GameSync, "remote_player_updated",
+		"remote_player_updated must fire when broadcast_player_transform is called " +
+		"(regression: stationary player never seen by others without initial broadcast)")
+	var params: Array = get_signal_parameters(GameSync, "remote_player_updated")
+	assert_eq(params[0], 2,
+		"remote_player_updated must carry peer_id=2")
+	assert_eq(params[1], test_pos,
+		"remote_player_updated must carry the correct world position")
+
+func test_A2_stationary_player_ghost_created_on_first_signal() -> void:
+	# Verify that PlayerManager spawns the ghost on the very first
+	# remote_player_updated signal, even before any movement-threshold updates.
+	# This is the downstream effect of _broadcast_initial_transform.
+	var mgr: Node = Node.new()
+	mgr.set_script(PlayerManagerScript)
+	var spawn_root := Node3D.new()
+	mgr.set("spawn_root", spawn_root)
+	add_child_autofree(spawn_root)
+	add_child_autofree(mgr)
+
+	# Simulate the single initial broadcast for peer 3 (team 0).
+	GameSync.remote_player_updated.emit(3, Vector3(5, 0, 5), Vector3.ZERO, 0)
+	await wait_frames(1)
+
+	var ghost: Node = spawn_root.get_node_or_null("RemotePlayer_3")
+	assert_not_null(ghost,
+		"PlayerManager must create a ghost on the first remote_player_updated " +
+		"signal — regression: stationary players were never spawned without this")
+	if ghost != null:
+		assert_true(ghost.visible,
+			"Freshly spawned ghost must be visible")
+
+	# Cleanup
+	if is_instance_valid(mgr) and mgr.is_inside_tree():
+		mgr.get_parent().remove_child(mgr)
+		mgr.queue_free()
+	LobbyManager.players.erase(3)
+
+func test_A3_seed_player_transform_emits_remote_player_updated_via_reliable_path() -> void:
+	# Regression guard for the reliable initial-position seed path.
+	# seed_player_transform is the reliable RPC called from report_initial_transform
+	# (used by _broadcast_initial_transform).  Unlike broadcast_player_transform
+	# (unreliable_ordered), it is guaranteed to arrive even when the client is
+	# still loading the scene.  This test verifies the function body emits
+	# remote_player_updated with correct arguments — the downstream trigger for
+	# PlayerManager to create a ghost.
+	watch_signals(GameSync)
+
+	var test_pos := Vector3(3, 0, -7)
+	LobbyManager.seed_player_transform(5, test_pos, Vector3.ZERO, 1)
+
+	assert_signal_emitted(GameSync, "remote_player_updated",
+		"seed_player_transform must emit remote_player_updated " +
+		"(regression: unreliable broadcast was silently dropped during scene load)")
+	var params: Array = get_signal_parameters(GameSync, "remote_player_updated")
+	assert_eq(params[0], 5, "peer_id must be 5")
+	assert_eq(params[1], test_pos, "position must match")
+
+func test_A4_seed_player_transform_on_respawn_position_emits_correct_peer_and_pos() -> void:
+	# Regression guard: after death the server calls seed_player_transform with
+	# the respawn position so the ghost on all clients is moved to the correct
+	# spawn point.  Verifies the function emits remote_player_updated with the
+	# exact respawn coords — the same code path triggered by
+	# FPSController.respawn() → _broadcast_initial_transform() →
+	# LobbyManager.report_initial_transform → seed_player_transform.
+	watch_signals(GameSync)
+
+	var respawn_pos := Vector3(0, 1, 82)  # blue spawn
+	LobbyManager.seed_player_transform(7, respawn_pos, Vector3.ZERO, 0)
+
+	assert_signal_emitted(GameSync, "remote_player_updated",
+		"seed_player_transform must emit remote_player_updated for respawn position " +
+		"(regression: client lost sight of host after death because respawn() " +
+		"did not re-call _broadcast_initial_transform)")
+	var params: Array = get_signal_parameters(GameSync, "remote_player_updated")
+	assert_eq(params[0], 7,           "peer_id must be 7")
+	assert_eq(params[1], respawn_pos, "position must be the respawn position")
 
 # ── §B  Minion positions ──────────────────────────────────────────────────────
 

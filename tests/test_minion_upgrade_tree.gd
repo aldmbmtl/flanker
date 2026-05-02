@@ -24,7 +24,10 @@ func test_all_nine_supporter_nodes_present() -> void:
 		assert_true(SkillDefs.ALL.has(id), "Missing node: %s" % id)
 
 func test_old_supporter_nodes_removed() -> void:
-	var old_ids := ["s_minion_hp", "s_minion_armor", "s_minion_revive",
+	# s_minion_revive is intentionally re-added as a new Supporter passive (Logistics branch,
+	# tier 2) that interacts with the minion kill streak mechanic. It is no longer in the
+	# "old nodes to remove" list. All other old minion upgrade nodes remain absent.
+	var old_ids := ["s_minion_hp", "s_minion_armor",
 					"s_minion_damage", "s_minion_speed", "s_minion_barrage",
 					"s_minion_count", "s_minion_xp", "s_minion_surge",
 					"s_build_discount", "s_fast_respawn", "s_tower_hp",

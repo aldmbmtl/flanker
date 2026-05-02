@@ -104,6 +104,9 @@ extends StaticBody3D
 var team: int = 0
 ## Peer who placed this tower. -1 = unknown / singleplayer peer 1.
 var placer_peer_id: int = -1
+## Lane index this tower was placed in (0=Left, 1=Mid, 2=Right). -1 = unknown.
+## Set by BuildSystem.spawn_item_local() via lane proximity check after spawn.
+var _lane_index: int = -1
 
 var _health: float = 0.0
 var _dead: bool = false
@@ -473,6 +476,23 @@ func _die() -> void:
 	else:
 		# No known killer — award to local player (peer id 1 in SP, no-op in MP)
 		LevelSystem.award_xp(1, xp)
+
+	# ── Tower-kill streak: send free ram minion(s) to the killer's team ──────
+	# Only runs server/singleplayer; only when a player landed the killing blow.
+	if _killer_peer_id > 0 and (multiplayer.is_server() or not multiplayer.has_multiplayer_peer()):
+		var killer_team: int = GameSync.get_player_team(_killer_peer_id)
+		if killer_team >= 0 and _lane_index >= 0:
+			var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
+			if spawner != null and spawner.has_method("spawn_free_ram"):
+				# Increment tower kill streak
+				var streak: int = GameSync.player_tower_kill_streak.get(_killer_peer_id, 0) + 1
+				GameSync.player_tower_kill_streak[_killer_peer_id] = streak
+				# tier: 0 at kill 1, 1 at kill 2, 2 at kill 3+
+				var ram_tier: int = mini(streak - 1, 2)
+				# ram count: 1 for kills 1-3, then +1 per kill beyond 3
+				var ram_count: int = 1 if streak <= 3 else (streak - 2)
+				for _i in ram_count:
+					spawner.spawn_free_ram(killer_team, ram_tier, _lane_index)
 
 	# Broadcast despawn to all peers (call_local — runs locally in SP too)
 	LobbyManager.despawn_tower.rpc(name)

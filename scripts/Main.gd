@@ -832,9 +832,17 @@ func _set_mode(is_fps: bool) -> void:
 	_is_fps_mode = is_fps
 	_apply_fog_settings()
 	if is_fps:
-		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+		# Defer capture by one frame — capturing immediately after a scene
+		# transition or respawn can fail with "NO GRAB" on Linux X11 when the
+		# window does not yet have focus.
+		call_deferred("_capture_mouse")
 	else:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+func _capture_mouse() -> void:
+	# Only capture if we are still in FPS mode when this deferred call fires.
+	if _is_fps_mode:
+		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 func flash_damage() -> void:
 	_damage_flash_time = 1.0

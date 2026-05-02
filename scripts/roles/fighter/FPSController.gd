@@ -187,12 +187,36 @@ func _ready() -> void:
 	if is_local:
 		call_deferred("_apply_dof_settings")
 		GraphicsSettings.settings_changed.connect(_apply_dof_settings)
+		# VISIBILITY-CRITICAL: broadcast initial position unconditionally so remote
+		# peers spawn our ghost immediately, even if we stand still after loading in.
+		# The movement-threshold guard in _physics_process suppresses all subsequent
+		# broadcasts until we actually move, so a stationary player would never
+		# appear on other clients without this seed broadcast.
+		call_deferred("_broadcast_initial_transform")
 
 func _apply_dof_settings() -> void:
 	if camera.attributes == null:
 		return
 	camera.attributes.dof_blur_far_enabled = GraphicsSettings.dof_enabled
 	camera.attributes.dof_blur_near_enabled = false  # re-controlled per-frame when zoomed
+
+func _broadcast_initial_transform() -> void:
+	# Sends one unconditional RELIABLE position broadcast so other peers can
+	# create our ghost even if we never move beyond the dead-zone threshold.
+	# Uses report_initial_transform (reliable) instead of report_player_transform
+	# (unreliable_ordered) because the client may still be loading the scene
+	# (WallPlacer/TreePlacer hold frames) and unreliable packets are silently
+	# dropped during that window — leaving the host permanently invisible to the client.
+	# _last_sent_pos / _last_sent_rot are seeded here so the first physics-process
+	# threshold check doesn't re-fire immediately after.
+	if not is_local or not is_inside_tree():
+		return
+	var cam_rot: Vector3 = camera.global_rotation if camera != null else Vector3.ZERO
+	_last_sent_pos = global_position
+	_last_sent_rot = cam_rot
+	print("[FPS] _broadcast_initial_transform peer_id=", peer_id,
+		" pos=", global_position, " rot=", cam_rot)
+	LobbyManager.report_initial_transform.rpc_id(1, global_position, cam_rot, player_team)
 
 func _init_slow_trail() -> void:
 	var p := GPUParticles3D.new()
@@ -403,6 +427,10 @@ func respawn(spawn_pos: Vector3) -> void:
 		reload_prompt.visible = false
 	col_shape.disabled = false
 	$PlayerBody.visible = true
+	# Re-seed position on all clients via the reliable RPC so the respawned
+	# player is visible even if the unreliable per-frame broadcast is dropped.
+	# Uses call_deferred so global_position is committed before broadcasting.
+	call_deferred("_broadcast_initial_transform")
 
 func pick_up_weapon(w: WeaponData) -> void:
 	# Check if we already have this weapon type in any slot — top up ammo

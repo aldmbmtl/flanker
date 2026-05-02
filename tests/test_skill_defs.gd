@@ -93,14 +93,14 @@ func test_non_active_nodes_have_zero_cooldown() -> void:
 # ── Node count sanity ──────────────────────────────────────────────────────────
 
 func test_total_node_count_is_22() -> void:
-	# 9 Fighter + 9 Supporter = 18 total
-	assert_eq(SkillDefs.ALL.size(), 18)
+	# 10 Fighter + 11 Supporter = 21 total (3 new streak/bounty passives added)
+	assert_eq(SkillDefs.ALL.size(), 21)
 
 func test_fighter_node_count_is_11() -> void:
-	assert_eq(SkillDefs.get_nodes_for_role("Fighter").size(), 9)
+	assert_eq(SkillDefs.get_nodes_for_role("Fighter").size(), 10)
 
 func test_supporter_node_count_is_11() -> void:
-	assert_eq(SkillDefs.get_nodes_for_role("Supporter").size(), 9)
+	assert_eq(SkillDefs.get_nodes_for_role("Supporter").size(), 11)
 
 # ── Helper functions ──────────────────────────────────────────────────────────
 

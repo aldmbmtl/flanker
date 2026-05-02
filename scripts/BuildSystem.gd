@@ -214,6 +214,19 @@ func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype:
 				node.setup(team)
 			# Store who placed this tower (for per-placer bonuses)
 			node.set("placer_peer_id", placer_peer_id)
+			# Resolve lane index by proximity to lane polylines and store on the tower.
+			# Used by TowerBase._die() to send free ram minions to the correct lane.
+			if def.get("is_tower", false):
+				var best_lane: int = -1
+				var best_dist: float = INF
+				var p := Vector2(world_pos.x, world_pos.z)
+				for lane_i in range(3):
+					var pts: Array = LaneData.get_lane_points(lane_i)
+					var d: float = LaneData.dist_to_polyline(p, pts)
+					if d < best_dist:
+						best_dist = d
+						best_lane = lane_i
+				node.set("_lane_index", best_lane)
 			# Apply Supporter attribute and skill tree tower HP bonuses (server/singleplayer only)
 			_apply_tower_hp_bonuses(node, item_type, placer_peer_id)
 			# Apply Supporter attribute fire rate bonus

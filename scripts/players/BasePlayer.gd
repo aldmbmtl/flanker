@@ -48,8 +48,9 @@ const LERP_SPEED := 15.0
 # ── Visuals ───────────────────────────────────────────────────────────────────
 
 var _anim: AnimationPlayer = null
-var _model_loaded: bool    = false
-var _current_char: String  = ""
+var _model_loaded: bool        = false
+var _current_char: String      = ""
+var _visuals_initialized: bool = false  # set true when _init_visuals() runs
 
 const FALLBACK_CHAR  := "a"
 const GLB_BASE_PATH  := "res://assets/kenney_blocky-characters/Models/GLB format/character-%s.glb"
@@ -109,6 +110,7 @@ func _build_visuals() -> void:
 	pass
 
 func _init_visuals() -> void:
+	_visuals_initialized = true
 	_build_visuals()
 
 	# Load correct avatar immediately if known; otherwise load fallback and wait
@@ -197,6 +199,16 @@ func take_damage(amount: float, source: String, source_team: int, shooter_peer_i
 # ── Avatar model loading ──────────────────────────────────────────────────────
 
 func _on_lobby_updated() -> void:
+	# VISIBILITY-CRITICAL: if lobby_updated fires before _init_visuals() has run
+	# (possible because _init_visuals is deferred), do NOT call _load_model here.
+	# _init_visuals() will call _try_load_avatar() itself; a premature call here
+	# would result in _load_model being called twice in the same frame, causing
+	# a queue_free on the old children that triggers Godot's internal
+	# visibility_changed and silently sets visible=false on the ghost root.
+	if not _visuals_initialized:
+		print("[BP] _on_lobby_updated peer_id=", peer_id,
+			" skipping — _init_visuals not yet run")
+		return
 	if _try_load_avatar():
 		print("[BP] _on_lobby_updated peer_id=", peer_id,
 			" avatar loaded char='", _current_char, "' — disconnecting lobby_updated")
@@ -270,6 +282,14 @@ func _load_model(char: String) -> void:
 	_model_loaded  = true
 	print("[BP] _load_model peer_id=", peer_id,
 		" done char='", _current_char, "' anim=", (_anim != null))
+
+	# Re-assert visibility after GLB import: Godot's deferred import machinery
+	# can fire visibility_changed and silently set the root CharacterBody3D
+	# visible=false during model instantiation. Puppet nodes (is_local=false)
+	# must always be visible — re-assert here to cancel any such internal change.
+	if not is_local:
+		visible = true
+		print("[BP] _load_model peer_id=", peer_id, " re-asserted visible=true (puppet)")
 
 func _set_layers_recursive(node: Node, layer: int) -> void:
 	if node is VisualInstance3D:

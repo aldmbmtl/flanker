@@ -30,7 +30,11 @@ var _fence_mesh: Mesh = null
 
 func _ready() -> void:
 	await get_tree().process_frame
+	if not is_inside_tree():
+		return
 	await get_tree().process_frame
+	if not is_inside_tree():
+		return
 	seed(GameSync.game_seed)
 
 	# Ensure terrain collision is ready before placement (FencePlacer doesn't
@@ -57,6 +61,8 @@ func _place_all_fences() -> void:
 		var pts: Array = LaneData.get_lane_points(lane_i)
 		_place_lane_fences(pts, lane_i)
 		await get_tree().process_frame
+		if not is_inside_tree():
+			return
 
 func _extract_first_mesh(scene: PackedScene) -> Mesh:
 	var inst: Node = scene.instantiate()

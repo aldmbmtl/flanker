@@ -57,7 +57,11 @@ func _ready() -> void:
 		gen_seed = randi()
 	seed(gen_seed)
 	await get_tree().process_frame
+	if not is_inside_tree():
+		return
 	await get_tree().process_frame
+	if not is_inside_tree():
+		return
 
 	# Ensure terrain collision is ready before raycasting.
 	if has_node("/root/Main/World/Terrain"):
@@ -132,6 +136,8 @@ func _place_walls() -> void:
 
 		# Yield every clearing to keep the loading screen responsive
 		await get_tree().process_frame
+		if not is_inside_tree():
+			return
 
 	await _scatter_grass()
 	await _scatter_sand()
@@ -221,6 +227,8 @@ func _scatter_grass() -> void:
 		# Yield every 20 placements to keep the loading screen responsive
 		if placed % 20 == 0:
 			await get_tree().process_frame
+			if not is_inside_tree():
+				return
 
 func _scatter_sand() -> void:
 	if SAND_SCENE_PATHS.is_empty():
@@ -284,6 +292,8 @@ func _scatter_sand() -> void:
 		# Yield every 20 placements to keep the loading screen responsive
 		if placed % 20 == 0:
 			await get_tree().process_frame
+			if not is_inside_tree():
+				return
 
 func _query_terrain(pos: Vector3) -> Dictionary:
 	if terrain_body == null:

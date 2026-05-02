@@ -109,7 +109,11 @@ func _ready() -> void:
 		gen_seed = randi()
 	seed(gen_seed)
 	await get_tree().process_frame
+	if not is_inside_tree():
+		return
 	await get_tree().process_frame
+	if not is_inside_tree():
+		return
 
 	# Ensure terrain mesh and collision are fully built before raycasting.
 	var terrain_node: Node = _get_terrain_node()
@@ -272,6 +276,8 @@ func _place_trees() -> void:
 		if batch >= 50:
 			batch = 0
 			await get_tree().process_frame
+			if not is_inside_tree():
+				return
 
 	# Build MultiMeshInstance3D nodes for each variant × band
 	_commit_multimeshes(TREE_SCENES)

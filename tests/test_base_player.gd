@@ -423,3 +423,67 @@ func test_p30_setup_after_add_child_updates_fields() -> void:
 	assert_eq(p.player_team, 1)
 	assert_true(p.is_local)
 	assert_eq(p.avatar_char, "e")
+
+# ── P31: _on_lobby_updated skips _load_model before _init_visuals runs ────────
+#
+# Regression guard for Bug C: lobby_updated can fire (via LobbyManager) before
+# _init_visuals() has been executed (because _init_visuals is called_deferred).
+# If _on_lobby_updated calls _load_model in that window, _load_model will be
+# called a second time when _init_visuals runs, causing a same-frame queue_free
+# that triggers Godot's visibility_changed → visible=false on the ghost root.
+#
+# The fix: _on_lobby_updated must be a no-op when _visuals_initialized is false.
+
+func test_p31_on_lobby_updated_before_init_visuals_does_not_load_model() -> void:
+	var p := _make_player()
+	# peer_id 88 has a known char so _try_load_avatar would succeed.
+	LobbyManager.players[88] = {"avatar_char": "b", "name": "T", "team": 0, "role": 0}
+	p.setup(88, 0, false, "")
+	# Do NOT add_child yet — _ready() calls call_deferred("_init_visuals"), so
+	# at this point _visuals_initialized is still false.
+	# We also do NOT add_child at all; we call _on_lobby_updated directly to
+	# simulate the race window where lobby_updated fires before _init_visuals runs.
+	# The function must be a no-op — _model_loaded must stay false.
+	p._on_lobby_updated()
+	assert_false(p._model_loaded,
+		"_on_lobby_updated must not load the model before _init_visuals has run " +
+		"(regression guard: double _load_model causes visible=false on ghost root)")
+	LobbyManager.players.erase(88)
+	p.queue_free()
+
+# ── P32: _visuals_initialized flag set true when _init_visuals runs ──────────
+#
+# Companion to P31: confirms _visuals_initialized becomes true after _init_visuals
+# executes, so subsequent lobby_updated calls proceed normally.
+
+func test_p32_visuals_initialized_set_after_init_visuals() -> void:
+	var p := _make_player()
+	p.setup(1, 0, false, "a")
+	add_child_autofree(p)
+	assert_false(p._visuals_initialized,
+		"_visuals_initialized must be false before _init_visuals deferred call runs")
+	await wait_frames(2)
+	assert_true(p._visuals_initialized,
+		"_visuals_initialized must be true after _init_visuals executes")
+
+# ── P33: _load_model re-asserts visible=true on puppet after GLB import ───────
+#
+# Regression guard: Godot's GLB import machinery fires visibility_changed and can
+# silently set the root CharacterBody3D visible=false during model instantiation.
+# _load_model() must re-assert visible=true for puppet nodes (is_local=false) at
+# the end of every model load, so any such engine-internal hidden state is undone.
+#
+# Failure mode without the fix: the ghost spawns, _load_model runs, Godot's import
+# deferred call hides the root, and the remote player becomes permanently invisible.
+
+func test_p33_load_model_reasserts_visible_true_on_puppet() -> void:
+	var p := _make_player()
+	p.setup(7, 0, false, "a")
+	add_child_autofree(p)
+	# Simulate what the engine may do during GLB import: hide the root node.
+	p.visible = false
+	# Now call _load_model — it must re-assert visible=true for puppet nodes.
+	p._load_model("a")
+	assert_true(p.visible,
+		"_load_model must re-assert visible=true on puppet (is_local=false) " +
+		"to counter Godot GLB import visibility_changed side-effect")

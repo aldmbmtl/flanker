@@ -23,6 +23,8 @@ func _ready() -> void:
 			if batch >= 20:
 				batch = 0
 				await get_tree().process_frame
+				if not is_inside_tree():
+					return
 
 func _place_segment(a: Vector2, b: Vector2, mat: StandardMaterial3D) -> void:
 	var seg := b - a
