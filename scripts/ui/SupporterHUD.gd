@@ -142,7 +142,7 @@ func _build_ui() -> void:
 		sub_name.add_theme_color_override("font_color", _DIM_COLOR)
 		sub_inner.add_child(sub_name)
 		var sub_cost := Label.new()
-		sub_cost.text = "¤%d" % wcost
+		sub_cost.text = "$%d" % wcost
 		sub_cost.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		sub_cost.add_theme_font_size_override("font_size", roundi(10.0 * sc))
 		sub_inner.add_child(sub_cost)
@@ -188,7 +188,7 @@ func _build_ui() -> void:
 
 		var cost_lbl := Label.new()
 		var cost: int = _get_slot_cost(i)
-		cost_lbl.text = "¤%d" % cost
+		cost_lbl.text = "$%d" % cost
 		cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		cost_lbl.add_theme_font_size_override("font_size", roundi(11.0 * sc))
 		inner.add_child(cost_lbl)

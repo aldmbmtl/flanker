@@ -266,7 +266,7 @@ func _add_button(entry: Dictionary) -> void:
 
 	# Fire cost label
 	var cost_lbl := Label.new()
-	cost_lbl.text = "¤%d" % LauncherDefs.get_fire_cost(entry["type"])
+	cost_lbl.text = "$%d" % LauncherDefs.get_fire_cost(entry["type"])
 	cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	cost_lbl.add_theme_font_size_override("font_size", roundi(10.0 * _scale))
 	cost_lbl.add_theme_color_override("font_color", _DIM_COLOR)
@@ -359,7 +359,7 @@ func _refresh_button(idx: int) -> void:
 		status.text = "~%ds" % secs
 		status.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	elif not can_afford:
-		status.text = "¤ LOW"
+		status.text = "$ LOW"
 		status.add_theme_color_override("font_color", Color(1.0, 0.35, 0.2))
 	else:
 		status.text = "READY"

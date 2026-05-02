@@ -50,7 +50,7 @@ const SupporterHUDScene := preload("res://scenes/ui/SupporterHUD.tscn")
 const LauncherHUDScript := preload("res://scripts/ui/LauncherHUD.gd")
 const CharacterScreenScene := preload("res://scenes/ui/CharacterScreen.tscn")
 const LaneBoostHUDScript := preload("res://scripts/ui/LaneBoostHUD.gd")
-const RamHUDScript        := preload("res://scripts/ui/RamHUD.gd")
+# RamHUD merged into LaneBoostHUD — no separate script needed
 const AISupporterControllerScript := preload("res://scripts/roles/supporter/AISupporterController.gd")
 const EntityHUDScript             := preload("res://scripts/hud/EntityHUD.gd")
 const PingHUDScript               := preload("res://scripts/hud/PingHUD.gd")
@@ -62,7 +62,6 @@ const LanePressureHUDScript := preload("res://scripts/ui/LanePressureHUD.gd")
 var _supporter_hud: Node = null
 var _launcher_hud: Node = null
 var _lane_boost_hud: Node = null
-var _ram_hud: Node = null
 var _entity_hud: Control = null
 var _ping_hud: Control    = null
 var _compass_hud: Control = null
@@ -282,12 +281,6 @@ func _start_multiplayer_game() -> void:
 		$HUD.add_child(_lane_boost_hud)
 		_lane_boost_hud.setup(player_start_team)
 		LobbyManager.lane_boosts_synced.connect(_lane_boost_hud.apply_boost_sync)
-		# Spawn RamHUD — left-edge ram spawn toolbar (always-visible, standalone)
-		_ram_hud = CanvasLayer.new()
-		_ram_hud.set_script(RamHUDScript)
-		_ram_hud.name = "RamHUD"
-		$HUD.add_child(_ram_hud)
-		_ram_hud.setup(player_start_team)
 
 		# Wire EntityHUD — player circles + tower health bars
 		_entity_hud = $HUD/HUDOverlay
@@ -621,11 +614,11 @@ func _process(delta: float) -> void:
 	if fps_player:
 		var player_team_name := "BLUE" if fps_player.player_team == 0 else "RED"
 		var player_pts := TeamData.get_points(fps_player.player_team)
-		points_label.text = "%s: %d" % [player_team_name, player_pts]
+		points_label.text = "%s: $%d" % [player_team_name, player_pts]
 	elif game_state == GameState.PLAYING:
 		var player_team_name := "BLUE" if player_start_team == 0 else "RED"
 		var player_pts := TeamData.get_points(player_start_team)
-		points_label.text = "%s: %d" % [player_team_name, player_pts]
+		points_label.text = "%s: $%d" % [player_team_name, player_pts]
 	var completed_respawns: Array = []
 	for pos in _pending_respawns.keys():
 		_pending_respawns[pos] -= delta

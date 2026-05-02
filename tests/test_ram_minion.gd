@@ -95,7 +95,7 @@ class TestRequestRamMinion extends GutTest:
 		var ok: bool = _spawner.request_ram_minion(0, 0, 0)
 		assert_true(ok, "should return true when affordable")
 
-	## Cost is deducted after successful request (T1 = ¤15).
+	## Cost is deducted after successful request (T1 = $15).
 	func test_cost_deducted_on_success() -> void:
 		TeamData.sync_from_server(50, 50)
 		_spawner.request_ram_minion(0, 0, 0)
@@ -112,7 +112,7 @@ class TestRequestRamMinion extends GutTest:
 	func test_all_lanes_deducts_triple_cost() -> void:
 		var ok: bool = _spawner.request_ram_minion(0, 0, -1)
 		assert_true(ok, "all-lanes should succeed with 100 pts")
-		assert_eq(TeamData.get_points(0), 55, "3 × ¤15 = ¤45 deducted")
+		assert_eq(TeamData.get_points(0), 55, "3 × $15 = $45 deducted")
 
 	## All-lanes request fails if team can't afford × 3.
 	func test_all_lanes_fails_when_cant_afford_triple() -> void:
@@ -143,17 +143,17 @@ class TestRequestRamMinion extends GutTest:
 		_spawner.request_ram_minion(0, 2, 0)
 		assert_eq(_spawner.spawn_calls[0]["mtype"], "ram_t3", "T2 → ram_t3")
 
-	## T2 (cow) costs ¤30 per lane.
+	## T2 (cow) costs $30 per lane.
 	func test_tier1_cost_per_lane() -> void:
 		TeamData.sync_from_server(100, 100)
 		_spawner.request_ram_minion(0, 1, 0)
-		assert_eq(TeamData.get_points(0), 70, "T2 costs ¤30")
+		assert_eq(TeamData.get_points(0), 70, "T2 costs $30")
 
-	## T3 (elephant) costs ¤50 per lane.
+	## T3 (elephant) costs $50 per lane.
 	func test_tier2_cost_per_lane() -> void:
 		TeamData.sync_from_server(100, 100)
 		_spawner.request_ram_minion(0, 2, 0)
-		assert_eq(TeamData.get_points(0), 50, "T3 costs ¤50")
+		assert_eq(TeamData.get_points(0), 50, "T3 costs $50")
 
 	## Spawn call records correct team.
 	func test_spawn_call_records_team() -> void:

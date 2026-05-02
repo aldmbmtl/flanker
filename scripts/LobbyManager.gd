@@ -933,7 +933,7 @@ func request_lane_boost(lane_i: int, team: int) -> void:
 	sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
 
 # Client (Supporter) requests a ram minion on a specific lane (or all lanes).
-# tier:   0=beaver (¤15), 1=cow (¤30), 2=elephant (¤50). All-lanes cost is ×3.
+# tier:   0=beaver ($15), 1=cow ($30), 2=elephant ($50). All-lanes cost is ×3.
 # lane_i: 0=Left, 1=Mid, 2=Right, -1=all lanes.
 @rpc("any_peer", "reliable")
 func request_ram_minion(tier: int, team: int, lane_i: int) -> void:

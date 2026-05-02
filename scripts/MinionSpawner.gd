@@ -124,6 +124,11 @@ func _launch_wave() -> void:
 		_main.show_wave_announcement(wave_number)
 		LobbyManager.sync_wave_announcement.rpc(wave_number)
 
+	# Pay out passive income accumulated from manual minion sends
+	for team in range(2):
+		TeamData.payout_passive_income(team)
+	LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+
 	var base_count: int = min(wave_number, MAX_WAVE_SIZE)
 	for lane_i in range(3):
 		for team in range(2):

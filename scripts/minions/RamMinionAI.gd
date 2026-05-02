@@ -1,5 +1,5 @@
 ## RamMinionAI — high-HP minion that ignores all enemies and rushes the enemy base.
-## Three tiers: beaver (300 HP / ¤15), cow (600 HP / ¤30), elephant (1000 HP / ¤50).
+## Three tiers: beaver (300 HP / $15), cow (600 HP / $30), elephant (1000 HP / $50).
 ## Double the physical and visual size of a standard minion.
 ## Requestable via SupporterHUD or injected randomly into auto-waves.
 class_name RamMinionAI

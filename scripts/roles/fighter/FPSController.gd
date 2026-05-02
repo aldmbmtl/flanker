@@ -1086,7 +1086,7 @@ func _update_points_label() -> void:
 		return
 	var blue_pts: int = TeamData.get_points(0)
 	var red_pts: int = TeamData.get_points(1)
-	points_label.text = "BLUE: %d | RED: %d" % [blue_pts, red_pts]
+	points_label.text = "BLUE: $%d | RED: $%d" % [blue_pts, red_pts]
 
 func _on_game_sync_died(p_peer_id: int) -> void:
 	if p_peer_id != peer_id:

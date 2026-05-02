@@ -7,6 +7,8 @@ func before_each() -> void:
 	# Reset to a clean known state before every test
 	TeamData.team_points[0] = 0
 	TeamData.team_points[1] = 0
+	TeamData.passive_income[0] = 0
+	TeamData.passive_income[1] = 0
 
 # ── add_points ────────────────────────────────────────────────────────────────
 
@@ -86,3 +88,35 @@ func test_both_teams_start_at_known_state_after_reset() -> void:
 	# before_each sets both to 0 — verify our test isolation works
 	assert_eq(TeamData.get_points(0), 0)
 	assert_eq(TeamData.get_points(1), 0)
+
+# ── passive income ────────────────────────────────────────────────────────────
+
+func test_add_passive_income_increases_counter() -> void:
+	TeamData.add_passive_income(0, 1)
+	TeamData.add_passive_income(0, 1)
+	assert_eq(TeamData.get_passive_income(0), 2, "two adds → rate of 2")
+
+func test_payout_passive_income_resets_and_adds_points() -> void:
+	TeamData.sync_from_server(50, 50)
+	TeamData.add_passive_income(0, 3)
+	TeamData.payout_passive_income(0)
+	assert_eq(TeamData.get_points(0), 53, "3 income paid out to team points")
+	assert_eq(TeamData.get_passive_income(0), 0, "rate resets to 0 after payout")
+
+func test_payout_returns_zero_when_empty() -> void:
+	TeamData.sync_from_server(40, 40)
+	TeamData.payout_passive_income(0)
+	assert_eq(TeamData.get_points(0), 40, "no change when income rate is 0")
+
+func test_passive_income_independent_per_team() -> void:
+	TeamData.add_passive_income(0, 2)
+	TeamData.add_passive_income(1, 5)
+	assert_eq(TeamData.get_passive_income(0), 2, "blue rate unaffected by red")
+	assert_eq(TeamData.get_passive_income(1), 5, "red rate unaffected by blue")
+
+func test_passive_income_cleared_on_reset() -> void:
+	TeamData.add_passive_income(0, 4)
+	TeamData.add_passive_income(1, 7)
+	TeamData.reset()
+	assert_eq(TeamData.get_passive_income(0), 0, "blue rate cleared on reset")
+	assert_eq(TeamData.get_passive_income(1), 0, "red rate cleared on reset")

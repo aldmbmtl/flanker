@@ -1,12 +1,12 @@
 extends CanvasLayer
 ## LaneBoostHUD — right-edge vertical toolbar for the Supporter role.
 ## Lets the Supporter queue extra minions on specific lanes for the next wave.
+## Also includes Ram minion sending (merged from RamHUD).
 ##
-## Buttons:
-##   LEFT  — +3 minions on lane 0 next wave (costs 15 pts)
-##   MID   — +3 minions on lane 1 next wave (costs 15 pts)
-##   RIGHT — +3 minions on lane 2 next wave (costs 15 pts)
-##   ALL   — +1 minion on every lane next wave (costs 15 pts)
+## Sections (top to bottom):
+##   SEND RAM — tier selector + lane buttons for immediate ram minion spawns
+##   REINFORCE — lane boost buttons for next wave
+##   Income display — shows pending passive income
 ##
 ## Boost state is server-authoritative. LobbyManager.lane_boosts_synced drives the display.
 ## Wire LobbyManager.lane_boosts_synced → apply_boost_sync() from Main.gd after setup().
@@ -26,6 +26,24 @@ const _DIM_COLOR    := Color(0.55, 0.45, 0.35, 1.0)
 const _SLOT_BG      := Color(0.06, 0.07, 0.09, 0.92)
 const _ACTIVE_BG    := Color(0.04, 0.12, 0.04, 0.92)
 
+## ── Ram section constants ─────────────────────────────────────────────────
+const RAM_TIER_COSTS:  Array[int]    = [15, 30, 50]
+const RAM_TIER_NAMES:  Array[String] = ["Beaver", "Cow", "Elephant"]
+const RAM_TIER_LABELS: Array[String] = ["Ram I", "Ram II", "Ram III"]
+
+const _RAM_LANES: Array = [
+	{ "label": "LEFT",  "lane_i": 0 },
+	{ "label": "MID",   "lane_i": 1 },
+	{ "label": "RIGHT", "lane_i": 2 },
+	{ "label": "ALL",   "lane_i": -1 },
+]
+
+var _ram_tier: int = 0  # currently-selected tier (0=beaver, 1=cow, 2=elephant)
+var _ram_tier_panels: Array = []
+var _ram_lane_panels: Array = []
+var _ram_cost_lbl: Label = null
+
+## ── Boost section constants ──────────────────────────────────────────────
 const BOOST_COST: int = 15
 
 ## Slot definitions: [label, lane_i]  lane_i=-1 means all lanes
@@ -44,6 +62,9 @@ var _synced_boosts: Array = [0, 0, 0]
 var _panels: Array = []
 var _boost_labels: Array = []
 var _vbox: VBoxContainer = null
+
+## Income display label
+var _income_lbl: Label = null
 
 func _ready() -> void:
 	_scale = float(DisplayServer.window_get_size().y) / 1080.0
@@ -133,17 +154,52 @@ func _build_ui() -> void:
 	_vbox.add_theme_constant_override("separation", roundi(6.0 * sc))
 	root.add_child(_vbox)
 
-	# Header
-	var header := Label.new()
-	header.text = "REINFORCE"
-	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	header.add_theme_font_size_override("font_size", roundi(10.0 * sc))
-	header.add_theme_color_override("font_color", _TITLE_COLOR)
-	_vbox.add_child(header)
+	# ── RAM Section (top) ────────────────────────────────────────
+	var ram_header := Label.new()
+	ram_header.text = "SEND RAM"
+	ram_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ram_header.add_theme_font_size_override("font_size", roundi(10.0 * sc))
+	ram_header.add_theme_color_override("font_color", _TITLE_COLOR)
+	_vbox.add_child(ram_header)
+
+	# Ram tier selection buttons (horizontal via HBoxContainer)
+	var ram_tier_hbox := HBoxContainer.new()
+	ram_tier_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	ram_tier_hbox.add_theme_constant_override("separation", roundi(4.0 * sc))
+	_vbox.add_child(ram_tier_hbox)
+
+	for ti in RAM_TIER_NAMES.size():
+		_add_ram_tier_button(ti, ram_tier_hbox)
+
+	# Ram cost label
+	_ram_cost_lbl = Label.new()
+	_ram_cost_lbl.text = "$%d / lane" % RAM_TIER_COSTS[_ram_tier]
+	_ram_cost_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_ram_cost_lbl.add_theme_font_size_override("font_size", roundi(9.0 * sc))
+	_ram_cost_lbl.add_theme_color_override("font_color", _DIM_COLOR)
+	_vbox.add_child(_ram_cost_lbl)
+
+	# Ram lane buttons
+	for li in _RAM_LANES.size():
+		var slot: Dictionary = _RAM_LANES[li]
+		_add_ram_lane_button(li, slot)
+
+	# Divider
+	var divider := HSeparator.new()
+	divider.custom_minimum_size = Vector2(0, 8.0 * sc)
+	_vbox.add_child(divider)
+
+	# ── Boost Section (bottom) ───────────────────────────────────
+	var boost_header := Label.new()
+	boost_header.text = "REINFORCE"
+	boost_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	boost_header.add_theme_font_size_override("font_size", roundi(10.0 * sc))
+	boost_header.add_theme_color_override("font_color", _TITLE_COLOR)
+	_vbox.add_child(boost_header)
 
 	# Cost label under header
 	var cost_header := Label.new()
-	cost_header.text = "¤%d / click" % BOOST_COST
+	cost_header.text = "$%d / click" % BOOST_COST
 	cost_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	cost_header.add_theme_font_size_override("font_size", roundi(9.0 * sc))
 	cost_header.add_theme_color_override("font_color", _DIM_COLOR)
@@ -153,6 +209,14 @@ func _build_ui() -> void:
 	for slot_i in _SLOTS.size():
 		var slot: Dictionary = _SLOTS[slot_i]
 		_add_slot_button(slot_i, slot)
+
+	# Income display at bottom
+	_income_lbl = Label.new()
+	_income_lbl.text = "Income: $0"
+	_income_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_income_lbl.add_theme_font_size_override("font_size", roundi(9.0 * sc))
+	_income_lbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.4))
+	_vbox.add_child(_income_lbl)
 
 	center.add_child(root)
 	add_child(wrapper)
@@ -206,7 +270,92 @@ func _add_slot_button(slot_i: int, slot: Dictionary) -> void:
 	_vbox.add_child(panel)
 	_panels.append(panel)
 
-# ── Process ───────────────────────────────────────────────────────────────────
+# ── Ram tier button creation ─────────────────────────────────────────
+
+func _add_ram_tier_button(ti: int, hbox: HBoxContainer) -> void:
+	var sc: float = _scale
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(30.0 * sc, 0.0)
+	panel.add_theme_stylebox_override("panel", _make_ram_tier_style(ti == _ram_tier))
+
+	var lbl := Label.new()
+	lbl.text = RAM_TIER_LABELS[ti]
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.add_theme_font_size_override("font_size", roundi(9.0 * sc))
+	lbl.add_theme_color_override("font_color", _TITLE_COLOR)
+	panel.add_child(lbl)
+
+	var btn := Button.new()
+	btn.flat = true
+	btn.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.add_child(btn)
+	btn.pressed.connect(func() -> void: _on_ram_tier_pressed(ti))
+
+	hbox.add_child(panel)
+	_ram_tier_panels.append(panel)
+
+func _make_ram_tier_style(selected: bool) -> StyleBoxFlat:
+	var sc: float = _scale
+	var s := StyleBoxFlat.new()
+	if selected:
+		s.bg_color = Color(0.22, 0.14, 0.02, 0.95)
+		s.border_color = Color(1.0, 0.55, 0.1, 1.0)
+	else:
+		s.bg_color = _SLOT_BG
+		s.border_color = Color(_BORDER_COLOR, 0.5)
+	s.border_width_left   = 2
+	s.border_width_right  = 2
+	s.border_width_top    = 2
+	s.border_width_bottom = 2
+	s.corner_radius_top_left     = 3
+	s.corner_radius_top_right    = 3
+	s.corner_radius_bottom_right = 3
+	s.corner_radius_bottom_left  = 3
+	s.content_margin_left   = 4.0 * sc
+	s.content_margin_right  = 4.0 * sc
+	s.content_margin_top    = 4.0 * sc
+	s.content_margin_bottom = 4.0 * sc
+	return s
+
+func _add_ram_lane_button(li: int, slot: Dictionary) -> void:
+	var sc: float = _scale
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(100.0 * sc, 0.0)
+	panel.add_theme_stylebox_override("panel", _make_slot_style(false, true))
+
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", roundi(2.0 * sc))
+	panel.add_child(inner)
+
+	var name_lbl := Label.new()
+	name_lbl.text = slot["label"]
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.add_theme_font_size_override("font_size", roundi(11.0 * sc))
+	name_lbl.add_theme_color_override("font_color", _TITLE_COLOR)
+	inner.add_child(name_lbl)
+
+	var desc_lbl := Label.new()
+	if slot["lane_i"] == -1:
+		desc_lbl.text = "all 3 lanes"
+	else:
+		desc_lbl.text = "send now"
+	desc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc_lbl.add_theme_font_size_override("font_size", roundi(9.0 * sc))
+	desc_lbl.add_theme_color_override("font_color", _DIM_COLOR)
+	inner.add_child(desc_lbl)
+
+	var btn := Button.new()
+	btn.flat = true
+	btn.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.add_child(btn)
+	btn.pressed.connect(func() -> void: _on_ram_lane_pressed(li))
+
+	_vbox.add_child(panel)
+	_ram_lane_panels.append(panel)
+
+# ── Process ───────────────────────────────────────────────────────────
 
 func _process(_delta: float) -> void:
 	_refresh_all()
@@ -215,6 +364,26 @@ func _refresh_all() -> void:
 	var pts: int = TeamData.get_points(_player_team)
 	var can_afford: bool = pts >= BOOST_COST
 
+	# Refresh ram tier buttons
+	for ti in _ram_tier_panels.size():
+		var p: PanelContainer = _ram_tier_panels[ti]
+		if is_instance_valid(p):
+			p.add_theme_stylebox_override("panel", _make_ram_tier_style(ti == _ram_tier))
+
+	# Refresh ram lane buttons
+	var ram_cost: int  = RAM_TIER_COSTS[_ram_tier]
+	var ram_afford_one: bool = pts >= ram_cost
+	var ram_afford_all: bool = pts >= ram_cost * 3
+
+	for li in _ram_lane_panels.size():
+		var p: PanelContainer = _ram_lane_panels[li]
+		if not is_instance_valid(p):
+			continue
+		var is_all: bool = _RAM_LANES[li]["lane_i"] == -1
+		var can_afford_this: bool = ram_afford_all if is_all else ram_afford_one
+		p.add_theme_stylebox_override("panel", _make_slot_style(false, can_afford_this))
+
+	# Refresh boost buttons
 	for slot_i in _SLOTS.size():
 		var lane_i: int = _SLOTS[slot_i]["lane_i"]
 
@@ -245,7 +414,7 @@ func _refresh_all() -> void:
 				blbl.text = "+%d total" % total
 				blbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.4))
 			elif not can_afford:
-				blbl.text = "¤ LOW"
+				blbl.text = "$ LOW"
 				blbl.add_theme_color_override("font_color", Color(1.0, 0.35, 0.2))
 			else:
 				blbl.text = ""
@@ -255,12 +424,41 @@ func _refresh_all() -> void:
 				blbl.text = "+%d queued" % queued
 				blbl.add_theme_color_override("font_color", Color(0.4, 1.0, 0.4))
 			elif not can_afford:
-				blbl.text = "¤ LOW"
+				blbl.text = "$ LOW"
 				blbl.add_theme_color_override("font_color", Color(1.0, 0.35, 0.2))
 			else:
 				blbl.text = ""
 
-# ── Input handler ─────────────────────────────────────────────────────────────
+	# Refresh income display
+	if _income_lbl and is_instance_valid(_income_lbl):
+		var income: int = TeamData.get_passive_income(_player_team)
+		_income_lbl.text = "Income: $%d" % income
+
+# ── Input handlers ──────────────────────────────────────────────────
+
+func _on_ram_tier_pressed(ti: int) -> void:
+	_ram_tier = ti
+	if _ram_cost_lbl and is_instance_valid(_ram_cost_lbl):
+		_ram_cost_lbl.text = "$%d / lane" % RAM_TIER_COSTS[_ram_tier]
+
+func _on_ram_lane_pressed(li: int) -> void:
+	var lane_i: int   = _RAM_LANES[li]["lane_i"]
+	var cost: int     = RAM_TIER_COSTS[_ram_tier]
+	var lanes_n: int  = 3 if lane_i == -1 else 1
+	if TeamData.get_points(_player_team) < cost * lanes_n:
+		return
+
+	# Add passive income (+1 per ram sent)
+	TeamData.add_passive_income(_player_team, 1)
+
+	if multiplayer.is_server():
+		var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
+		if spawner == null:
+			return
+		if spawner.request_ram_minion(_player_team, _ram_tier, lane_i):
+			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+	else:
+		LobbyManager.request_ram_minion.rpc_id(1, _ram_tier, _player_team, lane_i)
 
 func _on_boost_pressed(slot_i: int) -> void:
 	if TeamData.get_points(_player_team) < BOOST_COST:
@@ -277,6 +475,8 @@ func _on_boost_pressed(slot_i: int) -> void:
 			return
 		if not TeamData.spend_points(_player_team, BOOST_COST):
 			return
+		# Add passive income (+1 per boost sent)
+		TeamData.add_passive_income(_player_team, 1)
 		if lane_i == -1:
 			spawner.boost_all_lanes(_player_team)
 		else:
