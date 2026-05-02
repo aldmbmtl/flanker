@@ -10,6 +10,7 @@ func before_each() -> void:
 	LobbyManager.player_death_counts.clear()
 	LobbyManager._roles_pending = 0
 	LevelSystem.clear_all()
+	SkillTree.clear_all()
 
 # ── register_player_local ─────────────────────────────────────────────────────
 

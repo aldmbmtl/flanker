@@ -70,7 +70,7 @@ func test_B2_spawned_puppet_minion_has_correct_team() -> void:
 	var waypts: Array[Vector3] = [Vector3.ZERO]
 	LobbyManager.spawn_minion_visuals(1, Vector3.ZERO, waypts, 0, 66)
 
-	var m: StubMinionSpawner.StubMinionNode = spawner.get_minion_by_id(66)
+	var m: Node = spawner.get_minion_by_id(66)
 	assert_ne(m, null, "Minion 66 should have been spawned")
 	if m != null:
 		assert_eq(m.team, 1, "Puppet minion team must match spawn call team")
@@ -91,7 +91,7 @@ func test_B3_sync_minion_states_updates_puppet_position() -> void:
 	var healths := PackedFloat32Array([60.0])
 	LobbyManager.sync_minion_states(ids, positions, rotations, healths)
 
-	var m: StubMinionSpawner.StubMinionNode = spawner.get_minion_by_id(77)
+	var m: Node = spawner.get_minion_by_id(77)
 	assert_ne(m, null)
 	if m != null:
 		assert_eq(m.last_puppet_pos, Vector3(4, 0, 4),
@@ -113,7 +113,7 @@ func test_B4_sync_minion_states_updates_puppet_health() -> void:
 	var healths := PackedFloat32Array([22.5])
 	LobbyManager.sync_minion_states(ids, positions, rotations, healths)
 
-	var m: StubMinionSpawner.StubMinionNode = spawner.get_minion_by_id(88)
+	var m: Node = spawner.get_minion_by_id(88)
 	if m != null:
 		assert_almost_eq(m.last_puppet_hp, 22.5, 0.01,
 			"Puppet minion HP should match last sync_minion_states broadcast")
@@ -151,8 +151,8 @@ func test_B6_multiple_minions_state_synced_independently() -> void:
 	var healths := PackedFloat32Array([50.0, 30.0])
 	LobbyManager.sync_minion_states(ids, positions, rotations, healths)
 
-	var m1: StubMinionSpawner.StubMinionNode = spawner.get_minion_by_id(101)
-	var m2: StubMinionSpawner.StubMinionNode = spawner.get_minion_by_id(102)
+	var m1: Node = spawner.get_minion_by_id(101)
+	var m2: Node = spawner.get_minion_by_id(102)
 	if m1 != null:
 		assert_eq(m1.last_puppet_pos, Vector3(1, 0, 0))
 	if m2 != null:

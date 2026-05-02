@@ -3,7 +3,7 @@
 extends Node
 class_name StubMinionSpawner
 
-var spawn_calls: Array = []   # each: {team, spawn_pos, waypts, lane_i, minion_id}
+var spawn_calls: Array = []   # each: {team, spawn_pos, waypts, lane_i, minion_id, mtype}
 var kill_calls:  Array = []   # each: int minion_id
 var _minions: Dictionary = {} # minion_id -> StubMinionNode
 
@@ -28,10 +28,10 @@ class StubMinionNode extends Node:
 		pass
 
 func spawn_for_network(team: int, spawn_pos: Vector3, waypts: Array,
-		lane_i: int, minion_id: int) -> void:
+		lane_i: int, minion_id: int, mtype: String = "basic") -> void:
 	spawn_calls.append({
 		"team": team, "spawn_pos": spawn_pos, "waypts": waypts,
-		"lane_i": lane_i, "minion_id": minion_id
+		"lane_i": lane_i, "minion_id": minion_id, "mtype": mtype
 	})
 	var m := StubMinionNode.new()
 	m.minion_id = minion_id

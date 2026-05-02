@@ -3,6 +3,12 @@ extends Node
 const MINION_SCENE        := "res://scenes/minions/Minion.tscn"
 const CANNON_MINION_SCENE := "res://scenes/minions/CannonMinion.tscn"
 const HEALER_MINION_SCENE := "res://scenes/minions/HealerMinion.tscn"
+const RAM_MINION_SCENE    := "res://scenes/minions/RamMinion.tscn"
+
+## HP per ram tier (0=beaver, 1=cow, 2=elephant).
+const RAM_TIER_HP: Array[float]  = [300.0, 600.0, 1000.0]
+## Team-point cost per ram tier.
+const RAM_TIER_COSTS: Array[int] = [15, 30, 50]
 
 const WAVE_INTERVAL := 20.0
 const MAX_WAVE_SIZE := 6
@@ -34,12 +40,14 @@ var _revive_used: Dictionary = {0: false, 1: false}
 var _minion_scene: PackedScene = null
 var _cannon_scene: PackedScene = null
 var _healer_scene: PackedScene = null
+var _ram_scene:    PackedScene = null
 var _main: Node = null
 
 func _ready() -> void:
 	_minion_scene = load(MINION_SCENE)
 	_cannon_scene = load(CANNON_MINION_SCENE)
 	_healer_scene = load(HEALER_MINION_SCENE)
+	_ram_scene    = load(RAM_MINION_SCENE)
 	_main = get_node_or_null("/root/Main")
 	_minion_node_cache.clear()
 	_minion_counter = 0
@@ -139,6 +147,13 @@ func _launch_wave() -> void:
 	_lane_boosts = [[0, 0, 0], [0, 0, 0]]
 	LobbyManager.sync_lane_boosts.rpc([0, 0, 0], [0, 0, 0])
 
+	# 25% chance: inject one free tier-0 ram (beaver) on a random team + lane.
+	# No team-point cost — this is a free random wave event.
+	if randi() % 4 == 0:
+		var rteam: int = randi() % 2
+		var rlane: int  = randi() % 3
+		_spawn_minion(rteam, rlane, "ram_t1")
+
 # ── Lane boost API ────────────────────────────────────────────────────────────
 
 ## Adds `amount` extra minions for `team` on `lane_i` for the next wave.
@@ -158,6 +173,27 @@ func boost_all_lanes(team: int) -> void:
 	for lane_i in range(3):
 		_lane_boosts[team][lane_i] += 1
 
+## Spawn a requested ram minion on a specific lane.
+## Deducts team points (RAM_TIER_COSTS[tier]). Returns false if not enough points.
+## Pass lane_i = -1 to spawn on all three lanes (costs ×3).
+## Server-authoritative only.
+func request_ram_minion(team: int, tier: int, lane_i: int) -> bool:
+	if team < 0 or team > 1:
+		return false
+	var t: int = clampi(tier, 0, 2)
+	var lanes: Array[int] = []
+	if lane_i < 0:
+		lanes = [0, 1, 2]
+	else:
+		lanes = [clampi(lane_i, 0, 2)]
+	var total_cost: int = RAM_TIER_COSTS[t] * lanes.size()
+	if not TeamData.spend_points(team, total_cost):
+		return false
+	var mtype: String = "ram_t%d" % (t + 1)
+	for li in lanes:
+		_spawn_minion(team, li, mtype)
+	return true
+
 func _spawn_minion_delayed(team: int, lane_i: int, delay: float, mtype: String = "basic") -> void:
 	if delay <= 0.0:
 		_spawn_minion(team, lane_i, mtype)
@@ -174,7 +210,7 @@ func _spawn_minion(team: int, lane_i: int, mtype: String = "basic") -> void:
 	_spawn_at_position(team, spawn_pos, waypts, lane_i, minion_id, mtype)
 
 	if multiplayer.is_server():
-		LobbyManager.spawn_minion_visuals.rpc(team, spawn_pos, waypts, lane_i, minion_id)
+		LobbyManager.spawn_minion_visuals.rpc(team, spawn_pos, waypts, lane_i, minion_id, mtype)
 
 func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int, mtype: String = "basic") -> void:
 	# Pick scene based on minion type.
@@ -188,6 +224,10 @@ func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i:
 			if _healer_scene == null:
 				_healer_scene = load(HEALER_MINION_SCENE)
 			scene = _healer_scene
+		"ram_t1", "ram_t2", "ram_t3":
+			if _ram_scene == null:
+				_ram_scene = load(RAM_MINION_SCENE)
+			scene = _ram_scene
 		_:
 			if _minion_scene == null:
 				_minion_scene = load(MINION_SCENE)
@@ -199,6 +239,13 @@ func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i:
 	minion.name = "Minion_%d" % minion_id
 	minion.position = pos
 
+	# Ram minions: set tier and HP before add_child so _ready() sees them.
+	if mtype in ["ram_t1", "ram_t2", "ram_t3"]:
+		var tier_idx: int = int(mtype.substr(5, 1)) - 1  # "ram_t1"→0, "ram_t2"→1, "ram_t3"→2
+		minion.set("_ram_tier", tier_idx)
+		minion.set("max_health", RAM_TIER_HP[tier_idx])
+		minion.set("minion_type", "ram")
+
 	# Apply Supporter passive bonuses and model tier before add_child.
 	var sup: int = LobbyManager.get_supporter_peer(team)
 	_apply_type_bonuses(minion, mtype, sup)
@@ -209,7 +256,7 @@ func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i:
 	_minion_node_cache[minion_id] = minion
 
 ## Apply stat bonuses from skill tier passives per minion type.
-func _apply_type_bonuses(minion: CharacterBody3D, mtype: String, sup: int) -> void:
+func _apply_type_bonuses(minion: Node, mtype: String, sup: int) -> void:
 	if sup <= 0:
 		return
 	match mtype:
@@ -245,7 +292,7 @@ func _apply_type_bonuses(minion: CharacterBody3D, mtype: String, sup: int) -> vo
 ## Sets MinionBase static chars so _build_visuals() loads the right GLB.
 ## NOTE: This overwrites the global static chars; they are set immediately before
 ## add_child so the next _build_visuals() call sees the right char.
-func _apply_tier_model(minion: CharacterBody3D, mtype: String, sup: int) -> void:
+func _apply_tier_model(minion: Node, mtype: String, sup: int) -> void:
 	var tier_sum: float = 0.0
 	if sup > 0:
 		match mtype:
@@ -278,8 +325,8 @@ func _apply_tier_model(minion: CharacterBody3D, mtype: String, sup: int) -> void
 	minion.set("_spawn_blue_char", ch)
 	minion.set("_spawn_red_char", ch)
 
-func spawn_for_network(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int) -> void:
-	_spawn_at_position(team, pos, waypts, lane_i, minion_id, "basic")
+func spawn_for_network(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int, mtype: String = "basic") -> void:
+	_spawn_at_position(team, pos, waypts, lane_i, minion_id, mtype)
 	# Mark as puppet — server drives position
 	var minion: Node = _minion_node_cache.get(minion_id)
 	if minion == null:

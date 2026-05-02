@@ -101,6 +101,10 @@ func set_role_ingame(role: int) -> void:
 		supporter_claimed[team] = true
 		human_supporter_claimed.emit(team)
 	players[id].role = role
+	# Register the peer in the skill tree so the server can validate unlocks
+	# and execute skills on behalf of remote clients.
+	var role_str: String = "Supporter" if role == 1 else "Fighter"
+	SkillTree.register_peer(id, role_str)
 	_dirty = true
 	_sync_role_slots.rpc(supporter_claimed)
 	_roles_pending -= 1
@@ -338,7 +342,7 @@ func _init_minion_sync() -> void:
 	_minion_scene = preload("res://scenes/minions/Minion.tscn")
 
 @rpc("authority", "call_remote", "reliable")
-func spawn_minion_visuals(team: int, spawn_pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int) -> void:
+func spawn_minion_visuals(team: int, spawn_pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int, mtype: String = "basic") -> void:
 	if _minion_scene == null:
 		_minion_scene = preload("res://scenes/minions/Minion.tscn")
 
@@ -348,7 +352,7 @@ func spawn_minion_visuals(team: int, spawn_pos: Vector3, waypts: Array[Vector3],
 	if not main.has_node("MinionSpawner"):
 		return
 	var spawner: Node = main.get_node("MinionSpawner")
-	spawner.spawn_for_network(team, spawn_pos, waypts, lane_i, minion_id)
+	spawner.spawn_for_network(team, spawn_pos, waypts, lane_i, minion_id, mtype)
 
 @rpc("authority", "call_remote", "reliable")
 func kill_minion_visuals(minion_id: int) -> void:
@@ -886,6 +890,27 @@ func request_lane_boost(lane_i: int, team: int) -> void:
 	# Broadcast updated boost state and points to all peers
 	var b: Array = spawner.get("_lane_boosts") as Array
 	sync_lane_boosts.rpc(b[0], b[1])
+	sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+
+# Client (Supporter) requests a ram minion on a specific lane (or all lanes).
+# tier:   0=beaver (¤15), 1=cow (¤30), 2=elephant (¤50). All-lanes cost is ×3.
+# lane_i: 0=Left, 1=Mid, 2=Right, -1=all lanes.
+@rpc("any_peer", "reliable")
+func request_ram_minion(tier: int, team: int, lane_i: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var id: int = _sender_id()
+	var info: Dictionary = players.get(id, {})
+	# Validate: sender must be Supporter on the correct team.
+	if info.get("role", -1) != 1:
+		return
+	if info.get("team", -1) != team:
+		return
+	var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
+	if spawner == null:
+		return
+	# MinionSpawner.request_ram_minion handles point deduction + spawn.
+	spawner.request_ram_minion(team, tier, lane_i)
 	sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
 
 # ── Recon strike (fog reveal) sync ───────────────────────────────────────────

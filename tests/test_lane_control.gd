@@ -105,8 +105,8 @@ func test_initial_build_limit_returns_zero_both_teams() -> void:
 func test_push_timer_accumulates_while_condition_true() -> void:
 	# Blue minions past blue's own limit (z=0) into red's territory (z < 0)
 	_place_all_lanes_pushed(0)
-	_tick_team_for(0, 30.0)
-	assert_almost_eq(LaneControl.push_timer[0], 30.0, 0.01)
+	_tick_team_for(0, 10.0)
+	assert_almost_eq(LaneControl.push_timer[0], 10.0, 0.01)
 
 # ── 3. Push timer resets when condition breaks ─────────────────────────────────
 
@@ -168,8 +168,8 @@ func test_build_limit_changed_signal_fires_on_push() -> void:
 func test_rollback_timer_accumulates_when_lanes_clear() -> void:
 	LaneControl.push_level[0] = 1
 	# No enemy minions past limit — lanes are clear
-	_tick_team_for(0, 30.0)
-	assert_almost_eq(LaneControl.rollback_timer[0], 30.0, 0.01)
+	_tick_team_for(0, 10.0)
+	assert_almost_eq(LaneControl.rollback_timer[0], 10.0, 0.01)
 
 # ── 9. Rollback timer resets when condition breaks ────────────────────────────
 

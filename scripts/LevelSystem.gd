@@ -84,6 +84,7 @@ func award_xp(peer_id: int, amount: int) -> void:
 	_xp[peer_id] = _xp[peer_id] + amount
 	var xp_needed: int = _xp_for_next_level(lvl)
 	xp_gained.emit(peer_id, amount, _xp[peer_id], xp_needed)
+	_sync_level_state_to_peer(peer_id)
 
 	# Check for level-up(s)
 	while _level[peer_id] < MAX_LEVEL and _xp[peer_id] >= _xp_for_next_level(_level[peer_id]):

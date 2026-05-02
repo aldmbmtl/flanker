@@ -119,7 +119,12 @@ func get_player(peer_id: int) -> Node:
 	var main: Node = get_main()
 	if main == null:
 		return null
-	return main.get_node_or_null("FPSPlayer_%d" % peer_id)
+	var n: Node = main.get_node_or_null("FPSPlayer_%d" % peer_id)
+	if n != null:
+		return n
+	# On the server, remote peers are represented as BasePlayer puppets named
+	# RemotePlayer_<id>. Fall back to that so skill execution can read position.
+	return main.get_node_or_null("RemotePlayer_%d" % peer_id)
 
 func get_player_team(peer_id: int) -> int:
 	return GameSync.get_player_team(peer_id)

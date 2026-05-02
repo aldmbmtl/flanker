@@ -254,3 +254,16 @@ func test_supporter_cannot_spend_fighter_attr() -> void:
 	assert_eq(attrs.get("stamina", 0), 0,
 		"Supporter spending stamina must be a no-op")
 	SkillTree.clear_peer(PEER_A)
+
+# ── XP sync regression ────────────────────────────────────────────────────────
+
+func test_award_xp_emits_xp_gained_with_correct_accumulated_total() -> void:
+	# Regression guard: award_xp must emit xp_gained with the running total so
+	# the HUD (and sync path) always reflects current XP between level-ups.
+	watch_signals(LevelSystem)
+	LevelSystem.award_xp(PEER_A, 10)
+	LevelSystem.award_xp(PEER_A, 15)
+	# After two awards, running total must be 25
+	assert_eq(LevelSystem.get_xp(PEER_A), 25, "accumulated XP must be 25 after two awards")
+	# xp_gained must have fired twice
+	assert_signal_emit_count(LevelSystem, "xp_gained", 2)

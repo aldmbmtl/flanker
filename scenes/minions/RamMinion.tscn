@@ -1,0 +1,33 @@
+[gd_scene load_steps=6 format=3 uid="uid://ramminion"]
+
+[ext_resource type="Script" path="res://scripts/minions/RamMinionAI.gd" id="1"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_1"]
+height = 1.8
+radius = 0.35
+
+[node name="RamMinion" type="CharacterBody3D"]
+script = ExtResource("1")
+scale = Vector3(2, 2, 2)
+max_health = 300.0
+speed = 3.5
+attack_range = 0.0
+shoot_range = 0.0
+attack_damage = 0.0
+attack_cooldown = 99.0
+detect_range = 0.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("CapsuleShape3D_1")
+
+[node name="ShootAudio" type="AudioStreamPlayer3D" parent="."]
+stream = null
+volume_db = -6.0
+max_distance = 30.0
+attenuation_model = 2
+
+[node name="DeathAudio" type="AudioStreamPlayer3D" parent="."]
+stream = null
+volume_db = -4.0
+max_distance = 20.0
+attenuation_model = 2

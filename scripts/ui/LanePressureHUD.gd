@@ -15,8 +15,8 @@ extends Control
 ##
 ## Added to $HUD for both Fighter and Supporter roles.
 
-const PUSH_TIME:     float = 120.0
-const ROLLBACK_TIME: float = 60.0
+const PUSH_TIME:     float = 30.0
+const ROLLBACK_TIME: float = 15.0
 
 const COLOR_WARNING  := Color(1.0, 0.3, 0.1, 1.0)   # red-orange
 const COLOR_ADVANCE  := Color(0.2, 0.9, 0.3, 1.0)   # green
@@ -75,7 +75,7 @@ func _draw() -> void:
 		var col: Color = COLOR_WARNING
 		col.a = 0.55 + pulse * 0.45
 
-		var warn_text: String = "  ⚠ LIMIT UNDER PRESSURE  [ %ds ]  " % int(ceil(time_left))
+		var warn_text: String = "  ⚠ TERRITORY UNDER PRESSURE  [ %ds ]  " % int(ceil(time_left))
 		var text_w: float = font.get_string_size(warn_text, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
 		var panel_w: float = text_w + 16.0
 		var px: float = panel_cx - panel_w * 0.5

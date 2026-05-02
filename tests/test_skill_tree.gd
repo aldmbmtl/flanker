@@ -342,6 +342,44 @@ func test_get_active_slots_returns_copy() -> void:
 	# Internal state should be unchanged — slot 0 still has default f_dash
 	assert_eq(SkillTree.get_active_slots(FIGHTER_ID)[0], "f_dash")
 
+func test_get_player_finds_fps_player_node() -> void:
+	var main := Node.new()
+	main.name = "Main"
+	Engine.get_main_loop().root.add_child(main)
+	var fp := Node3D.new()
+	fp.name = "FPSPlayer_5"
+	main.add_child(fp)
+	assert_eq(SkillTree.get_player(5), fp)
+	Engine.get_main_loop().root.remove_child(main)
+	main.queue_free()
+
+func test_get_player_falls_back_to_remote_player_node() -> void:
+	# Regression: on the server, remote clients have BasePlayer puppets named
+	# RemotePlayer_<id>. get_player must find them so skill execution works.
+	var main := Node.new()
+	main.name = "Main"
+	Engine.get_main_loop().root.add_child(main)
+	var rp := Node3D.new()
+	rp.name = "RemotePlayer_7"
+	main.add_child(rp)
+	assert_eq(SkillTree.get_player(7), rp,
+		"get_player must fall back to RemotePlayer_<id> when FPSPlayer_<id> absent")
+	Engine.get_main_loop().root.remove_child(main)
+	main.queue_free()
+
+func test_get_player_fps_preferred_over_remote() -> void:
+	# If both exist (shouldn't in practice), FPSPlayer wins.
+	var main := Node.new()
+	main.name = "Main"
+	Engine.get_main_loop().root.add_child(main)
+	var fp := Node3D.new(); fp.name = "FPSPlayer_9"
+	var rp := Node3D.new(); rp.name = "RemotePlayer_9"
+	main.add_child(fp)
+	main.add_child(rp)
+	assert_eq(SkillTree.get_player(9), fp)
+	Engine.get_main_loop().root.remove_child(main)
+	main.queue_free()
+
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 func _unlock_dash(peer_id: int) -> void:

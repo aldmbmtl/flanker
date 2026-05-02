@@ -15,8 +15,8 @@ const PUSH_LIMITS_BLUE: Array = [0.0, -13.7, -27.4, -41.0]
 const PUSH_LIMITS_RED:  Array = [0.0, +13.7, +27.4, +41.0]
 
 const MAX_PUSH:       int   = 3
-const PUSH_TIME:      float = 120.0
-const ROLLBACK_TIME:  float = 60.0
+const PUSH_TIME:      float = 30.0
+const ROLLBACK_TIME:  float = 15.0
 
 # Lane assignment proximity threshold — minion must be within this many units
 # of a lane polyline to be counted for that lane's push condition.

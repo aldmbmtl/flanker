@@ -77,6 +77,7 @@ func _reset_state() -> void:
 	GameSync.player_teams.clear()
 	TeamData.sync_from_server(75, 75)
 	LevelSystem.clear_all()
+	SkillTree.clear_all()
 
 func after_each() -> void:
 	_stop_network()
@@ -241,6 +242,26 @@ func test_set_role_all_confirmed_fires_signal() -> void:
 	LobbyManager._roles_pending = 1
 	LobbyManager.set_role_ingame(0)
 	assert_signal_emitted(LobbyManager, "all_roles_confirmed")
+
+func test_set_role_fighter_registers_skill_tree_peer() -> void:
+	# Regression: set_role_ingame must call SkillTree.register_peer so the server
+	# can validate/execute skills on behalf of remote clients.
+	SkillTree.clear_peer(1)
+	LobbyManager.register_player_local(1, "P1")
+	LobbyManager.players[1]["team"] = 0
+	LobbyManager._roles_pending = 1
+	LobbyManager.set_role_ingame(0)  # FIGHTER
+	assert_true(SkillTree.get_skill_pts(1) >= 0,
+		"SkillTree must have a state entry for the peer after role is set")
+
+func test_set_role_supporter_registers_skill_tree_peer() -> void:
+	SkillTree.clear_peer(1)
+	LobbyManager.register_player_local(1, "P1")
+	LobbyManager.players[1]["team"] = 0
+	LobbyManager._roles_pending = 1
+	LobbyManager.set_role_ingame(1)  # SUPPORTER
+	assert_true(SkillTree.get_skill_pts(1) >= 0,
+		"SkillTree must have a state entry for supporter peer after role is set")
 
 func test_sync_role_slots_updates_supporter_claimed() -> void:
 	var new_claimed: Dictionary = { 0: true, 1: false }
@@ -781,7 +802,7 @@ func test_sync_minion_states_calls_apply_puppet_state() -> void:
 	var healths := PackedFloat32Array([45.0])
 	LobbyManager.sync_minion_states(ids, positions, rotations, healths)
 
-	var m: StubMinionSpawner.StubMinionNode = stub_spawner.get_minion_by_id(77)
+	var m: Node = stub_spawner.get_minion_by_id(77)
 	assert_ne(m, null, "Minion 77 should exist in spawner")
 	if m != null:
 		assert_eq(m.last_puppet_pos, Vector3(5, 0, 5))
