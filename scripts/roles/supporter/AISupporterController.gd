@@ -2,7 +2,7 @@ extends Node
 # ── AI Supporter Controller ───────────────────────────────────────────────────
 # Server-only node. One per team that has no human Supporter.
 # Periodically evaluates the game state and places towers / drops
-# using the same server-side path as request_place_item.
+# using the same server-side path as BuildSystem.place_item.
 #
 # Tower placement zones (own half only):
 #   Defensive  — first 20% of lane from base end (fountatin area)
@@ -109,7 +109,7 @@ func _on_tower_despawned(_item_type: String, tower_team: int, _tower_name: Strin
 	LevelSystem.award_xp(peer_id, LevelSystem.XP_TOWER)
 
 # Enemy player died — award player kill XP (same as LevelSystem.XP_PLAYER).
-func _on_player_died(dead_peer_id: int) -> void:
+func _on_player_died(dead_peer_id: int, _respawn_time: float) -> void:
 	if GameSync.get_player_team(dead_peer_id) == team:
 		return  # ally died, no XP
 	LevelSystem.award_xp(peer_id, LevelSystem.XP_PLAYER)
@@ -472,8 +472,6 @@ func _do_place(world_pos: Vector3, item_type: String, subtype: String) -> bool:
 	var assigned_name: String = build_system.place_item(world_pos, team, item_type, subtype, peer_id)
 	if assigned_name == "":
 		return false
-	LobbyManager.spawn_item_visuals.rpc(world_pos, team, item_type, subtype, assigned_name)
-	LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
 	LobbyManager.item_spawned.emit(item_type, team)
 	# Register launcher so AI can fire from it
 	if LauncherDefs.is_launcher_type(item_type):
@@ -548,13 +546,11 @@ func _maybe_boost_lane() -> void:
 	if points - (BOOST_COST * 3) >= BOOST_RESERVE and randf() < 0.3:
 		if TeamData.spend_points(team, BOOST_COST):
 			spawner.boost_all_lanes(team)
-			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
 	else:
 		var lane_order: Array = _lanes_by_enemy_pressure()
 		var target_lane: int = lane_order[0]
 		if TeamData.spend_points(team, BOOST_COST):
 			spawner.boost_lane(team, target_lane, LobbyManager.LANE_BOOST_AMOUNT)
-			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
 
 # ── Missile strike logic ──────────────────────────────────────────────────────
 
@@ -598,8 +594,12 @@ func _check_strike_opportunities() -> void:
 			continue
 
 		LobbyManager.spawn_missile_server(fire_pos, target, team, launcher_type)
-		LobbyManager.spawn_missile_visuals.rpc(fire_pos, target, team, launcher_type)
-		LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+		BridgeClient.send("request_fire_missile", {
+			"fire_pos": [fire_pos.x, fire_pos.y, fire_pos.z],
+			"target_pos": [target.x, target.y, target.z],
+			"team": team,
+			"launcher_type": launcher_type,
+		})
 
 		_launcher_cooldowns[lname] = LauncherDefs.get_cooldown(launcher_type)
 		# Fire one launcher per frame maximum

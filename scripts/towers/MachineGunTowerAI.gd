@@ -27,11 +27,15 @@ func _do_attack(target: Node3D) -> void:
 	var hit_unit := false
 	var target_peer_id: int = target.get("peer_id") if target.get("peer_id") != null else -1
 	if target_peer_id > 0:
-		# BasePlayer (local or remote) — broadcast through LobbyManager so the
-		# client receives apply_player_damage.rpc + notify_player_died.rpc.
+		# BasePlayer (local or remote) — route through Python bridge.
 		var target_team: int = GameSync.get_player_team(target_peer_id)
 		if target_team >= 0 and target_team != team:
-			LobbyManager.damage_player_broadcast(target_peer_id, attack_damage, team)
+			BridgeClient.send("damage_player", {
+				"peer_id": target_peer_id,
+				"amount": attack_damage,
+				"source_team": team,
+				"killer_peer_id": -1,
+			})
 			hit_unit = true
 	elif target.has_method("take_damage"):
 		var target_team: int = _get_body_team(target)
@@ -51,7 +55,7 @@ func _do_attack(target: Node3D) -> void:
 	if target_hit_body != null:
 		excluded.append(target_hit_body.get_rid())
 	query.exclude = excluded
-	query.collision_mask = 0b11  # layers 1+2 — terrain + units
+	query.collision_mask = 0b01  # layer 1 — terrain only; fences (layer 4/value 8) are passable
 	var result: Dictionary = space.intersect_ray(query)
 	if not result.is_empty():
 		hit_pos    = result.position
@@ -59,13 +63,25 @@ func _do_attack(target: Node3D) -> void:
 
 	_spawn_hit_impact(hit_pos, hit_normal, hit_unit)
 	_spawn_tracer(from, hit_pos)
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		LobbyManager.spawn_mg_visuals.rpc(name, from, hit_pos, hit_normal, hit_unit)
+	if BridgeClient.is_connected_to_server():
+		BridgeClient.send("fire_projectile", {
+			"visual_type": "mg",
+			"params": {
+				"tower_name": name,
+				"from": [from.x, from.y, from.z],
+				"hit_pos": [hit_pos.x, hit_pos.y, hit_pos.z],
+				"hit_normal": [hit_normal.x, hit_normal.y, hit_normal.z],
+				"hit_unit": hit_unit,
+			}
+		})
 
 ## Called by TowerBase._process after turret look_at when in multiplayer.
 func _on_turret_rotated(yaw_rad: float) -> void:
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		LobbyManager.sync_mg_turret_rot.rpc(name, yaw_rad)
+	if BridgeClient.is_connected_to_server():
+		BridgeClient.send("fire_projectile", {
+			"visual_type": "mg_turret_rot",
+			"params": {"tower_name": name, "yaw_rad": yaw_rad}
+		})
 
 # ── VFX ───────────────────────────────────────────────────────────────────────
 

@@ -124,7 +124,7 @@ func _process(delta: float) -> void:
 	_bodies_in_range = _bodies_in_range.filter(func(b): return is_instance_valid(b))
 
 func take_damage(amount: float, _source: String, _killer_team: int = -1, _shooter_peer_id: int = -1) -> void:
-	if not multiplayer.is_server():
+	if not BridgeClient.is_host():
 		return
 	if _dead:
 		return
@@ -134,7 +134,5 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1, _shoote
 
 func _die() -> void:
 	_dead = true
-	if multiplayer.has_multiplayer_peer():
-		LobbyManager.despawn_tower.rpc(name)
-	else:
-		queue_free()
+	# Python broadcasts tower_despawned → BridgeClient calls despawn_tower locally.
+	pass

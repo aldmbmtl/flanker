@@ -63,10 +63,23 @@ func _process(delta: float) -> void:
 	var new_pos: Vector3  = prev_pos + velocity * delta
 
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	# Primary ray: prev_pos → new_pos (current frame step).
 	var query := PhysicsRayQueryParameters3D.create(prev_pos, new_pos)
+	query.collision_mask = 0xFFFFFFF7  # all layers except layer 4 (bit 3 = value 8): fences/torches
 	if spawner_rid.is_valid():
 		query.exclude = [spawner_rid]
 	var result: Dictionary = space.intersect_ray(query)
+
+	# Back-ray: extend origin 0.2 m behind prev_pos so that if the projectile
+	# has already tunnelled into thin geometry (slope seams, LOD edges) the ray
+	# starts outside the surface and can still register the hit.
+	if result.is_empty() and velocity.length_squared() > 0.0:
+		var back_origin: Vector3 = prev_pos - velocity.normalized() * 0.2
+		var back_query := PhysicsRayQueryParameters3D.create(back_origin, new_pos)
+		back_query.collision_mask = query.collision_mask
+		if spawner_rid.is_valid():
+			back_query.exclude = [spawner_rid]
+		result = space.intersect_ray(back_query)
 
 	if not result.is_empty():
 		_on_hit(result.position, result.collider)
@@ -120,12 +133,15 @@ func _handle_ghost_hit(collider: Object, dmg: float) -> bool:
 	if not GameSync.player_dead.get(target_peer, false):
 		var ghost_team: int = GameSync.get_player_team(target_peer)
 		var friendly: bool = (shooter_team >= 0 and ghost_team == shooter_team)
-		if not friendly and (not multiplayer.has_multiplayer_peer() or multiplayer.is_server()):
-			var new_hp: float = GameSync.damage_player(target_peer, dmg, shooter_team, shooter_peer_id)
-			if multiplayer.has_multiplayer_peer():
-				LobbyManager.apply_player_damage.rpc(target_peer, new_hp)
-				if new_hp <= 0.0:
-					LobbyManager.notify_player_died.rpc(target_peer)
+		if not friendly and BridgeClient.is_host():
+			# Only the host sends damage_player to Python (server-authoritative).
+			# Non-host clients must not send damage; the host's message is sufficient.
+			BridgeClient.send("damage_player", {
+				"peer_id": target_peer,
+				"amount": dmg,
+				"source_team": shooter_team,
+				"killer_peer_id": shooter_peer_id,
+			})
 	return true
 
 # ── Tree clearing helper ──────────────────────────────────────────────────────
@@ -137,11 +153,10 @@ func _request_destroy_tree(pos: Vector3) -> void:
 	# Only allow tree destruction if this projectile is allowed to destroy trees
 	if not can_destroy_trees:
 		return
-
-	if multiplayer.is_server():
-		LobbyManager.sync_destroy_tree.rpc(pos)
-	else:
-		LobbyManager.request_destroy_tree.rpc_id(1, pos)
+	# Only the host sends tree destruction to Python (server-authoritative).
+	# Non-host clients must not send — Python broadcasts sync_destroy_tree back to all.
+	if BridgeClient.is_host():
+		LobbyManager.request_destroy_tree(pos)
 
 # ── Splash helper ─────────────────────────────────────────────────────────────
 
@@ -156,7 +171,7 @@ func _apply_splash(pos: Vector3, radius: float, splash_dmg: float,
 		_splash_shape = SphereShape3D.new()
 		_splash_params = PhysicsShapeQueryParameters3D.new()
 		_splash_params.shape = _splash_shape
-		_splash_params.collision_mask = 0xFFFFFFFF
+		_splash_params.collision_mask = 0xFFFFFFF7  # all layers except layer 4 (bit 3 = value 8): fences/torches
 	_splash_shape.radius = radius
 	_splash_params.transform = Transform3D(Basis.IDENTITY, pos)
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state

@@ -33,10 +33,8 @@ signal active_slots_changed(peer_id: int, slots: Array)
 
 func _ready() -> void:
 	LevelSystem.level_up.connect(_on_level_up)
-
-func _process(delta: float) -> void:
-	for peer_id in _states:
-		_tick_cooldowns_for(peer_id, delta)
+	# Cooldown ticks are driven by Python via BridgeClient "cooldown_tick" messages.
+	# _process is intentionally absent — no local tick races with the server.
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -294,25 +292,15 @@ func _on_level_up(peer_id: int, _new_level: int) -> void:
 
 # ── Multiplayer sync ───────────────────────────────────────────────────────────
 
-func _push_state_to_peer(peer_id: int) -> void:
-	if not multiplayer.has_multiplayer_peer():
-		return
-	if not multiplayer.is_server():
-		return
-	if peer_id == multiplayer.get_unique_id():
-		return  # server is also local — state is already live
-	if not multiplayer.get_peers().has(peer_id):
-		return
-	var s: SkillTreeState = _states.get(peer_id)
-	if s == null:
-		return
-	sync_skill_state.rpc_id(peer_id, s.skill_pts, s.unlocked.duplicate(),
-			s.active_slots.duplicate(), s.cooldowns.duplicate())
+func _push_state_to_peer(_peer_id: int) -> void:
+	# Python broadcasts skill_unlocked / skill_pts_changed / active_slots_changed /
+	# cooldown_tick individually — no local RPC push needed.
+	pass
 
 # Server → owning client: push full authoritative state.
-@rpc("authority", "reliable")
+# @rpc removed — Python pushes per-field updates via BridgeClient handlers.
 func sync_skill_state(pts: int, unlocked: Array, slots: Array, cooldowns: Dictionary) -> void:
-	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_id: int = BridgeClient.get_peer_id()
 	var s: SkillTreeState = _states.get(my_id)
 	if s == null:
 		# Client has no local state yet — create it so queries work.
@@ -345,35 +333,28 @@ func sync_skill_state(pts: int, unlocked: Array, slots: Array, cooldowns: Dictio
 	skill_pts_changed.emit(my_id, pts)
 
 func _sender_id() -> int:
-	var id: int = multiplayer.get_remote_sender_id()
-	return id if id != 0 else 1
+	return BridgeClient.get_peer_id()
 
 # Client → server: request to unlock a node.
-@rpc("any_peer", "reliable")
 func request_unlock(node_id: String) -> void:
-	if not multiplayer.is_server(): return
-	unlock_node_local(_sender_id(), node_id)
+	BridgeClient.send("unlock_skill", {"node_id": node_id})
 
 # Client → server: assign active slot.
-@rpc("any_peer", "reliable")
 func request_assign_active(slot: int, node_id: String) -> void:
-	if not multiplayer.is_server(): return
-	assign_active_slot(_sender_id(), slot, node_id)
+	BridgeClient.send("assign_active", {"slot": slot, "node_id": node_id})
 
 # Client → server: use active ability.
-@rpc("any_peer", "reliable")
 func request_use_active(slot: int) -> void:
-	if not multiplayer.is_server(): return
-	use_active_local(_sender_id(), slot)
+	BridgeClient.send("use_skill", {"slot": slot})
 
 # ── Effect delivery RPCs (server → owning client) ─────────────────────────────
 # These replicate meta-based ability state to the client's own player node so
 # FPSController can read them locally. Called by FighterSkills after setting
 # the same metas on the server-side node.
 
-@rpc("authority", "reliable")
+# @rpc removed — bridge send replaces ENet RPC (skill_effect update).
 func apply_dash(origin: Vector3, target: Vector3, elapsed: float, duration: float) -> void:
-	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_id: int = BridgeClient.get_peer_id()
 	var player: Node = get_player(my_id)
 	if player == null:
 		return
@@ -382,29 +363,62 @@ func apply_dash(origin: Vector3, target: Vector3, elapsed: float, duration: floa
 	player.set_meta("dash_elapsed",  elapsed)
 	player.set_meta("dash_duration", duration)
 
-@rpc("authority", "reliable")
+# @rpc removed — bridge send replaces ENet RPC (skill_effect update).
 func apply_rapid_fire(duration: float, weapon_type: String) -> void:
-	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_id: int = BridgeClient.get_peer_id()
 	var player: Node = get_player(my_id)
 	if player == null:
 		return
 	player.set_meta("rapid_fire_timer",  duration)
 	player.set_meta("rapid_fire_weapon", weapon_type)
 
-@rpc("authority", "reliable")
+# @rpc removed — bridge send replaces ENet RPC (skill_effect update).
 func apply_iron_skin(hp: float, timer: float) -> void:
-	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_id: int = BridgeClient.get_peer_id()
 	var player: Node = get_player(my_id)
 	if player == null:
 		return
 	player.set_meta("shield_hp",    hp)
 	player.set_meta("shield_timer", timer)
 
-@rpc("authority", "reliable")
+# @rpc removed — bridge send replaces ENet RPC (skill_effect update).
 func apply_rally_cry(bonus: float, duration: float) -> void:
-	var my_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_id: int = BridgeClient.get_peer_id()
 	var player: Node = get_player(my_id)
 	if player == null:
 		return
 	player.set_meta("rally_speed_bonus", bonus)
 	player.set_meta("rally_cry_timer",   duration)
+
+## Bridge receive path: server pushes authoritative cooldown snapshot for one peer.
+## Replaces the local _tick_cooldowns_for path for bridge-connected sessions.
+func _apply_bridge_cooldown_tick(peer_id: int, cooldowns: Dictionary) -> void:
+	var s: SkillTreeState = _states.get(peer_id)
+	if s == null:
+		# Peer has no state yet (cooldown_tick arrived before register_peer).
+		# Queue the tick so register_peer can apply it after creating the state.
+		_pending_cooldown_ticks[peer_id] = cooldowns.duplicate()
+		return
+	s.cooldowns = cooldowns.duplicate()
+
+# Pending cooldown ticks queued before register_peer was called.
+var _pending_cooldown_ticks: Dictionary = {}  # peer_id -> Dictionary
+
+func register_peer(peer_id: int, role: String) -> void:
+	if _states.has(peer_id):
+		return
+	var s := SkillTreeState.new()
+	s.role = role
+	_states[peer_id] = s
+	# Grant dash by default for Fighters so it's immediately testable
+	if role == "Fighter":
+		s.skill_pts += 1
+		s.unlocked.append("f_dash")
+		s.active_slots[0] = "f_dash"
+		skill_pts_changed.emit(peer_id, s.skill_pts)
+		skill_unlocked.emit(peer_id, "f_dash")
+		active_slots_changed.emit(peer_id, s.active_slots.duplicate())
+	# Apply any cooldown tick that arrived before registration
+	if _pending_cooldown_ticks.has(peer_id):
+		s.cooldowns = _pending_cooldown_ticks[peer_id].duplicate()
+		_pending_cooldown_ticks.erase(peer_id)

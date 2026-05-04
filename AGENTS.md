@@ -20,6 +20,31 @@ grep -h "^\*\*Status:" plans/*.md
 
 ---
 
+## MANDATORY: Python Tests Must Have 100% Coverage
+
+**`make test` enforces 100% Python coverage — no exceptions.**
+
+The pytest suite runs with `--cov=server --cov-fail-under=100`. If any line in
+`server/` is not exercised by at least one test, `make test` fails with a non-zero
+exit code.
+
+### Rules
+
+- **Every line in `server/` must be covered.** No exceptions, no `# pragma: no cover`
+  except the two pre-approved lines in `main.py`:
+  - `def run(...)` — the blocking TCP server loop; cannot be unit-tested by design.
+  - `if __name__ == "__main__":` — the process entry guard; cannot be unit-tested by design.
+- **When adding a new Python module, write tests that cover every branch before the
+  change is considered complete.** Coverage enforcement is not optional.
+- **Do not add `# pragma: no cover` to new code.** If a line appears genuinely
+  untestable, stop and raise it for human review before proceeding. Do not add the
+  pragma silently.
+- **The coverage check is part of `make test` and cannot be bypassed** without
+  explicitly removing `--cov-fail-under=100` from the Makefile, which is a violation
+  of this requirement.
+
+---
+
 ## MANDATORY: Tests Must Pass After Every Code Change
 
 **Run `make test` after every single code change — no exceptions.**
@@ -48,7 +73,7 @@ This sequence is mandatory. A test that was never verified to fail without the f
 - **Write new tests for every new feature or bug fix** before the change is considered complete.
 - **Never silence a failure** by deleting the test or converting it to `pending()` without a documented known-bug justification.
 
-The suite currently has **608 passing** and **8 pending/risky** (all intentional — documented known bugs or no-assert smoke tests). Any run that drops below 608 passing is a regression.
+The suite currently has **897 passing** and **27 pending/risky** (all intentional — documented known bugs or no-assert smoke tests). Any run that drops below 897 passing is a regression.
 
 See the [Test Suite](#test-suite) section for the full inventory of test files and what each covers.
 
@@ -72,7 +97,7 @@ Game binary: `/usr/bin/godot` (system install, 4.6.2). No `./godot` or `bin/godo
 ## Skill System
 
 ### Overview
-The skill system provides Fighter players with three distinct branches of abilities: Guardian, DPS, and Tank. Supporter players have their own branch system with Arsenal, Logistics, and Defense skills.
+The skill system provides Fighter players with three distinct branches of abilities: Guardian, DPS, and Tank. Supporter players have five branches: Basic Minion, Cannon Minion, Healer Minion, Logistics, and Defense.
 
 Skills are earned through leveling up (1 skill point per level) and can be unlocked in the skill tree UI. Active abilities have cooldowns and can be assigned to hotbar slots.
 
@@ -87,7 +112,7 @@ Skills are earned through leveling up (1 skill point per level) and can be unloc
 
 Skills are defined in the static `SkillDefs.gd` autoload. Each node includes fields:
 - role: "Fighter" or "Supporter"
-- branch: visual grouping (e.g., "Guardian", "DPS", "Tank", "Arsenal", "Logistics", "Defense")
+- branch: visual grouping (e.g., "Guardian", "DPS", "Tank", "Basic Minion", "Cannon Minion", "Healer Minion", "Logistics", "Defense")
 - type: "passive", "active", "unlock", or "utility"
 - tier: 1, 2, or 3 (also cost in skill points)
 - cost: int skill points to unlock
@@ -110,26 +135,29 @@ Fighter Skills:
   - Dash: Dash 5m forward. 6s cooldown.
   - Rapid Fire: Current weapon fires 3× faster for 3s. 20s cooldown.
   - Rocket Barrage: Fire one rocket at each enemy tower within 50m (up to 5). No targets = no effect. 45s cooldown.
+  - Bloodrush (passive): Killing an enemy player restores 30 HP.
 - Tank branch:
   - Adrenaline: Instantly heal 40 HP. 20s cooldown.
   - Iron Skin: Absorb the next 60 incoming damage as a shield for 8s. 30s cooldown.
   - Deploy MG: Deploy a MachineGun turret at your feet for 20s (no team point cost). 60s cooldown.
 
 Supporter Skills:
-- Arsenal branch:
-  - Build Discount: All your placements cost -2 team points.
-  - Turret Overdrive: Targeted friendly tower fires 2× speed for 6s. 25s cooldown.
-  - Advanced Launcher: Unlocks Advanced Launcher missile type in the build shop.
+- Basic Minion branch:
+  - Veteran Troops (passive): Basic minions use upgraded model (j→m) and spawn with +20% HP.
+  - Elite Troops (passive): Basic minions use elite model (m→r) and deal +20% damage.
+  - Coordinated Fire: All living basic minions fire immediately. 30s cooldown.
+- Cannon Minion branch:
+  - Heavy Ordnance (passive): Cannon minions use upgraded model (d→g) and deal +25% damage.
+  - Long Range (passive): Cannon minions use elite model (g→h) and gain +30% shoot range.
+  - Rocket Barrage: All living cannon minions fire immediately. 45s cooldown.
+- Healer Minion branch:
+  - Field Medicine (passive): Healer minions use upgraded model (i→n); heal pulses +5 HP (15 total).
+  - Extended Care (passive): Healer minions use elite model (n→q); heal range +4m (12m total).
+  - Mass Heal: Instantly restore 30 HP to all living friendly minions and players on the map. 60s cooldown.
 - Logistics branch:
-  - Fast Respawn: Your personal respawn timer is -2s.
-  - Ammo Drop: Place an ammo crate at your feet. Allies within 3m reload instantly. 30s cooldown.
-  - Build Anywhere: Removes lane-setback restriction from your placements.
-  - Rally: Rally beacon: all teammates gain +10% move speed for 8s. 45s cooldown.
+  - Last Stand (passive, prereq: s_healer_t1): Once per wave, the first friendly minion that would die is revived at 30% HP instead.
 - Defense branch:
-  - Tower HP: Friendly towers you place spawn with +20% HP.
-  - Repair: Restore 30% HP to the nearest friendly tower within 15m. 20s cooldown.
-  - Fortify: Barrier towers you place have ×2 HP.
-  - Point Surge: On kill: your team gains +3 points.
+  - Battle Hardened (passive, prereq: s_basic_t1): All friendly minions take 15% less damage.
 
 ### Architecture
 
@@ -194,9 +222,9 @@ Skill tree state affects:
 | `GameSync` | `scripts/GameSync.gd` | In-game player state: healths, teams, spawn positions, ammo, weapon type, respawn countdowns. `PLAYER_MAX_HP = 100`. Signals: `player_health_changed`, `player_died`, `player_respawned`, `remote_player_updated`, `player_ammo_changed` |
 | `LaneData` | `scripts/LaneData.gd` | All lane Bézier path data. `get_lane_points(i)`, `get_lane_waypoints(i, team)`, `regenerate_for_new_game()` |
 | `TeamData` | `scripts/TeamData.gd` | Team currency. Starting points: 75 each. `add_points(team, amount)`, `spend_points(team, amount) -> bool`, `get_points(team)`, `sync_from_server(blue, red)` |
-| `NetworkManager` | `scripts/NetworkManager.gd` | ENet peer management. Port: 8910, max peers: 10. `start_host(port)`, `join_game(address, port)`, `close_connection()`. Signals: `peer_connected`, `peer_disconnected`, `connected_to_server`, `connection_failed`, `server_disconnected` |
-| `LobbyManager` | `scripts/LobbyManager.gd` | Player registry, role claiming, game start orchestration, bullet/minion/tower sync RPCs, ping broadcast, death counts. `register_player_local(id, name)`, `can_start_game()`, `start_game(path, seed, time_seed)`, `get_players_by_team(team)`, `increment_death_count(id)`, `get_respawn_time(id)`, `_sender_id()`. `RESPAWN_BASE = 5.0`. Signals: `lobby_updated`, `game_start_requested`, `all_roles_confirmed`, `ping_received`, `tower_despawned`, `item_spawned` |
-| `LevelSystem` | `scripts/LevelSystem.gd` | XP, leveling (12 levels), attribute points (hp/speed/damage, cap 6 each). `award_xp(id, amount)`, `spend_point_local(id, attr)`, `request_spend_point.rpc_id(1, attr)`, `get_xp(id)`, `get_level(id)`, `get_unspent_points(id)`, `get_bonus_hp(id)`, `get_bonus_speed_mult(id)`, `get_bonus_damage_mult(id)`, `register_peer(id)`, `clear_peer(id)`, `clear_all()`. Signals: `xp_gained`, `level_up`, `attribute_spent` |
+| `BridgeClient` | `scripts/BridgeClient.gd` | TCP connection to Python server (port 7890). `send(type, payload)`, `is_connected_to_server()`, `is_host()`, `get_peer_id()`. Signals: `connected_to_server`, `disconnected_from_server`, `message_received`. `_is_host` and `_local_peer_id` are set from `lobby_state` messages |
+| `LobbyManager` | `scripts/LobbyManager.gd` | Player registry, role claiming, game start orchestration, minion/tower sync, ping broadcast, death counts. `register_player_local(id, name)`, `can_start_game()`, `start_game(path, seed, time_seed)`, `get_players_by_team(team)`, `increment_death_count(id)`, `get_respawn_time(id)`. `RESPAWN_BASE = 5.0`. Signals: `lobby_updated`, `game_start_requested`, `all_roles_confirmed`, `ping_received`, `tower_despawned`, `item_spawned` |
+| `LevelSystem` | `scripts/LevelSystem.gd` | XP, leveling (12 levels), attribute points (hp/speed/damage, cap 6 each). `award_xp(id, amount)`, `spend_point_local(id, attr)`, `get_xp(id)`, `get_level(id)`, `get_unspent_points(id)`, `get_bonus_hp(id)`, `get_bonus_speed_mult(id)`, `get_bonus_damage_mult(id)`, `register_peer(id)`, `clear_peer(id)`, `clear_all()`. Signals: `xp_gained`, `level_up`, `attribute_spent` |
 | `TeamLives` | `scripts/TeamLives.gd` | Lives per team (default from `GameSettings.lives_per_team`). Server-authoritative, RPC synced. Signal: `game_over` |
 | `LoadingState` | `scripts/ui/LoadingState.gd` | Relay for loading progress. `report(text, progress)`. Signal: `status_changed` |
 | `GraphicsSettings` | `scripts/ui/GraphicsSettings.gd` | Persistent graphics settings saved to `user://graphics.cfg`. Fog (enabled, density), DoF (enabled, blur), shadow quality (0=off/1=low/2=high). `apply(...)`, `restore_defaults()`, `get_fog_density(time_seed)`. Signal: `settings_changed` |
@@ -266,7 +294,7 @@ Additional scenes (not in Main.tscn static tree):
 - `scenes/players/BasePlayer.tscn` — base scene for all player representations. `CharacterBody3D` root with `CollisionShape3D`, `HitBody (StaticBody3D + HitShape CollisionShape3D)`, `PlayerBody/CharacterMesh (Node3D)`. Script: `BasePlayer.gd`. `FPSPlayer.tscn` inherits this scene and attaches `FPSController.gd`.
 
 ### Key data flows
-- `Main.gd._ready()` detects `NetworkManager._peer != null` → chooses single-player or multiplayer path
+- `Main.gd._ready()` calls `_setup_game()` → `_start_multiplayer_game()` (always multiplayer via Python bridge)
 - `Main.gd._on_start_game()` awaits `$World/TreePlacer.done` and `$World/WallPlacer.done` before proceeding, driving the loading screen progress bar
 - Multiplayer game start: `LobbyManager.start_game(path)` → broadcasts `notify_game_seed.rpc` (call_local; sets `GameSync.game_seed` + `LaneData.regenerate_for_new_game()` on all peers) → `load_game_scene.rpc` → all peers change scene
 - Bullets spawned into `get_tree().root.get_child(0)` (scene root child 0) — never parented to shooter
@@ -707,7 +735,7 @@ Tests live in `res://tests/`. Run with `make test`. All tests extend `GutTest`. 
 **Total: 608 passing, 8 pending/risky (all intentional — documented known bugs or no-assert smoke tests)**
 
 ### Test tiers
-- **Tier 1** — `OfflineMultiplayerPeer`. `multiplayer.is_server()` returns `true`. Server-authoritative code paths run without network guards blocking them.
+- **Tier 1** — `OfflineMultiplayerPeer`. Set `BridgeClient._is_host = true` in `before_each` and reset to `false` in `after_each`. Set `BridgeClient._local_peer_id` to the test peer ID as needed (reset to `0` in `after_each`). Server-authoritative code paths run without network guards blocking them.
 - **Tier 2** — `MockMultiplayerAPI` RPC dispatch interception for verifying RPC calls without a real network.
 - **Tier 3** — Real `ENetMultiplayerPeer` loopback on `127.0.0.1`. Ports 7510–7519. Use `await wait_for_signal(...)` or `await wait_frames(N)` — GUT `simulate()` does NOT pump ENet sockets.
 
@@ -735,7 +763,7 @@ The tests verify **data plumbing** — signals fire with correct values, state d
 - `global_position`: always call `add_child` before setting it.
 - `TeamData`: use `sync_from_server(blue, red)` to seed team points, not `set_points` (doesn't exist).
 - Use GUT's `watch_signals(obj)` + `get_signal_parameters(obj, "signal_name")` to assert signal arguments — do **not** use `CONNECT_ONE_SHOT` lambdas (causes cross-test signal contamination).
-- `call_remote` RPC functions skip local execution entirely under `OfflineMultiplayerPeer` and `MockMultiplayerAPI`. Call the function body directly to test what the receiving peer executes.
+- `call_remote` RPC functions (now replaced by `BridgeClient.send()`): bridge `send()` is a no-op when not connected. Call server-side handler functions directly to test what the receiving peer executes.
 - `MockMultiplayerAPI._rpc()` only logs calls, never executes function bodies — always call the function directly alongside `.rpc()` when state assertions are needed.
 - After `ENetMultiplayerPeer.close()`, poll both client and server a few frames before nulling the client reference — ENet needs one flush cycle to deliver the disconnect packet.
 - Run `make test` and confirm zero failing tests before committing.

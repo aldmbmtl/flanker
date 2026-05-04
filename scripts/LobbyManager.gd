@@ -11,11 +11,11 @@ var supporter_claimed: Dictionary = { 0: false, 1: false }
 var player_death_counts: Dictionary = {}
 var ai_supporter_teams: Array = []  # teams where an AI Supporter was spawned
 
-var _dirty := false
-var _roles_pending: int = 0
+## Set by BridgeClient when it receives a lobby_state message from Python.
+## True iff all players are registered and all are ready.
+var _can_start: bool = false
 
 signal lobby_updated
-signal game_start_requested
 signal kicked_from_server
 signal player_left(id: int)
 signal role_slots_updated(claimed: Dictionary)
@@ -25,78 +25,32 @@ signal item_spawned(item_type: String, team: int)
 signal tower_despawned(item_type: String, team: int, tower_name: String)
 
 func _ready() -> void:
-	NetworkManager.peer_connected.connect(_on_peer_connected)
-	NetworkManager.peer_disconnected.connect(_on_peer_disconnected)
-	NetworkManager.connected_to_server.connect(_on_connected_to_server)
-	NetworkManager.server_disconnected.connect(_on_server_disconnected)
 	_init_bullet_sync()
 	_init_minion_sync()
 	GameSync.player_respawned.connect(_on_game_sync_player_respawned)
 	TeamLives.game_over.connect(_on_team_lives_game_over)
+	BridgeClient.disconnected_from_server.connect(_on_bridge_disconnected)
 
-func _on_game_sync_player_respawned(peer_id: int, spawn_pos: Vector3) -> void:
-	if multiplayer.is_server():
-		notify_player_respawned.rpc(peer_id, spawn_pos, GameSync.game_seed)
+func _on_game_sync_player_respawned(_peer_id: int, _spawn_pos: Vector3) -> void:
+	pass  # Respawn broadcast is handled by the Python bridge (player_respawned update).
 
-func _process(_delta: float) -> void:
-	if not multiplayer.has_multiplayer_peer():
-		return
-	if multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
-		return
-	if multiplayer.is_server() and _dirty and players.size() > 0:
-		sync_lobby_state.rpc(players)
-		_dirty = false
+func _on_bridge_disconnected() -> void:
+	players.clear()
+	game_started = false
+	kicked_from_server.emit()
 
-func register_player_local(peer_id: int, new_player_name: String) -> void:
-	var assigned_team := _assign_team()
-	var player_info := {
-		"name": new_player_name,
-		"team": assigned_team,
-		"role": -1,
-		"ready": false,
-		"avatar_char": ""
-	}
-	players[peer_id] = player_info
-	_dirty = true
-	lobby_updated.emit()
-
-@rpc("any_peer", "call_remote", "reliable")
-func register_player(new_player_name: String) -> void:
-	if not multiplayer.is_server():
-		return
-	var id := multiplayer.get_remote_sender_id()
-	register_player_local(id, new_player_name)
-
-# get_remote_sender_id() returns 0 when the server calls an RPC on itself.
-# In that case the caller is the server, whose peer id is always 1.
-func _sender_id() -> int:
-	var id := multiplayer.get_remote_sender_id()
-	return id if id != 0 else 1
-
-@rpc("any_peer", "reliable")
-func set_team(team_id: int) -> void:
-	var id := _sender_id()
-	if not players.has(id):
-		return
-	if game_started:
-		return
-	players[id].team = team_id
-	_dirty = true
-	lobby_updated.emit()
-
-@rpc("any_peer", "reliable")
 func set_role_ingame(role: int) -> void:
+	BridgeClient.send("set_role_ingame", {"role": role})
+
+func _handle_set_role_ingame(id: int, role: int) -> void:
 	# role: 0=FIGHTER, 1=SUPPORTER — called after game scene loads
-	if not multiplayer.is_server():
-		return
-	var id := _sender_id()
 	if not players.has(id):
 		return
 	var team: int = players[id].team
 	if role == 1:
 		if supporter_claimed.get(team, false):
 			# Slot taken — reject and re-broadcast current state
-			_notify_role_rejected.rpc_id(id, supporter_claimed)
+			_notify_role_rejected(id, supporter_claimed)
 			return
 		supporter_claimed[team] = true
 		human_supporter_claimed.emit(team)
@@ -105,76 +59,37 @@ func set_role_ingame(role: int) -> void:
 	# and execute skills on behalf of remote clients.
 	var role_str: String = "Supporter" if role == 1 else "Fighter"
 	SkillTree.register_peer(id, role_str)
-	_dirty = true
-	_sync_role_slots.rpc(supporter_claimed)
-	_roles_pending -= 1
-	if _roles_pending <= 0:
-		_roles_pending = 0
-		all_roles_confirmed.emit()
+	_sync_role_slots(supporter_claimed)
 
-@rpc("authority", "call_local", "reliable")
 func _sync_role_slots(claimed: Dictionary) -> void:
 	supporter_claimed = claimed.duplicate()
 	role_slots_updated.emit(supporter_claimed)
 
-@rpc("authority", "reliable")
-func _notify_role_rejected(claimed: Dictionary) -> void:
+func _notify_role_rejected(_id: int, claimed: Dictionary) -> void:
 	supporter_claimed = claimed.duplicate()
 	role_slots_updated.emit(supporter_claimed)
 
-@rpc("any_peer", "reliable")
 func set_ready(ready_state: bool) -> void:
-	var id := _sender_id()
+	BridgeClient.send("set_ready", {"ready": ready_state})
+
+func _handle_set_ready(id: int, ready_state: bool) -> void:
 	if not players.has(id):
 		return
 	if game_started:
 		return
 	players[id].ready = ready_state
-	_dirty = true
 	lobby_updated.emit()
 
-@rpc("authority", "call_local", "reliable")
 func sync_lobby_state(state: Dictionary) -> void:
 	players = state.duplicate(true)
 	lobby_updated.emit()
-
-@rpc("authority", "reliable")
-func load_game_scene(path: String) -> void:
-	game_started = true
-	game_start_requested.emit()
-	get_tree().change_scene_to_file(path)
-
-@rpc("authority", "call_local", "reliable")
-func notify_game_seed(new_seed: int, new_time_seed: int) -> void:
-	GameSync.game_seed = new_seed
-	GameSync.time_seed = new_time_seed
-	LaneData.regenerate_for_new_game()
-
-func start_game(path: String, map_seed: int = 0, time_seed: int = -1) -> void:
-	var s: int = map_seed if map_seed > 0 else randi()
-	if s == 0:
-		s = 1  # never send seed=0; TerrainGenerator fallback path means client diverges
-	notify_game_seed.rpc(s, time_seed)  # call_local — sets GameSync on server too
-	supporter_claimed = { 0: false, 1: false }
-	player_death_counts.clear()
-	ai_supporter_teams.clear()
-	_roles_pending = players.size()
-	LevelSystem.clear_all()
-	# Re-register all connected peers for the new match
-	for pid in players.keys():
-		LevelSystem.register_peer(pid)
-	game_started = true
-	game_start_requested.emit()
-	load_game_scene.rpc(path)
-	get_tree().change_scene_to_file(path)
 
 const RESPAWN_CAP: float = 60.0
 
 func increment_death_count(peer_id: int) -> int:
 	player_death_counts[peer_id] = player_death_counts.get(peer_id, 0) + 1
 	var new_count: int = player_death_counts[peer_id]
-	# Broadcast updated death count to all clients so their local respawn timer is accurate
-	sync_death_count.rpc(peer_id, new_count)
+	BridgeClient.send("sync_death_count", {"peer_id": peer_id, "count": new_count})
 	return new_count
 
 func get_respawn_time(peer_id: int) -> float:
@@ -183,46 +98,12 @@ func get_respawn_time(peer_id: int) -> float:
 	t = min(t, RESPAWN_CAP)
 	return maxf(1.0, t)
 
-@rpc("authority", "reliable")
+# Called by Python relay — updates local death count for respawn timer calculation.
 func sync_death_count(peer_id: int, count: int) -> void:
 	player_death_counts[peer_id] = count
 
-@rpc("any_peer", "reliable")
-func register_player_team(peer_id: int, team: int) -> void:
-	if not multiplayer.is_server():
-		return
-	GameSync.set_player_team(peer_id, team)
-
-@rpc("any_peer", "reliable")
-func report_ammo(reserve: int, weapon_type: String) -> void:
-	if not multiplayer.is_server():
-		return
-	GameSync.set_player_reserve_ammo(_sender_id(), reserve, weapon_type)
-
-@rpc("any_peer", "reliable")
-func request_start_game() -> void:
-	var id := _sender_id()
-	if id != host_id:
-		return
-	game_start_requested.emit()
-
-func _assign_team() -> int:
-	var blue_count := 0
-	var red_count := 0
-	for p in players.values():
-		if p.team == 0:
-			blue_count += 1
-		else:
-			red_count += 1
-	return 0 if blue_count <= red_count else 1
-
 func can_start_game() -> bool:
-	if players.is_empty():
-		return false
-	for p in players.values():
-		if not p.ready:
-			return false
-	return true
+	return _can_start
 
 func get_players_by_team(team: int) -> Array:
 	var result: Array = []
@@ -240,38 +121,6 @@ func get_supporter_peer(team: int) -> int:
 			return id
 	return -1
 
-func _on_peer_connected(id: int) -> void:
-	print("Lobby: peer connected ", id)
-	# Register in LevelSystem so XP tracking is ready when game starts
-	LevelSystem.register_peer(id)
-
-func _on_peer_disconnected(id: int) -> void:
-	print("Lobby: peer disconnected ", id)
-	# If roles haven't all been confirmed yet and this peer hadn't submitted,
-	# decrement so the server doesn't wait forever.
-	if game_started and _roles_pending > 0:
-		var info: Dictionary = players.get(id, {})
-		if not info.has("role") or info.get("role", -1) == -1:
-			_roles_pending -= 1
-			if _roles_pending <= 0:
-				_roles_pending = 0
-				all_roles_confirmed.emit()
-	players.erase(id)
-	_dirty = true
-	player_left.emit(id)
-	lobby_updated.emit()
-	LevelSystem.clear_peer(id)
-
-func _on_connected_to_server() -> void:
-	print("Connected to lobby server")
-
-func _on_server_disconnected() -> void:
-	print("Server disconnected")
-	# Close the peer immediately so no in-flight RPCs hit a dead connection
-	NetworkManager.close_connection()
-	players.clear()
-	game_started = false
-	kicked_from_server.emit()
 
 var _bullet_scene: PackedScene
 var _rocket_scene: PackedScene
@@ -282,8 +131,8 @@ func _init_bullet_sync() -> void:
 	_bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
 	_rocket_scene = preload("res://scenes/projectiles/Rocket.tscn")
 
-@rpc("authority", "call_remote", "unreliable_ordered")
 func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_team: int, shooter_peer_id: int = -1, projectile_type: String = "bullet") -> void:
+	print("[LobbyManager] spawn_bullet_visuals: type=%s pos=%s dir=%s team=%d peer=%d" % [projectile_type, pos, dir, shooter_team, shooter_peer_id])
 	if projectile_type == "rocket":
 		if _rocket_scene == null:
 			_rocket_scene = preload("res://scenes/projectiles/Rocket.tscn")
@@ -307,10 +156,9 @@ func spawn_bullet_visuals(pos: Vector3, dir: Vector3, damage: float, shooter_tea
 	VfxUtils.get_scene_root(self).add_child(bullet)
 	bullet.global_position = pos
 	var main: Node = VfxUtils.get_scene_root(self)
-	if main != null and main.has_method("_on_bullet_hit_something") and shooter_peer_id == multiplayer.get_unique_id():
+	if main != null and main.has_method("_on_bullet_hit_something") and shooter_peer_id == BridgeClient.get_peer_id():
 		bullet.hit_something.connect(main._on_bullet_hit_something)
 
-@rpc("authority", "call_remote", "unreliable_ordered")
 func spawn_cannonball_visuals(pos: Vector3, target: Vector3, damage: float, team: int) -> void:
 	if _cannonball_scene == null:
 		_cannonball_scene = preload("res://scenes/projectiles/Cannonball.tscn")
@@ -323,7 +171,6 @@ func spawn_cannonball_visuals(pos: Vector3, target: Vector3, damage: float, team
 	VfxUtils.get_scene_root(self).add_child(ball)
 	SoundManager.play_3d("res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_001.ogg", pos, 0.0, randf_range(0.9, 1.05))
 
-@rpc("authority", "call_remote", "unreliable_ordered")
 func spawn_mortar_visuals(pos: Vector3, target: Vector3, damage: float, team: int) -> void:
 	if _mortar_scene == null:
 		_mortar_scene = preload("res://scenes/projectiles/MortarShell.tscn")
@@ -341,7 +188,6 @@ var _minion_scene: PackedScene
 func _init_minion_sync() -> void:
 	_minion_scene = preload("res://scenes/minions/Minion.tscn")
 
-@rpc("authority", "call_remote", "reliable")
 func spawn_minion_visuals(team: int, spawn_pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int, mtype: String = "basic") -> void:
 	if _minion_scene == null:
 		_minion_scene = preload("res://scenes/minions/Minion.tscn")
@@ -354,7 +200,6 @@ func spawn_minion_visuals(team: int, spawn_pos: Vector3, waypts: Array[Vector3],
 	var spawner: Node = main.get_node("MinionSpawner")
 	spawner.spawn_for_network(team, spawn_pos, waypts, lane_i, minion_id, mtype)
 
-@rpc("authority", "call_remote", "reliable")
 func kill_minion_visuals(minion_id: int) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
@@ -368,262 +213,40 @@ func kill_minion_visuals(minion_id: int) -> void:
 		if minion != null and minion.has_method("force_die"):
 			minion.force_die()
 
-@rpc("any_peer", "reliable")
 func report_avatar_char(char: String) -> void:
-	if not multiplayer.is_server():
-		return
-	var sender: int = _sender_id()
+	BridgeClient.send("report_avatar", {"char": char})
+
+func _handle_report_avatar_char(sender: int, char: String) -> void:
 	if not players.has(sender):
 		return
 	players[sender]["avatar_char"] = char
 	# Broadcast updated state so all clients get the new avatar_char
-	sync_lobby_state.rpc(players)
+	sync_lobby_state(players)
 
-# VISIBILITY-CRITICAL: must be call_local so the host executes the body locally.
-# call_remote silently suppresses local execution on the server → broadcast never
-# fires → clients never receive host position → host invisible to all clients.
-# DO NOT change call_local to call_remote here. See test_A9 for the regression guard.
-@rpc("any_peer", "call_local", "unreliable_ordered")
 func report_player_transform(pos: Vector3, rot: Vector3, team: int) -> void:
-	var sender: int = _sender_id()
-	print("[TRANSFORM:REPORT] sender=", sender,
-		" is_server=", multiplayer.is_server(),
-		" my_id=", multiplayer.get_unique_id(),
-		" pos=", pos)
-	if multiplayer.is_server():
-		print("[TRANSFORM:REPORT] server dispatching broadcast for sender=", sender)
-		broadcast_player_transform.rpc(sender, pos, rot, team)
-	else:
-		print("[TRANSFORM:REPORT] WARNING: not server, skipping broadcast — sender=", sender,
-			" my_id=", multiplayer.get_unique_id())
+	BridgeClient.send("report_transform", {
+		"pos": [pos.x, pos.y, pos.z],
+		"rot": [rot.x, rot.y, rot.z],
+		"team": team,
+	})
 
-# VISIBILITY-CRITICAL: reliable version of report_player_transform used only for
-# the initial position seed at spawn time.  The normal report_player_transform is
-# unreliable_ordered and can be silently dropped while the client is still loading
-# the game scene (WallPlacer/TreePlacer are async and hold frames during that window).
-# This must be call_local for the same reason as report_player_transform — see above.
-# Called once from FPSController._broadcast_initial_transform().
-@rpc("any_peer", "call_local", "reliable")
 func report_initial_transform(pos: Vector3, rot: Vector3, team: int) -> void:
-	var sender: int = _sender_id()
-	print("[TRANSFORM:SEED] sender=", sender,
-		" is_server=", multiplayer.is_server(),
-		" my_id=", multiplayer.get_unique_id(),
-		" pos=", pos)
-	if multiplayer.is_server():
-		seed_player_transform.rpc(sender, pos, rot, team)
+	BridgeClient.send("report_initial_transform", {
+		"pos": [pos.x, pos.y, pos.z],
+		"rot": [rot.x, rot.y, rot.z],
+		"team": team,
+	})
 
-@rpc("authority", "call_local", "unreliable_ordered")
 func broadcast_player_transform(peer_id: int, pos: Vector3, rot: Vector3, team: int) -> void:
-	print("[BCAST] peer_id=", peer_id, " is_server=", multiplayer.is_server(), " my_id=", multiplayer.get_unique_id(), " pos=", pos)
+	print("[BCAST] peer_id=", peer_id, " pos=", pos)
 	GameSync.remote_player_updated.emit(peer_id, pos, rot, team)
 
-# VISIBILITY-CRITICAL: reliable version of broadcast_player_transform used only for
-# the initial position seed at spawn time.  Unlike broadcast_player_transform which is
-# unreliable_ordered (and can be dropped while the client is still loading the scene),
-# this RPC is reliable so it is guaranteed to arrive.  Called once per peer at game
-# start via FPSController._broadcast_initial_transform().
-@rpc("authority", "call_local", "reliable")
 func seed_player_transform(peer_id: int, pos: Vector3, rot: Vector3, team: int) -> void:
-	print("[SEED] peer_id=", peer_id, " is_server=", multiplayer.is_server(), " my_id=", multiplayer.get_unique_id(), " pos=", pos)
+	print("[SEED] peer_id=", peer_id, " pos=", pos)
 	GameSync.remote_player_updated.emit(peer_id, pos, rot, team)
 
-@rpc("any_peer", "reliable")
-func validate_shot(origin: Vector3, direction: Vector3, damage: float, shooter_team: int, shooter_peer: int, hit_info: Dictionary = {}, projectile_type: String = "bullet") -> void:
-	if not multiplayer.is_server():
-		return
-
-	# --- Client-reported hit path (avoids server raycast hitting FPSPlayer_1) ---
-	if not hit_info.is_empty():
-		if hit_info.has("minion_id"):
-			var mid: int = hit_info["minion_id"] as int
-			var main: Node = get_tree().root.get_node("Main")
-			if main != null:
-				var minion: Node = main.get_node_or_null("Minion_%d" % mid)
-				if minion != null and minion.has_method("take_damage"):
-					var mpos: Vector3 = minion.global_position
-					if mpos.distance_to(origin) <= 550.0:
-						minion.take_damage(damage, "player", shooter_team, shooter_peer)
-		elif hit_info.has("tower_pos"):
-			var tpos: Vector3 = hit_info["tower_pos"] as Vector3
-			var towers: Array = get_tree().get_nodes_in_group("towers")
-			var best: Node = null
-			var best_dist: float = 5.0
-			for t in towers:
-				var d: float = (t as Node3D).global_position.distance_to(tpos)
-				if d < best_dist:
-					best_dist = d
-					best = t
-			if best != null and best.has_method("take_damage"):
-				best.take_damage(damage, "player", shooter_team, shooter_peer)
-		elif hit_info.has("peer_id"):
-			var target_peer: int = hit_info["peer_id"] as int
-			if target_peer != shooter_peer and not GameSync.player_dead.get(target_peer, false):
-				var target_team: int = GameSync.get_player_team(target_peer)
-				if target_team == -1 or target_team != shooter_team:
-					var new_hp: float = damage_player_broadcast(target_peer, damage, shooter_team, shooter_peer)
-					if new_hp <= 0.0:
-						pass  # point_surge removed
-		spawn_bullet_visuals.rpc(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
-		# call_remote skips the server itself — spawn locally for the host
-		if projectile_type == "rocket":
-			spawn_bullet_visuals(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
-		return
-
-	# --- Server-side fallback (used when host fires, hit_info is empty) ---
-	var hit_result: Dictionary = _raycast_players(origin, direction)
-
-	if hit_result.has("peer_id"):
-		var target_peer: int = hit_result.peer_id
-		var new_hp: float = damage_player_broadcast(target_peer, damage, shooter_team, shooter_peer)
-		if new_hp <= 0.0:
-			pass  # point_surge removed
-	elif hit_result.has("minion_path"):
-		var main: Node = get_tree().root.get_node("Main")
-		if main != null:
-			var minion: Node = main.get_node(hit_result.minion_path)
-			if minion != null and minion.has_method("take_damage"):
-				minion.take_damage(damage, "player", shooter_team, shooter_peer)
-
-	spawn_bullet_visuals.rpc(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
-	# call_remote skips the server itself — spawn locally for the host
-	if projectile_type == "rocket":
-		spawn_bullet_visuals(origin, direction, damage, shooter_team, shooter_peer, projectile_type)
-
-## Server-authoritative: damage a player and broadcast the result to all clients.
-## Calls GameSync.damage_player, then sends apply_player_damage.rpc (all peers)
-## and notify_player_died.rpc (clients only) when HP reaches zero.
-## Does NOT call _apply_point_surge — callers that need it add it after.
-## Must only be called on the server.
-func damage_player_broadcast(target_peer: int, amount: float, source_team: int, killer_peer: int = -1) -> float:
-	var new_hp: float = GameSync.damage_player(target_peer, amount, source_team, killer_peer)
-	apply_player_damage.rpc(target_peer, new_hp)
-	if new_hp <= 0.0:
-		notify_player_died.rpc(target_peer, GameSync.game_seed)
-	return new_hp
-
-@rpc("authority", "call_local", "reliable")
-func apply_player_damage(peer_id: int, new_health: float) -> void:
-	GameSync.set_player_health(peer_id, new_health)
-
-## Broadcast bounty state change to all clients (called by GameSync.damage_player).
-## is_bounty=true: player has ≥3 kills and is now a high-value target.
-## is_bounty=false: bounty was cashed (player died) or reset.
-@rpc("authority", "call_local", "reliable")
-func sync_bounty_state(peer_id: int, is_bounty: bool) -> void:
-	GameSync.player_is_bounty[peer_id] = is_bounty
-
-## Server-authoritative: heal a player and notify the target peer's local controller.
-## Must only be called on the server. Finds the FPS player node on the receiving
-## peer via "Main/FPSPlayer_{peer_id}" and calls heal() on it.
-func heal_player_broadcast(target_peer: int, amount: float) -> void:
-	var new_hp: float = minf(
-		GameSync.player_healths.get(target_peer, 0.0) + amount,
-		GameSync.PLAYER_MAX_HP + LevelSystem.get_bonus_hp(target_peer))
-	GameSync.set_player_health(target_peer, new_hp)
-	# If target is the server-player, heal the local FPS node directly.
-	# Otherwise send a directed RPC to the target client.
-	if target_peer == multiplayer.get_unique_id():
-		var fps_node: Node = get_tree().root.get_node_or_null("Main/FPSPlayer_%d" % target_peer)
-		if fps_node != null and fps_node.has_method("heal"):
-			fps_node.call("heal", amount)
-	elif multiplayer.has_multiplayer_peer():
-		var peers: Array = multiplayer.get_peers()
-		if peers.has(target_peer):
-			apply_player_heal.rpc_id(target_peer, new_hp)
-
-@rpc("authority", "call_remote", "reliable")
-func apply_player_heal(new_health: float) -> void:
-	var my_id: int = multiplayer.get_unique_id()
-	var fps_node: Node = get_tree().root.get_node_or_null("Main/FPSPlayer_%d" % my_id)
-	if fps_node == null or not fps_node.has_method("heal"):
-		return
-	# Sync GameSync first, then apply to local controller (avoids double-sync)
-	var old_hp: float = GameSync.player_healths.get(my_id, 0.0)
-	if new_health > old_hp:
-		fps_node.get("hp")  # no-op read; heal() syncs GameSync internally
-		fps_node.call("heal", new_health - old_hp)
-
-@rpc("authority", "call_remote", "reliable")
-func notify_player_died(peer_id: int, session_seed: int) -> void:
-	# VISIBILITY-CRITICAL — this RPC fires on CLIENTS only (call_remote).
-	# session_seed guards against stale reliable-queue packets from a previous
-	# session arriving after the new game has started. If the embedded seed does
-	# not match the current GameSync.game_seed the packet is from a previous game
-	# and must be dropped — processing it would hide the ghost for the entire match.
-	if session_seed != GameSync.game_seed:
-		print("[DIED:RPC] STALE notify_player_died dropped peer_id=", peer_id,
-			" packet_seed=", session_seed,
-			" current_seed=", GameSync.game_seed)
-		return
-	print("[DIED:RPC] notify_player_died peer_id=", peer_id,
-		" is_server=", multiplayer.is_server(),
-		" my_id=", multiplayer.get_unique_id(),
-		" was_already_dead=", GameSync.player_dead.get(peer_id, false),
-		" GameSync.player_dead=", GameSync.player_dead)
-	GameSync.player_dead[peer_id] = true
-	GameSync.player_died.emit(peer_id)
-	print("[DIED:RPC] notify_player_died DONE peer_id=", peer_id,
-		" GameSync.player_dead=", GameSync.player_dead)
-
-@rpc("authority", "call_remote", "reliable")
-func notify_player_respawned(peer_id: int, spawn_pos: Vector3, session_seed: int) -> void:
-	# VISIBILITY-CRITICAL — fires on CLIENTS only (call_remote).
-	# session_seed guards against stale reliable-queue packets from a previous session.
-	if session_seed != GameSync.game_seed:
-		print("[RESPAWN:RPC] STALE notify_player_respawned dropped peer_id=", peer_id,
-			" packet_seed=", session_seed,
-			" current_seed=", GameSync.game_seed)
-		return
-	print("[RESPAWN:RPC] notify_player_respawned peer_id=", peer_id,
-		" spawn_pos=", spawn_pos,
-		" is_server=", multiplayer.is_server(),
-		" my_id=", multiplayer.get_unique_id(),
-		" was_dead=", GameSync.player_dead.get(peer_id, false))
-	GameSync.player_healths[peer_id] = GameSync.PLAYER_MAX_HP + LevelSystem.get_bonus_hp(peer_id)
-	GameSync.player_dead[peer_id] = false
-	GameSync.player_respawned.emit(peer_id, spawn_pos)
-	print("[RESPAWN:RPC] notify_player_respawned DONE peer_id=", peer_id,
-		" new_hp=", GameSync.player_healths[peer_id])
-
-func _raycast_players(origin: Vector3, direction: Vector3) -> Dictionary:
-	var space: PhysicsDirectSpaceState3D = get_tree().root.get_world_3d().direct_space_state
-	if space == null:
-		return {}
-	var to: Vector3 = origin + direction * 500.0
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(origin, to)
-	query.collision_mask = 1
-	var result: Dictionary = space.intersect_ray(query)
-	if result.is_empty():
-		return {}
-	var collider: Object = result.collider
-	# CollisionShape3D is a child — walk up to the real node
-	var node: Node = collider if collider is Node else null
-	if node == null:
-		return {}
-	# Check if this is a remote player ghost hitbox (StaticBody3D with peer_id meta)
-	var check_ghost: Node = node
-	while check_ghost != null and check_ghost != get_tree().root:
-		if check_ghost.has_meta("ghost_peer_id"):
-			var ghost_peer: int = check_ghost.get_meta("ghost_peer_id") as int
-			if ghost_peer > 0:
-				return {"peer_id": ghost_peer}
-		check_ghost = check_ghost.get_parent()
-	# Check if this is (or belongs to) a player CharacterBody3D
-	var check: Node = node
-	while check != null:
-		if check.has_method("take_damage") and check.get("player_team") != null:
-			var peer_id: int = _find_peer_id_from_node(check)
-			if peer_id > 0:
-				return {"peer_id": peer_id}
-		check = check.get_parent() if check != get_tree().root else null
-	# Check for minion
-	if node.has_method("take_damage"):
-		return {"minion_path": node.get_path()}
-	return {}
-
+## Returns the peer ID from an FPSPlayer node name.
 func _find_peer_id_from_node(node: Node) -> int:
-	# Players are named "FPSPlayer_{peer_id}"
 	var n: String = node.name
 	if n.begins_with("FPSPlayer_"):
 		var id_str: String = n.substr(10)
@@ -631,27 +254,26 @@ func _find_peer_id_from_node(node: Node) -> int:
 			return id_str.to_int()
 	return -1
 
+
 # ── Minion sync ───────────────────────────────────────────────────────────────
 
-@rpc("authority", "call_remote", "unreliable_ordered")
 func sync_minion_states(ids: PackedInt32Array, positions: PackedVector3Array,
 		rotations: PackedFloat32Array, healths: PackedFloat32Array) -> void:
-	var main: Node = get_tree().root.get_node_or_null("Main")
-	if main == null:
-		return
-	var spawner: Node = main.get_node_or_null("MinionSpawner")
+	var id_arr: Array = []
+	var pos_arr: Array = []
+	var rot_arr: Array = []
+	var hp_arr: Array = []
 	for i in ids.size():
-		var minion: Node = null
-		if spawner != null:
-			minion = spawner.get_minion_by_id(ids[i])
-		if minion == null:
-			minion = main.get_node_or_null("Minion_%d" % ids[i])
-		if minion != null and minion.has_method("apply_puppet_state"):
-			minion.apply_puppet_state(positions[i], rotations[i], healths[i])
+		id_arr.append(ids[i])
+		pos_arr.append([positions[i].x, positions[i].y, positions[i].z])
+		rot_arr.append(rotations[i])
+		hp_arr.append(healths[i])
+	BridgeClient.send("sync_minion_states", {
+		"ids": id_arr, "positions": pos_arr, "rotations": rot_arr, "healths": hp_arr,
+	})
 
 # ── Tower / item sync ────────────────────────────────────────────────────────
 
-@rpc("authority", "call_remote", "unreliable")
 func notify_tower_hit(tower_name: String) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
@@ -660,7 +282,6 @@ func notify_tower_hit(tower_name: String) -> void:
 	if tower != null and tower.has_method("_flash_hit"):
 		tower._flash_hit()
 
-@rpc("authority", "call_remote", "unreliable")
 func notify_minion_hit(minion_id: int) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
@@ -671,10 +292,9 @@ func notify_minion_hit(minion_id: int) -> void:
 		minion = spawner.get_minion_by_id(minion_id)
 	if minion == null:
 		minion = main.get_node_or_null("Minion_%d" % minion_id)
-	if minion != null and minion.has_method("_flash_hit"):
+	if minion != null and is_instance_valid(minion) and not minion.is_queued_for_deletion() and minion.has_method("_flash_hit"):
 		minion._flash_hit()
 
-@rpc("authority", "call_remote", "unreliable")
 func spawn_mg_visuals(tower_name: String, muzzle_pos: Vector3, hit_pos: Vector3, hit_normal: Vector3, hit_unit: bool) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
@@ -690,7 +310,6 @@ func spawn_mg_visuals(tower_name: String, muzzle_pos: Vector3, hit_pos: Vector3,
 		tower._spawn_tracer(muzzle_pos, hit_pos)
 	SoundManager.play_3d("res://assets/kenney_sci-fi-sounds/Audio/laserSmall_002.ogg", muzzle_pos, -3.0, randf_range(0.92, 1.08))
 
-@rpc("authority", "call_remote", "unreliable")
 func spawn_slow_pulse_visuals(tower_name: String, origin: Vector3) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
@@ -703,7 +322,6 @@ func spawn_slow_pulse_visuals(tower_name: String, origin: Vector3) -> void:
 		# Nothing to do — pulse VFX is cosmetic only.
 		pass
 
-@rpc("authority", "call_remote", "unreliable_ordered")
 func sync_mg_turret_rot(tower_name: String, yaw_rad: float) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
@@ -715,58 +333,14 @@ func sync_mg_turret_rot(tower_name: String, yaw_rad: float) -> void:
 	if pivot != null:
 		pivot.rotation.y = yaw_rad
 
-@rpc("any_peer", "reliable")
-func request_place_item(world_pos: Vector3, team: int, item_type: String, subtype: String) -> void:
-	if not multiplayer.is_server():
-		return
-	var id: int = _sender_id()
-	var info: Dictionary = players.get(id, {})
-	if info.get("team", -1) != team:
-		return
-	# Only Supporters (role == 1) may place items
-	if info.get("role", -1) != 1:
-		return
-	var build_sys: Node = get_tree().root.get_node_or_null("Main/BuildSystem")
-	if build_sys == null:
-		return
-	var assigned_name: String = build_sys.place_item(world_pos, team, item_type, subtype, id)
-	if assigned_name != "":
-		spawn_item_visuals.rpc(world_pos, team, item_type, subtype, assigned_name)
-		# Server already has the node from place_item but never runs spawn_item_visuals
-		# (call_remote). Emit item_spawned locally so the server-host player's
-		# LauncherHUD registers client-placed launchers.
-		item_spawned.emit(item_type, team)
-		sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
-
-# Legacy alias — still works for any old callers
-@rpc("any_peer", "reliable")
-func request_place_tower(world_pos: Vector3, team: int) -> void:
-	request_place_item(world_pos, team, "cannon", "")
-
-@rpc("authority", "call_remote", "reliable")
-func spawn_item_visuals(world_pos: Vector3, team: int, item_type: String, subtype: String, node_name: String = "") -> void:
-	var build_sys: Node = get_tree().root.get_node_or_null("Main/BuildSystem")
-	if build_sys != null and build_sys.has_method("spawn_item_local"):
-		build_sys.spawn_item_local(world_pos, team, item_type, subtype, node_name)
-	item_spawned.emit(item_type, team)
-
-# Legacy alias
-@rpc("authority", "call_remote", "reliable")
-func spawn_tower_visuals(world_pos: Vector3, team: int) -> void:
-	spawn_item_visuals(world_pos, team, "cannon", "")
-
 # ── Supporter drop despawn sync ───────────────────────────────────────────────
 
 # Any client calls this when a supporter-placed drop is picked up.
-# Server validates and broadcasts despawn to all peers (including itself).
-@rpc("any_peer", "reliable")
+# Sends to Python for server-authoritative validation before broadcasting despawn.
 func notify_drop_picked_up(node_name: String) -> void:
-	if not multiplayer.is_server():
-		return
-	despawn_drop.rpc(node_name)
+	BridgeClient.send("pickup_drop", {"name": node_name})
 
 # Executed on every peer (call_local) — removes the named drop node from Main.
-@rpc("authority", "call_local", "reliable")
 func despawn_drop(node_name: String) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
@@ -776,7 +350,6 @@ func despawn_drop(node_name: String) -> void:
 		node.queue_free()
 
 # Called by server when a tower or heal station dies — removes it on all peers.
-@rpc("authority", "call_local", "reliable")
 func despawn_tower(node_name: String) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main == null:
@@ -799,37 +372,13 @@ func _type_from_node_name(node_name: String) -> String:
 # ── Launcher / Missile sync ───────────────────────────────────────────────────
 
 # Client requests the server to fire a missile from a specific launcher.
-@rpc("any_peer", "reliable")
 func request_fire_missile(launcher_name: String, target_pos: Vector3, team: int, launcher_type: String) -> void:
-	if not multiplayer.is_server():
-		return
-	var id: int = _sender_id()
-	var info: Dictionary = players.get(id, {})
-	# Validate: sender must be Supporter on the correct team
-	if info.get("role", -1) != 1:
-		return
-	if info.get("team", -1) != team:
-		return
-	# Validate: launcher exists and belongs to this team
-	var main: Node = get_tree().root.get_node_or_null("Main")
-	if main == null:
-		return
-	var launcher: Node = main.get_node_or_null(launcher_name)
-	if launcher == null:
-		return
-	var launcher_team: int = launcher.get("team") if launcher.get("team") != null else -1
-	if launcher_team != team:
-		return
-	# Spend fire cost server-side
-	var fire_cost: int = LauncherDefs.get_fire_cost(launcher_type)
-	if not TeamData.spend_points(team, fire_cost):
-		return
-	# Get fire position
-	var fire_pos: Vector3 = launcher.get_fire_position() if launcher.has_method("get_fire_position") else launcher.global_position + Vector3(0.0, 6.0, 0.0)
-	# Spawn on server + broadcast to clients
-	_spawn_missile_server(fire_pos, target_pos, team, launcher_type)
-	spawn_missile_visuals.rpc(fire_pos, target_pos, team, launcher_type)
-	sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+	BridgeClient.send("request_fire_missile", {
+		"launcher_name": launcher_name,
+		"target_pos": [target_pos.x, target_pos.y, target_pos.z],
+		"team": team,
+		"launcher_type": launcher_type,
+	})
 
 func spawn_missile_server(fire_pos: Vector3, target_pos: Vector3, team: int, launcher_type: String) -> void:
 	_spawn_missile_server(fire_pos, target_pos, team, launcher_type)
@@ -837,8 +386,7 @@ func spawn_missile_server(fire_pos: Vector3, target_pos: Vector3, team: int, lau
 func _spawn_missile_server(fire_pos: Vector3, target_pos: Vector3, team: int, launcher_type: String) -> void:
 	_do_spawn_missile_body(fire_pos, target_pos, team, launcher_type)
 
-# Executed on all remote clients — spawns the missile projectile.
-@rpc("authority", "call_remote", "reliable")
+# Executed on each client — spawns the missile projectile.
 func spawn_missile_visuals(fire_pos: Vector3, target_pos: Vector3, team: int, launcher_type: String) -> void:
 	_do_spawn_missile_body(fire_pos, target_pos, team, launcher_type)
 
@@ -855,21 +403,13 @@ func _do_spawn_missile_body(fire_pos: Vector3, target_pos: Vector3, team: int, l
 	VfxUtils.get_scene_root(self).add_child(missile)
 	missile.global_position = fire_pos
 
-# ── TeamData sync ─────────────────────────────────────────────────────────────
-
-@rpc("authority", "call_remote", "reliable")
-func sync_team_points(blue: int, red: int) -> void:
-	TeamData.sync_from_server(blue, red)
-
 # ── Wave info sync ────────────────────────────────────────────────────────────
 
-@rpc("authority", "call_remote", "reliable")
 func sync_wave_info(wave_num: int, next_in: int) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main != null and main.has_method("update_wave_info"):
 		main.update_wave_info(wave_num, next_in)
 
-@rpc("authority", "call_remote", "reliable")
 func sync_wave_announcement(wave_num: int) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main != null and main.has_method("show_wave_announcement"):
@@ -879,15 +419,11 @@ func sync_wave_announcement(wave_num: int) -> void:
 
 const TREE_DESTROY_RADIUS := 3.0
 
-# Called by any peer when a cannonball hits a tree — server validates + fans out.
-@rpc("any_peer", "call_local", "reliable")
+# Called by any peer when a cannonball hits a tree — relays to Python.
 func request_destroy_tree(pos: Vector3) -> void:
-	if not multiplayer.is_server():
-		return
-	sync_destroy_tree.rpc(pos)
+	BridgeClient.send("destroy_tree", {"pos": [pos.x, pos.y, pos.z]})
 
-# Executed on every peer (call_local) — removes tree nodes near pos.
-@rpc("authority", "call_local", "reliable")
+# Called by BridgeClient relay — removes tree nodes near pos.
 func sync_destroy_tree(pos: Vector3) -> void:
 	var tp: Node = get_tree().root.get_node_or_null("Main/World/TreePlacer")
 	if tp != null:
@@ -900,82 +436,34 @@ const LANE_BOOST_AMOUNT: int = 3
 
 signal lane_boosts_synced(boosts_team0: Array, boosts_team1: Array)
 
-# Broadcasts current lane boost state to all peers (call_local so server HUD also updates).
-@rpc("authority", "call_local", "reliable")
+# Called by BridgeClient relay — emits signal so local HUD and MinionSpawner update.
 func sync_lane_boosts(boosts_team0: Array, boosts_team1: Array) -> void:
 	lane_boosts_synced.emit(boosts_team0, boosts_team1)
 
 # Client (Supporter) requests a lane boost for the next wave.
 # lane_i: 0=Left, 1=Mid, 2=Right, -1=all lanes (+1 each)
-@rpc("any_peer", "reliable")
 func request_lane_boost(lane_i: int, team: int) -> void:
-	if not multiplayer.is_server():
-		return
-	var id: int = _sender_id()
-	var info: Dictionary = players.get(id, {})
-	# Validate: sender must be Supporter on the correct team
-	if info.get("role", -1) != 1:
-		return
-	if info.get("team", -1) != team:
-		return
-	if not TeamData.spend_points(team, LANE_BOOST_COST):
-		return
-	var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
-	if spawner == null:
-		return
-	if lane_i == -1:
-		spawner.boost_all_lanes(team)
-	else:
-		spawner.boost_lane(team, lane_i, LANE_BOOST_AMOUNT)
-	# Broadcast updated boost state and points to all peers
-	var b: Array = spawner.get("_lane_boosts") as Array
-	sync_lane_boosts.rpc(b[0], b[1])
-	sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+	BridgeClient.send("request_lane_boost", {"lane_i": lane_i, "team": team})
 
 # Client (Supporter) requests a ram minion on a specific lane (or all lanes).
 # tier:   0=beaver ($15), 1=cow ($30), 2=elephant ($50). All-lanes cost is ×3.
 # lane_i: 0=Left, 1=Mid, 2=Right, -1=all lanes.
-@rpc("any_peer", "reliable")
 func request_ram_minion(tier: int, team: int, lane_i: int) -> void:
-	if not multiplayer.is_server():
-		return
-	var id: int = _sender_id()
-	var info: Dictionary = players.get(id, {})
-	# Validate: sender must be Supporter on the correct team.
-	if info.get("role", -1) != 1:
-		return
-	if info.get("team", -1) != team:
-		return
-	var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
-	if spawner == null:
-		return
-	# MinionSpawner.request_ram_minion handles point deduction + spawn.
-	spawner.request_ram_minion(team, tier, lane_i)
-	sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+	BridgeClient.send("request_ram_minion", {"tier": tier, "team": team, "lane_i": lane_i})
 
 # ── Recon strike (fog reveal) sync ───────────────────────────────────────────
 
 # Client requests server to broadcast a recon reveal for their team.
-@rpc("any_peer", "reliable")
 func request_recon_reveal(target_pos: Vector3, reveal_radius: float, reveal_duration: float, team: int) -> void:
-	if not multiplayer.is_server():
-		return
-	var id: int = _sender_id()
-	var info: Dictionary = players.get(id, {})
-	# Validate: sender must be Supporter on the correct team
-	if info.get("role", -1) != 1:
-		return
-	if info.get("team", -1) != team:
-		return
-	# Spend fire cost server-side
-	if not TeamData.spend_points(team, LauncherDefs.get_fire_cost("recon_strike")):
-		return
-	broadcast_recon_reveal.rpc(target_pos, reveal_radius, reveal_duration, team)
-	sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+	BridgeClient.send("request_recon_reveal", {
+		"target_pos": [target_pos.x, target_pos.y, target_pos.z],
+		"reveal_radius": reveal_radius,
+		"reveal_duration": reveal_duration,
+		"team": team,
+	})
 
 # Executed on every peer — triggers fog reveal + VFX on all clients.
-@rpc("authority", "call_local", "reliable")
-func broadcast_recon_reveal(target_pos: Vector3, reveal_radius: float, reveal_duration: float, team: int) -> void:
+func broadcast_recon_reveal(target_pos: Vector3, reveal_radius: float, reveal_duration: float, _team: int) -> void:
 	var main: Node = get_tree().root.get_node_or_null("Main")
 	if main != null and main.has_method("apply_recon_reveal"):
 		main.apply_recon_reveal(target_pos, reveal_radius, reveal_duration)
@@ -983,14 +471,9 @@ func broadcast_recon_reveal(target_pos: Vector3, reveal_radius: float, reveal_du
 # ── Game over broadcast ───────────────────────────────────────────────────────
 
 func _on_team_lives_game_over(winner_team: int) -> void:
-	# Only the server triggers this; broadcast to all clients.
-	if not multiplayer.is_server():
-		return
-	_rpc_game_over.rpc(winner_team)
-
-@rpc("authority", "call_remote", "reliable")
-func _rpc_game_over(winner_team: int) -> void:
-	TeamLives.game_over.emit(winner_team)
+	# Python is authoritative for game_over — this is a no-op relay only.
+	# BridgeClient handles the actual broadcast via the "game_over" message.
+	pass
 
 # ── Ping system ───────────────────────────────────────────────────────────────
 
@@ -998,21 +481,22 @@ signal ping_received(world_pos: Vector3, team: int, color: Color)
 
 const _PING_COL_DEFAULT := Color(0.62, 0.0, 1.0, 1.0)  # vivid purple
 
-# Any peer calls this on the server with their world position and team.
-# Server validates team membership then broadcasts to all peers.
+# Any peer calls this with their world position and team.
+# Python validates team membership then broadcasts to all peers.
 # color defaults to purple so existing callers need no changes.
-@rpc("any_peer", "reliable")
 func request_ping(world_pos: Vector3, team: int, color: Color = Color(0.62, 0.0, 1.0, 1.0)) -> void:
-	if not multiplayer.is_server():
-		return
-	var id: int = _sender_id()
+	BridgeClient.send("request_ping", {
+		"world_pos": [world_pos.x, world_pos.y, world_pos.z],
+		"team": team,
+		"color": [color.r, color.g, color.b, color.a],
+	})
+
+func _handle_request_ping(id: int, world_pos: Vector3, team: int, color: Color) -> void:
 	var info: Dictionary = players.get(id, {})
 	if info.get("team", -1) != team:
 		return
-	broadcast_ping.rpc(world_pos, team, color)
+	broadcast_ping(world_pos, team, color)
 
-# Executed on every peer (call_local) — emit signal so HUD / minimap can react.
-@rpc("authority", "call_local", "reliable")
 func broadcast_ping(world_pos: Vector3, team: int, color: Color = Color(0.62, 0.0, 1.0, 1.0)) -> void:
 	ping_received.emit(world_pos, team, color)
 
@@ -1025,5 +509,4 @@ func reset() -> void:
 	supporter_claimed = { 0: false, 1: false }
 	player_death_counts.clear()
 	ai_supporter_teams.clear()
-	_dirty = false
-	_roles_pending = 0
+	_can_start = false

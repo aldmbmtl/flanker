@@ -27,9 +27,8 @@ var _players: Dictionary = {}
 var _local_peer_id: int = 1
 
 func _ready() -> void:
-	_local_peer_id = multiplayer.get_unique_id() if NetworkManager._peer != null else 1
+	_local_peer_id = BridgeClient.get_peer_id()
 	print("[PM] _ready local_peer_id=", _local_peer_id,
-		" is_server=", multiplayer.is_server(),
 		" spawn_root=", (spawn_root.name if spawn_root != null else "null (→ get_parent())"))
 	GameSync.remote_player_updated.connect(_on_remote_player_updated)
 	LobbyManager.player_left.connect(remove_player)
@@ -143,11 +142,10 @@ func remove_player(peer_id: int) -> void:
 			p.queue_free()
 		_players.erase(peer_id)
 
-func _on_player_died(peer_id: int) -> void:
+func _on_player_died(peer_id: int, _respawn_time: float) -> void:
 	var had_player: bool = _players.has(peer_id)
 	print("[PM-DIED] peer_id=", peer_id,
 		" had_player=", had_player,
-		" is_server=", (multiplayer.is_server() if multiplayer != null else "n/a"),
 		" GameSync.player_dead=", GameSync.player_dead)
 	if had_player:
 		var p: Variant = _players[peer_id]
@@ -168,15 +166,16 @@ func _on_player_respawned(peer_id: int, spawn_pos: Vector3) -> void:
 	print("[PM-RESP] peer_id=", peer_id,
 		" had_player=", had_player,
 		" spawn_pos=", spawn_pos,
-		" is_server=", (multiplayer.is_server() if multiplayer != null else "n/a"),
 		" GameSync.player_dead=", GameSync.player_dead)
 	if had_player:
 		var p: Variant = _players[peer_id]
 		if is_instance_valid(p):
 			var bp: BasePlayer = p
 			var was_visible: bool = bp.visible
-			bp._set_alive(true)
+			# Call update_transform BEFORE _set_alive so _on_respawned
+			# receives the correct spawn position, not DEAD_POSITION.
 			bp.update_transform(spawn_pos, bp.rotation)
+			bp._set_alive(true)
 			print("[PM-RESP] player shown peer_id=", peer_id,
 				" was_visible=", was_visible)
 		else:

@@ -1,6 +1,6 @@
 [gd_scene load_steps=8 format=3 uid="uid://tower"]
 
-[ext_resource type="Script" path="res://scripts/towers/TowerAI.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/towers/BallisticTower.gd" id="1"]
 [ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-square-bottom-a.glb" id="2"]
 [ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-square-middle-a.glb" id="3"]
 [ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-square-top-a.glb" id="4"]
@@ -16,6 +16,12 @@ max_health = 900.0
 attack_range = 30.0
 attack_interval = 1.0
 fire_point_fallback_height = 4.0
+attack_damage = 50.0
+projectile_scene_path = "res://scenes/projectiles/Cannonball.tscn"
+fire_sound_path = "res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_001.ogg"
+source_tag = "cannonball"
+pitch_scale_min = 0.9
+pitch_scale_max = 1.05
 model_base = ExtResource("2")
 model_base_scale = Vector3(2.667, 2.667, 2.667)
 model_base_offset = Vector3(0, 0, 0)

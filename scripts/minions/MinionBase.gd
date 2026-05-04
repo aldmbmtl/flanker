@@ -173,15 +173,26 @@ func _fire_at(target: Node3D) -> void:
 	dir = dir.normalized()
 
 	var bullet: Node3D = BulletScene.instantiate()
-	bullet.damage       = attack_damage
-	bullet.source       = "minion"
-	bullet.shooter_team = team
-	bullet.velocity     = dir * bullet_speed
+	bullet.damage        = attack_damage
+	bullet.source        = "minion"
+	bullet.shooter_team  = team
+	bullet.velocity      = dir * bullet_speed
+	bullet.max_lifetime  = 0.5  # cap at ~29m; prevents bullets travelling across the full map
 	VfxUtils.get_scene_root(self).add_child(bullet)
 	bullet.global_position = spawn_pos
 
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		LobbyManager.spawn_bullet_visuals.rpc(bullet.global_position, dir, attack_damage, team)
+	# Only send fire_projectile to Python if NOT host (host already has the real bullet).
+	# Python broadcasts spawn_visual to non-host clients only.
+	if not BridgeClient.is_host():
+		BridgeClient.send("fire_projectile", {
+			"visual_type": "bullet",
+			"params": {
+				"pos": [bullet.global_position.x, bullet.global_position.y, bullet.global_position.z],
+				"dir": [dir.x, dir.y, dir.z],
+				"damage": attack_damage,
+				"shooter_team": team,
+			},
+		})
 
 	shoot_audio.play()
 
@@ -619,15 +630,11 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_
 			amount = amount * (1.0 - clampf(dr, 0.0, 1.0))
 	health -= amount
 	_flash_hit()
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		LobbyManager.notify_minion_hit.rpc(_minion_id)
+	BridgeClient.send("minion_hit_visual", {"minion_id": _minion_id})
 	if health <= 0.0:
 		_die()
-		var awarding_team: int = _killer_team if _killer_team >= 0 else 0
-		var pts: int = (kill_points * 2) if _killer_team == -1 else kill_points
-		TeamData.add_points(awarding_team, pts)
-		if multiplayer.is_server():
-			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
+		# Team points are handled server-authoritatively by Python.
+		# Do NOT call TeamData.add_points locally — Python sends team_points updates.
 
 func apply_slow(duration: float, mult: float) -> void:
 	_slow_timer = max(_slow_timer, duration)
@@ -639,8 +646,10 @@ func apply_puppet_state(pos: Vector3, rot: float, hp: float) -> void:
 	if pos.distance_squared_to(_puppet_last_received_pos) > 0.001:
 		_puppet_last_received_pos = pos
 		_puppet_idle_frames = 0
+	# Only die if Python confirms death AND we haven't already started dying.
+	# Use a deferred call to avoid race with minion_died bridge message.
 	if hp <= 0.0 and not _dead:
-		_die()
+		call_deferred("_die")
 
 func _die() -> void:
 	if _dead:
@@ -648,14 +657,15 @@ func _die() -> void:
 	_dead = true
 
 	# s_minion_revive: once-per-wave revival — check before committing death
-	if multiplayer.is_server() or not multiplayer.has_multiplayer_peer():
+	if BridgeClient.is_host():
 		var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
 		if spawner != null:
 			var revive_used: Dictionary = spawner.get("_revive_used") if spawner.get("_revive_used") != null else {}
 			var sup: int = LobbyManager.get_supporter_peer(team)
 			if sup > 0 and SkillTree.get_passive_bonus(sup, "minion_revive") > 0.0 and not revive_used.get(team, false):
+				# Atomically mark as used BEFORE reviving to prevent same-frame double-read
 				revive_used[team] = true
-				spawner.set("_revive_used", revive_used)
+				spawner.set("_revive_used", revive_used.duplicate())
 				health = maxf(1.0, get("max_health") * 0.30)
 				_dead = false
 				return
@@ -669,42 +679,30 @@ func _die() -> void:
 	tween.tween_property(self, "scale", Vector3.ZERO, 0.25)
 	tween.tween_callback(queue_free)
 
-	if multiplayer.is_server():
-		LobbyManager.kill_minion_visuals.rpc(_minion_id)
+	if BridgeClient.is_host():
+		LobbyManager.kill_minion_visuals(_minion_id)
+		# Python is authoritative for XP awards in multiplayer.
+		# Include killer info so Python can award XP and send level_up to the right client.
+		# In singleplayer (not connected), fall back to local award_xp.
+		var award_xp_target: int = -1
+		if _killer_peer_id > 0:
+			award_xp_target = _killer_peer_id
+		else:
+			var sup: int = LobbyManager.get_supporter_peer(_attacker_team)
+			if sup > 0:
+				award_xp_target = sup
+		if award_xp_target > 0 and not BridgeClient.is_connected_to_server():
+			# Singleplayer only: award XP locally (Python handles multiplayer).
+			var xp_amt: int = _xp_with_bonus(award_xp_target, LevelSystem.XP_MINION)
+			LevelSystem.award_xp(award_xp_target, xp_amt)
+		BridgeClient.send("minion_death", {
+			"minion_id": _minion_id,
+			"killer_peer_id": award_xp_target,
+			"bonus_mult": SkillTree.get_passive_bonus(award_xp_target, "minion_xp_bonus") if award_xp_target > 0 else 0.0,
+		})
 		var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
 		if spawner != null:
 			spawner.get("_minion_node_cache").erase(_minion_id)
-		if _killer_peer_id > 0:
-			var xp_amt: int = _xp_with_bonus(_killer_peer_id, LevelSystem.XP_MINION)
-			LevelSystem.award_xp(_killer_peer_id, xp_amt)
-			# ── Minion kill streak: every 5 kills boosts the strongest friendly lane ──
-			var new_streak: int = GameSync.player_minion_kill_streak.get(_killer_peer_id, 0) + 1
-			GameSync.player_minion_kill_streak[_killer_peer_id] = new_streak
-			if new_streak % 5 == 0 and spawner != null and spawner.has_method("boost_lane"):
-				var killer_team: int = GameSync.get_player_team(_killer_peer_id)
-				if killer_team >= 0:
-					var boost_lane_i: int = _find_strongest_friendly_lane(killer_team)
-					spawner.boost_lane(killer_team, boost_lane_i, 1)
-		else:
-			# No player peer fired the killing blow (e.g. a tower or another minion).
-			# Credit the Supporter on the attacking team.
-			var sup: int = LobbyManager.get_supporter_peer(_attacker_team)
-			if sup > 0:
-				LevelSystem.award_xp(sup, LevelSystem.XP_MINION)
-	elif not multiplayer.has_multiplayer_peer():
-		var sp_killer: int = _killer_peer_id if _killer_peer_id > 0 else 1
-		var xp_amt: int = _xp_with_bonus(sp_killer, LevelSystem.XP_MINION)
-		LevelSystem.award_xp(sp_killer, xp_amt)
-		# ── Minion kill streak (singleplayer path) ─────────────────────────────
-		if _killer_peer_id > 0:
-			var new_streak: int = GameSync.player_minion_kill_streak.get(_killer_peer_id, 0) + 1
-			GameSync.player_minion_kill_streak[_killer_peer_id] = new_streak
-			var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
-			if new_streak % 5 == 0 and spawner != null and spawner.has_method("boost_lane"):
-				var killer_team: int = GameSync.get_player_team(_killer_peer_id)
-				if killer_team >= 0:
-					var boost_lane_i: int = _find_strongest_friendly_lane(killer_team)
-					spawner.boost_lane(killer_team, boost_lane_i, 1)
 
 ## Returns XP amount scaled by s_minion_xp passive of the Supporter on the
 ## dead minion's *own* team — killer earns more XP when they've upgraded minions.

@@ -65,7 +65,7 @@ func _process(delta: float) -> void:
 
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(prev_pos, new_pos)
-	query.collision_mask = 0xFFFFFFFB   # all layers except layer 3 (fences / walls)
+	query.collision_mask = 0xFFFFFFF7   # all layers except layer 4 (bit 3 = value 8): fences/torches
 	var result: Dictionary = space.intersect_ray(query)
 
 	if not result.is_empty():

@@ -1,6 +1,6 @@
 [gd_scene load_steps=8 format=3 uid="uid://mortar_tower"]
 
-[ext_resource type="Script" path="res://scripts/towers/MortarTowerAI.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/towers/BallisticTower.gd" id="1"]
 [ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-square-bottom-b.glb" id="2"]
 [ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-square-middle-a.glb" id="3"]
 [ext_resource type="PackedScene" path="res://assets/tower-defense-kit/Models/GLB format/tower-square-top-b.glb" id="4"]
@@ -16,6 +16,12 @@ max_health = 700.0
 attack_range = 50.0
 attack_interval = 3.5
 fire_point_fallback_height = 4.0
+attack_damage = 80.0
+projectile_scene_path = "res://scenes/projectiles/MortarShell.tscn"
+fire_sound_path = "res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_004.ogg"
+source_tag = ""
+pitch_scale_min = 0.88
+pitch_scale_max = 1.0
 model_base = ExtResource("2")
 model_base_scale = Vector3(2.667, 2.667, 2.667)
 model_base_offset = Vector3(0, 0, 0)

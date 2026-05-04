@@ -39,7 +39,7 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 		_request_destroy_tree(pos)
 		return
 
-	var is_server: bool = not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
+	var is_server: bool = BridgeClient.is_host()
 	if is_server:
 		if not _handle_ghost_hit(collider, damage):
 			if CombatUtils.should_damage(collider, shooter_team):

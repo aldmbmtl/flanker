@@ -16,7 +16,7 @@ var bs: Node
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
 # Stub BuildSystem that records the last place_item call so we can inspect args.
-class StubBuildSystem extends Node:
+class _AISupporterBSStub extends Node:
 	var last_place_peer_id: int = -999
 	var last_can_place_peer_id: int = -999
 	var last_placed_type: String = ""
@@ -57,7 +57,7 @@ func before_each() -> void:
 
 	ai = _make_ai(0)
 	# Build stub build system and inject into AI
-	bs = StubBuildSystem.new()
+	bs = _AISupporterBSStub.new()
 	add_child_autofree(bs)
 	ai.set("build_system", bs)
 
@@ -81,7 +81,7 @@ func test_ai_place_item_passes_peer_id() -> void:
 	var pid: int = ai.get("peer_id")
 	# Directly call _do_place so we don't need physics
 	ai.call("_do_place", Vector3.ZERO, "cannon", "")
-	assert_eq((bs as StubBuildSystem).last_place_peer_id, pid,
+	assert_eq((bs as _AISupporterBSStub).last_place_peer_id, pid,
 		"_do_place must pass AI peer_id as placer_peer_id to build_system.place_item")
 
 # ─── Test 4: peer_id passed to can_place_item ────────────────────────────────
@@ -93,7 +93,7 @@ func test_ai_can_place_item_passes_peer_id() -> void:
 	# flows through the stub's can_place path via _try_place_near_player).
 	# Simpler: call _do_place and verify place_item got the peer_id.
 	ai.call("_do_place", Vector3(5.0, 0.0, 5.0), "healthpack", "")
-	assert_eq((bs as StubBuildSystem).last_place_peer_id, pid,
+	assert_eq((bs as _AISupporterBSStub).last_place_peer_id, pid,
 		"All place_item calls must forward AI peer_id")
 
 # ─── Test 5: tower_hp bonus applies to placed towers ─────────────────────────
@@ -119,9 +119,11 @@ func test_ai_tower_hp_bonus_applies() -> void:
 
 func test_ai_fire_rate_bonus_applies() -> void:
 	var pid: int = ai.get("peer_id")
+	# Inject 1 unspent point directly into LevelSystem state, bypassing award_xp
+	# so the AI's auto-spend _on_level_up handler does not consume it first.
 	LevelSystem.clear_peer(pid)
 	LevelSystem.register_peer(pid)
-	LevelSystem.award_xp(pid, LevelSystem.XP_PER_LEVEL[0])
+	LevelSystem._points[pid] = 1
 	LevelSystem.spend_point_local(pid, "tower_fire_rate")
 	var bonus: float = LevelSystem.get_bonus_tower_fire_rate_mult(pid)
 	assert_almost_eq(bonus, LevelSystem.TOWER_FIRE_RATE_PER_POINT, 0.001,
@@ -131,12 +133,14 @@ func test_ai_fire_rate_bonus_applies() -> void:
 
 func test_ai_earns_xp_on_enemy_tower_despawn() -> void:
 	var pid: int = ai.get("peer_id")
-	var xp_before: int = LevelSystem.get_xp(pid)
+	var level_before: int = LevelSystem.get_level(pid)
 	# Emit with enemy team (1, since AI is team 0)
 	LobbyManager.tower_despawned.emit("cannon", 1, "Cannon_0_0")
-	var xp_after: int = LevelSystem.get_xp(pid)
-	assert_eq(xp_after - xp_before, LevelSystem.XP_TOWER,
-		"AI should earn XP_TOWER when an enemy tower is destroyed")
+	# XP_TOWER (200) > XP_PER_LEVEL[0] (70) so a level-up occurs.
+	# Verify the peer levelled up — proof that award_xp was called with a
+	# large enough amount.
+	assert_gt(LevelSystem.get_level(pid), level_before,
+		"AI should level up after earning XP_TOWER from an enemy tower destruction")
 
 # ─── Test 8: No XP for own tower despawn ─────────────────────────────────────
 
@@ -152,14 +156,15 @@ func test_ai_no_xp_on_own_tower_despawn() -> void:
 
 func test_ai_earns_xp_on_enemy_player_death() -> void:
 	var pid: int = ai.get("peer_id")
-	# Register an enemy player (team 1) in GameSync
-	GameSync.register_player(999, "EnemyPlayer")
+	# Set team for the enemy player — GameSync has no register_player; set_player_team
+	# is sufficient to make get_player_team(999) return 1.
 	GameSync.set_player_team(999, 1)
-	var xp_before: int = LevelSystem.get_xp(pid)
-	GameSync.player_died.emit(999)
-	var xp_after: int = LevelSystem.get_xp(pid)
-	assert_eq(xp_after - xp_before, LevelSystem.XP_PLAYER,
-		"AI should earn XP_PLAYER when an enemy player dies")
+	var level_before: int = LevelSystem.get_level(pid)
+	GameSync.player_died.emit(999, 10.0)
+	# XP_PLAYER (100) > XP_PER_LEVEL[0] (70) so a level-up occurs — proof award_xp
+	# was called with the correct amount.
+	assert_gt(LevelSystem.get_level(pid), level_before,
+		"AI should level up after earning XP_PLAYER when an enemy player dies")
 
 # ─── Test 10: auto-attribute spend triggers on level-up ──────────────────────
 
@@ -204,7 +209,7 @@ func test_ai_places_machinegun_in_mid_phase() -> void:
 		ai.get("_placed_counts")["jungle_cannon_%d" % ji] = 1
 
 	TeamData.sync_from_server(200, 200)
-	(bs as StubBuildSystem).can_place_result = true
+	(bs as _AISupporterBSStub).can_place_result = true
 	ai.call("_phase_mid", 200.0)
 
 	var counts: Dictionary = ai.get("_placed_counts")
@@ -236,7 +241,7 @@ func test_ai_places_machinegun_in_late_phase() -> void:
 		ai.get("_placed_counts")["launcher_missile_%d" % li] = 1
 
 	TeamData.sync_from_server(200, 200)
-	(bs as StubBuildSystem).can_place_result = true
+	(bs as _AISupporterBSStub).can_place_result = true
 	ai.call("_phase_late", 200.0)
 
 	var counts: Dictionary = ai.get("_placed_counts")

@@ -48,6 +48,8 @@ func _ready() -> void:
 		_loaded_scenes[key] = load(path)
 	# Retroactive fire-rate update when a Supporter spends into tower_fire_rate
 	LevelSystem.attribute_spent.connect(_on_attribute_spent)
+	# Subscribe to Python server responses for tower events
+	BridgeClient.message_received.connect(_on_bridge_message)
 
 # ── Placement validation ──────────────────────────────────────────────────────
 
@@ -55,20 +57,10 @@ func get_item_cost(item_type: String, subtype: String) -> int:
 	var base: int
 	if item_type == "weapon":
 		base = WEAPON_COSTS.get(subtype, 0)
-		# f_explosive: rocket launcher costs 30 less for an unlocked Fighter
-		if subtype == "rocket_launcher":
-			base = max(0, base - 30) if _any_team_has_explosive() else base
 	else:
 		var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
 		base = def.get("cost", 0)
 	return base
-
-func _any_team_has_explosive() -> bool:
-	# Check if any registered peer has f_explosive unlocked
-	for peer_id in SkillTree.get_all_peers():
-		if SkillTree.is_unlocked(peer_id, "f_explosive"):
-			return true
-	return false
 
 func can_place_item(world_pos: Vector3, team: int, item_type: String, placer_peer_id: int = -1) -> bool:
 	var def: Dictionary = PLACEABLE_DEFS.get(item_type, {})
@@ -128,14 +120,21 @@ func place_item(world_pos: Vector3, team: int, item_type: String, subtype: Strin
 	world_pos.x = snappedf(world_pos.x, 2.0)
 	world_pos.z = snappedf(world_pos.z, 2.0)
 
-	if not can_place_item(world_pos, team, item_type, placer_peer_id):
-		return ""
+	# Mirror the range_mult used in can_place_item so Python applies the same
+	# effective spacing as the client-side preview.
+	var spacing_mult: float = 1.0 - LevelSystem.get_bonus_placement_range_mult(placer_peer_id)
 
-	var cost: int = get_item_cost(item_type, subtype)
-	if not TeamData.spend_points(team, cost):
-		return ""
-
-	return spawn_item_local(world_pos, team, item_type, subtype, "", placer_peer_id)
+	# Relay to Python authority layer.  The response arrives asynchronously via
+	# _on_bridge_message("tower_spawned"/"placement_rejected"/"team_points").
+	BridgeClient.send("place_tower", {
+		"pos": [world_pos.x, world_pos.y, world_pos.z],
+		"team": team,
+		"tower_type": item_type,
+		"subtype": subtype,
+		"placer_peer_id": placer_peer_id,
+		"spacing_mult": spacing_mult,
+	})
+	return ""
 
 # Legacy shim
 func place_tower(world_pos: Vector3, team: int) -> bool:
@@ -168,26 +167,31 @@ func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype:
 	if forced_name != "":
 		node.name = forced_name
 	elif item_type in ["healthpack", "weapon"]:
-		var sx: int = int(world_pos.x)
-		var sz: int = int(world_pos.z)
+		var sx: int = snappedf(world_pos.x, 1.0)
+		var sz: int = snappedf(world_pos.z, 1.0)
 		node.name = "Drop_%s_%d_%d" % [item_type, sx, sz]
 	elif item_type in ["cannon", "mortar", "slow", "machinegun"]:
-		var sx: int = int(world_pos.x)
-		var sz: int = int(world_pos.z)
+		var sx: int = snappedf(world_pos.x, 1.0)
+		var sz: int = snappedf(world_pos.z, 1.0)
 		node.name = "Tower_%s_%d_%d" % [item_type, sx, sz]
 	elif item_type == "healstation":
-		var sx: int = int(world_pos.x)
-		var sz: int = int(world_pos.z)
+		var sx: int = snappedf(world_pos.x, 1.0)
+		var sz: int = snappedf(world_pos.z, 1.0)
 		node.name = "HealStation_%d_%d" % [sx, sz]
 	elif LauncherDefs.is_launcher_type(item_type):
-		var sx: int = int(world_pos.x)
-		var sz: int = int(world_pos.z)
+		var sx: int = snappedf(world_pos.x, 1.0)
+		var sz: int = snappedf(world_pos.z, 1.0)
 		node.name = "Launcher_%s_%d_%d" % [item_type.replace("launcher_", ""), sx, sz]
 
 	var main: Node = get_tree().root.get_node("Main")
 	main.add_child(node)
 	# Set position AFTER add_child — global_position requires the node to be in the tree
 	node.global_position = world_pos
+
+	# Register drops with the Python authority so pickups can be validated.
+	var def_entry: Dictionary = PLACEABLE_DEFS.get(item_type, {})
+	if not def_entry.get("is_tower", false) and BridgeClient.is_connected_to_server():
+		BridgeClient.send("register_drop", {"name": str(node.name), "team": team})
 
 	# Type-specific post-add setup
 	match item_type:
@@ -227,7 +231,9 @@ func spawn_item_local(world_pos: Vector3, team: int, item_type: String, subtype:
 						best_dist = d
 						best_lane = lane_i
 				node.set("_lane_index", best_lane)
-			# Apply Supporter attribute and skill tree tower HP bonuses (server/singleplayer only)
+		# Apply Supporter attribute and skill tree tower HP bonuses (server/singleplayer only).
+		# Skip on non-host clients — they receive state from Python, not local calculation.
+		if BridgeClient.is_host() or not BridgeClient.is_connected_to_server():
 			_apply_tower_hp_bonuses(node, item_type, placer_peer_id)
 			# Apply Supporter attribute fire rate bonus
 			_apply_tower_fire_rate_bonus(node, placer_peer_id)
@@ -269,6 +275,45 @@ func _apply_tower_fire_rate_bonus(node: Node, placer_peer_id: int) -> void:
 	if interval <= 0.0:
 		return  # passive tower — no attack timer
 	node.set("attack_interval", interval * (1.0 - mult))
+
+# ── Python bridge message handler ────────────────────────────────────────────
+
+func _on_bridge_message(msg_type: String, payload: Dictionary) -> void:
+	match msg_type:
+		"tower_spawned":
+			_handle_tower_spawned(payload)
+		"tower_despawned":
+			_handle_tower_despawned(payload)
+		"placement_rejected":
+			push_warning("[BuildSystem] placement rejected by server: reason=%s" % payload.get("reason", "unknown"))
+		"team_points":
+			TeamData.sync_from_server(payload.get("blue", 0), payload.get("red", 0))
+
+
+func _handle_tower_spawned(payload: Dictionary) -> void:
+	var item_type: String = payload.get("tower_type", "")
+	var team: int = payload.get("team", 0)
+	var raw_pos = payload.get("pos", [0.0, 0.0, 0.0])
+	var world_pos := Vector3(float(raw_pos[0]), float(raw_pos[1]), float(raw_pos[2]))
+	var forced_name: String = payload.get("name", "")
+	spawn_item_local(world_pos, team, item_type, "", forced_name)
+	LobbyManager.item_spawned.emit(item_type, team)
+
+
+func _handle_tower_despawned(payload: Dictionary) -> void:
+	var tower_name: String = payload.get("name", "")
+	if tower_name == "":
+		return
+	var main: Node = get_tree().root.get_node_or_null("Main")
+	if main == null:
+		return
+	var node: Node = main.get_node_or_null(tower_name)
+	if node != null:
+		node.queue_free()
+	var item_type: String = payload.get("tower_type", "")
+	var team: int = payload.get("team", 0)
+	LobbyManager.tower_despawned.emit(item_type, team, tower_name)
+
 
 # Called when any peer spends an attribute point.
 # When a Supporter spends into tower_fire_rate, retroactively update all towers they placed.

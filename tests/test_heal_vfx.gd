@@ -200,17 +200,5 @@ func test_heal_does_not_trigger_damage_flash_signal() -> void:
 		"GameSync HP after heal must exceed pre-heal value — confirms no damage path taken")
 	GameSync.reset()
 
-func test_gamesync_stale_hp_regression() -> void:
-	## Regression test: without the fix, GameSync.player_healths[peer] stays at
-	## the pre-heal value, so a subsequent damage_player() sees wrong base HP.
-	## With fix: after heal(30) from 60 → 90, damage_player(20) leaves HP at 70.
-	GameSync.reset()
-	var player := _make_real_fps(HEAL_SYNC_PEER)
-	GameSync.set_player_health(HEAL_SYNC_PEER, 60.0)
-	player.hp = 60.0
-	player.heal(30.0)  # should update GameSync to 90.0
-	# Now apply damage through GameSync (server-authoritative path)
-	GameSync.damage_player(HEAL_SYNC_PEER, 20.0, 1)
-	assert_almost_eq(GameSync.get_player_health(HEAL_SYNC_PEER), 70.0, 0.01,
-		"damage after heal must use healed HP as base (regression: stale 60 → 40)")
-	GameSync.reset()
+# test_gamesync_stale_hp_regression removed — damage_player() is now
+# Python-authoritative and no longer exists in GameSync.gd.

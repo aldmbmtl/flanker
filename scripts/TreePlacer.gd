@@ -336,7 +336,7 @@ func _commit_multimeshes(tree_scenes: Array[PackedScene]) -> void:
 			var mmi := MultiMeshInstance3D.new()
 			mmi.multimesh = mm
 			# tree_shadow_distance: 0=Off, 1=Close (near band only), 2=Far (both bands)
-			var tsd: int = GraphicsSettings.tree_shadow_distance
+			var tsd: int = ClientSettings.tree_shadow_distance
 			var cast: int = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			if tsd == 1 and band == 0:
 				cast = GeometryInstance3D.SHADOW_CASTING_SETTING_ON

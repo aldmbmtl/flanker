@@ -42,6 +42,7 @@ func _make_fake_player(peer_id: int) -> FakePlayer:
 # ── Setup / teardown ──────────────────────────────────────────────────────────
 
 func before_each() -> void:
+	BridgeClient._local_peer_id = 1
 	SkillTree.clear_all()
 	# Remove any Main node from prior tests to start clean.
 	var old_main: Node = get_tree().root.get_node_or_null("Main")
@@ -50,6 +51,7 @@ func before_each() -> void:
 	_main = null
 
 func after_each() -> void:
+	BridgeClient._local_peer_id = 0
 	SkillTree.clear_all()
 	if _main != null and is_instance_valid(_main):
 		_main.free()

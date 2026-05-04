@@ -89,34 +89,67 @@ func test_both_teams_start_at_known_state_after_reset() -> void:
 	assert_eq(TeamData.get_points(0), 0)
 	assert_eq(TeamData.get_points(1), 0)
 
-# ── passive income ────────────────────────────────────────────────────────────
+# ── passive_income ────────────────────────────────────────────────────────────
 
-func test_add_passive_income_increases_counter() -> void:
-	TeamData.add_passive_income(0, 1)
-	TeamData.add_passive_income(0, 1)
-	assert_eq(TeamData.get_passive_income(0), 2, "two adds → rate of 2")
+func test_get_passive_income_returns_zero_by_default() -> void:
+	assert_eq(TeamData.get_passive_income(0), 0,
+		"Team 0 passive income must start at 0")
+	assert_eq(TeamData.get_passive_income(1), 0,
+		"Team 1 passive income must start at 0")
 
-func test_payout_passive_income_resets_and_adds_points() -> void:
-	TeamData.sync_from_server(50, 50)
-	TeamData.add_passive_income(0, 3)
-	TeamData.payout_passive_income(0)
-	assert_eq(TeamData.get_points(0), 53, "3 income paid out to team points")
-	assert_eq(TeamData.get_passive_income(0), 0, "rate resets to 0 after payout")
+func test_get_passive_income_out_of_range_returns_zero() -> void:
+	assert_eq(TeamData.get_passive_income(99), 0,
+		"Out-of-range team must return 0")
+	assert_eq(TeamData.get_passive_income(-1), 0,
+		"Negative team must return 0")
 
-func test_payout_returns_zero_when_empty() -> void:
-	TeamData.sync_from_server(40, 40)
-	TeamData.payout_passive_income(0)
-	assert_eq(TeamData.get_points(0), 40, "no change when income rate is 0")
+func test_add_passive_income_is_noop() -> void:
+	# add_passive_income is server-authoritative — client calls are ignored.
+	TeamData.add_passive_income(0, 99)
+	TeamData.add_passive_income(1, 99)
+	assert_eq(TeamData.get_passive_income(0), 0,
+		"add_passive_income must be a no-op on the client")
+	assert_eq(TeamData.get_passive_income(1), 0,
+		"add_passive_income must be a no-op on the client")
 
-func test_passive_income_independent_per_team() -> void:
-	TeamData.add_passive_income(0, 2)
-	TeamData.add_passive_income(1, 5)
-	assert_eq(TeamData.get_passive_income(0), 2, "blue rate unaffected by red")
-	assert_eq(TeamData.get_passive_income(1), 5, "red rate unaffected by blue")
+# ── sync_income_from_server ───────────────────────────────────────────────────
 
-func test_passive_income_cleared_on_reset() -> void:
-	TeamData.add_passive_income(0, 4)
-	TeamData.add_passive_income(1, 7)
+func test_sync_income_from_server_sets_both_teams() -> void:
+	TeamData.sync_income_from_server(3, 7)
+	assert_eq(TeamData.get_passive_income(0), 3,
+		"sync_income_from_server must set team 0 income rate")
+	assert_eq(TeamData.get_passive_income(1), 7,
+		"sync_income_from_server must set team 1 income rate")
+
+func test_sync_income_from_server_overwrites_previous() -> void:
+	TeamData.sync_income_from_server(5, 5)
+	TeamData.sync_income_from_server(2, 9)
+	assert_eq(TeamData.get_passive_income(0), 2,
+		"sync_income_from_server must overwrite previous team 0 value")
+	assert_eq(TeamData.get_passive_income(1), 9,
+		"sync_income_from_server must overwrite previous team 1 value")
+
+func test_sync_income_from_server_zero_clears_income() -> void:
+	TeamData.sync_income_from_server(4, 6)
+	TeamData.sync_income_from_server(0, 0)
+	assert_eq(TeamData.get_passive_income(0), 0,
+		"sync_income_from_server(0,0) must zero team 0 income")
+	assert_eq(TeamData.get_passive_income(1), 0,
+		"sync_income_from_server(0,0) must zero team 1 income")
+
+func test_reset_zeroes_passive_income() -> void:
+	TeamData.sync_income_from_server(10, 20)
 	TeamData.reset()
-	assert_eq(TeamData.get_passive_income(0), 0, "blue rate cleared on reset")
-	assert_eq(TeamData.get_passive_income(1), 0, "red rate cleared on reset")
+	assert_eq(TeamData.get_passive_income(0), 0,
+		"reset() must zero team 0 passive income")
+	assert_eq(TeamData.get_passive_income(1), 0,
+		"reset() must zero team 1 passive income")
+
+func test_reset_also_restores_team_points() -> void:
+	TeamData.team_points[0] = 999
+	TeamData.team_points[1] = 999
+	TeamData.reset()
+	assert_eq(TeamData.get_points(0), 75,
+		"reset() must restore team 0 points to 75")
+	assert_eq(TeamData.get_points(1), 75,
+		"reset() must restore team 1 points to 75")

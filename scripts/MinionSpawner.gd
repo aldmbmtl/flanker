@@ -55,7 +55,7 @@ func _ready() -> void:
 	_minion_counter = 0
 
 func _physics_process(_delta: float) -> void:
-	if NetworkManager._peer != null and not multiplayer.is_server():
+	if not BridgeClient.is_host():
 		return
 	_sync_frame += 1
 	if _sync_frame >= SYNC_INTERVAL:
@@ -90,7 +90,7 @@ func _broadcast_minion_states() -> void:
 	var offset: int = 0
 	while offset < total:
 		var end: int = min(offset + SYNC_CHUNK_SIZE, total)
-		LobbyManager.sync_minion_states.rpc(
+		LobbyManager.sync_minion_states(
 			ids.slice(offset, end),
 			positions.slice(offset, end),
 			rotations.slice(offset, end),
@@ -98,68 +98,20 @@ func _broadcast_minion_states() -> void:
 		)
 		offset = end
 
-func _process(delta: float) -> void:
-	if NetworkManager._peer != null and not multiplayer.is_server():
-		return
-	wave_timer += delta
-	# Update countdown label
-	if _main and _main.has_method("update_wave_info"):
-		var next_in := int(WAVE_INTERVAL - wave_timer) + 1
-		_main.update_wave_info(wave_number, next_in)
-		if next_in != _last_synced_next_in:
-			_last_synced_next_in = next_in
-			LobbyManager.sync_wave_info.rpc(wave_number, next_in)
-
-	if wave_timer >= WAVE_INTERVAL:
-		wave_timer = 0.0
-		wave_number += 1
-		_last_synced_next_in = -1
-		# Reset once-per-wave revive flag for both teams
-		_revive_used[0] = false
-		_revive_used[1] = false
-		_launch_wave()
-
-func _launch_wave() -> void:
-	if _main and _main.has_method("show_wave_announcement"):
-		_main.show_wave_announcement(wave_number)
-		LobbyManager.sync_wave_announcement.rpc(wave_number)
-
-	# Pay out passive income accumulated from manual minion sends
-	for team in range(2):
-		TeamData.payout_passive_income(team)
-	LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
-
-	var base_count: int = min(wave_number, MAX_WAVE_SIZE)
-	for lane_i in range(3):
-		for team in range(2):
-			var extra: int = _lane_boosts[team][lane_i]
-			var count: int = base_count + extra
-			# Determine wave composition.
-			# Slots 0-3 = basic, slot 4 = cannon (wave ≥ 5), slot 5 = healer (wave = 6+).
-			# Smaller waves fill from the start of the slot list.
-			var i: int = 0
-			while i < count:
-				var mtype: String
-				if i <= 3:
-					mtype = "basic"
-				elif i == 4:
-					mtype = "cannon"
-				else:
-					mtype = "healer"
-				var delay: float = i * MINION_STAGGER
-				_spawn_minion_delayed(team, lane_i, delay, mtype)
-				i += 1
-
-	# Reset all boosts after the wave launches and broadcast zeroes to all peers
-	_lane_boosts = [[0, 0, 0], [0, 0, 0]]
-	LobbyManager.sync_lane_boosts.rpc([0, 0, 0], [0, 0, 0])
-
-	# 25% chance: inject one free tier-0 ram (beaver) on a random team + lane.
-	# No team-point cost — this is a free random wave event.
-	if randi() % 4 == 0:
-		var rteam: int = randi() % 2
-		var rlane: int  = randi() % 3
-		_spawn_minion(rteam, rlane, "ram_t1")
+## Called by BridgeClient when Python sends a spawn_wave message.
+## Spawns the specified count of minions for the given team+lane+type.
+func _on_bridge_spawn_wave(payload: Dictionary) -> void:
+	var team: int = payload.get("team", 0)
+	var lane_i: int = payload.get("lane", 0)
+	var mtype: String = str(payload.get("minion_type", "basic"))
+	var count: int = payload.get("count", 1)
+	wave_number = payload.get("wave_number", wave_number)
+	# Reset once-per-wave revive flag when wave number advances.
+	_revive_used[0] = false
+	_revive_used[1] = false
+	for i in range(count):
+		var delay: float = i * MINION_STAGGER
+		_spawn_minion_delayed(team, lane_i, delay, mtype)
 
 # ── Lane boost API ────────────────────────────────────────────────────────────
 
@@ -227,9 +179,6 @@ func _spawn_minion(team: int, lane_i: int, mtype: String = "basic") -> void:
 	var minion_id: int = _minion_counter
 	_spawn_at_position(team, spawn_pos, waypts, lane_i, minion_id, mtype)
 
-	if multiplayer.is_server():
-		LobbyManager.spawn_minion_visuals.rpc(team, spawn_pos, waypts, lane_i, minion_id, mtype)
-
 func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i: int, minion_id: int, mtype: String = "basic") -> void:
 	# Pick scene based on minion type.
 	var scene: PackedScene
@@ -273,6 +222,29 @@ func _spawn_at_position(team: int, pos: Vector3, waypts: Array[Vector3], lane_i:
 	get_tree().root.get_node("Main").add_child(minion)
 	minion.setup(team, waypts, lane_i)
 	_minion_node_cache[minion_id] = minion
+
+	# Notify all non-host clients so they can create a puppet node for this minion.
+	# The Python server relays the spawn_visual/minion_spawn message to every peer
+	# except the sender (host), which triggers LobbyManager.spawn_minion_visuals on
+	# each client and calls spawn_for_network to create the puppet before state-sync
+	# updates arrive.
+	if BridgeClient.is_host():
+		var wp_array: Array = []
+		for w: Vector3 in waypts:
+			wp_array.append([w.x, w.y, w.z])
+		BridgeClient.send("spawn_visual", {
+			"visual_type": "minion_spawn",
+			"params": {
+				"team": team,
+				"pos_x": pos.x,
+				"pos_y": pos.y,
+				"pos_z": pos.z,
+				"lane_i": lane_i,
+				"minion_id": minion_id,
+				"mtype": mtype,
+				"waypoints": wp_array,
+			}
+		})
 
 ## Apply stat bonuses from skill tier passives per minion type.
 func _apply_type_bonuses(minion: Node, mtype: String, sup: int) -> void:

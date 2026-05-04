@@ -6,3 +6,7 @@ build/
 *.import
 *.uid
 addons
+.coverage
+__pycache__/
+*.pyc
+logs/

@@ -1,58 +1,58 @@
 # test_player_username.gd
 # Tier 1 — unit tests for the player username feature.
-# Covers: GameSettings save/load round-trip, StartMenu button guard,
+# Covers: ClientSettings save/load round-trip, StartMenu button guard,
 # and name propagation to LobbyManager registration.
 extends GutTest
 
-# ── GameSettings: player_name persistence ─────────────────────────────────────
+# ── ClientSettings: player_name persistence ───────────────────────────────────
 
 func test_game_settings_has_player_name_var() -> void:
-	assert_true("player_name" in GameSettings, "GameSettings should expose player_name")
+	assert_true("player_name" in ClientSettings, "ClientSettings should expose player_name")
 
 func test_player_name_default_is_empty() -> void:
-	var saved: String = GameSettings.player_name
-	GameSettings.player_name = ""
-	assert_eq(GameSettings.player_name, "", "Default player_name should be empty string")
-	GameSettings.player_name = saved
+	var saved: String = ClientSettings.player_name
+	ClientSettings.player_name = ""
+	assert_eq(ClientSettings.player_name, "", "Default player_name should be empty string")
+	ClientSettings.player_name = saved
 
 func test_player_name_can_be_set() -> void:
-	var saved: String = GameSettings.player_name
-	GameSettings.player_name = "Aldric"
-	assert_eq(GameSettings.player_name, "Aldric", "player_name should store assigned value")
-	GameSettings.player_name = saved
+	var saved: String = ClientSettings.player_name
+	ClientSettings.player_name = "Aldric"
+	assert_eq(ClientSettings.player_name, "Aldric", "player_name should store assigned value")
+	ClientSettings.player_name = saved
 
 func test_player_name_save_and_load_round_trip() -> void:
-	var saved: String = GameSettings.player_name
-	GameSettings.player_name = "RoundTripTest"
-	GameSettings.save_settings()
+	var saved: String = ClientSettings.player_name
+	ClientSettings.player_name = "RoundTripTest"
+	ClientSettings.save_settings()
 	# Reset in memory, then reload
-	GameSettings.player_name = ""
-	GameSettings.load_settings()
-	assert_eq(GameSettings.player_name, "RoundTripTest", "Loaded name should match saved name")
+	ClientSettings.player_name = ""
+	ClientSettings.load_settings()
+	assert_eq(ClientSettings.player_name, "RoundTripTest", "Loaded name should match saved name")
 	# Restore original value
-	GameSettings.player_name = saved
-	GameSettings.save_settings()
+	ClientSettings.player_name = saved
+	ClientSettings.save_settings()
 
 func test_player_name_empty_survives_save_load() -> void:
-	var saved: String = GameSettings.player_name
-	GameSettings.player_name = ""
-	GameSettings.save_settings()
-	GameSettings.player_name = "Temp"
-	GameSettings.load_settings()
-	assert_eq(GameSettings.player_name, "", "Empty name should survive save/load round-trip")
-	GameSettings.player_name = saved
-	GameSettings.save_settings()
+	var saved: String = ClientSettings.player_name
+	ClientSettings.player_name = ""
+	ClientSettings.save_settings()
+	ClientSettings.player_name = "Temp"
+	ClientSettings.load_settings()
+	assert_eq(ClientSettings.player_name, "", "Empty name should survive save/load round-trip")
+	ClientSettings.player_name = saved
+	ClientSettings.save_settings()
 
 func test_player_name_max_length_survives_save_load() -> void:
-	var saved: String = GameSettings.player_name
+	var saved: String = ClientSettings.player_name
 	var long_name: String = "ABCDEFGHIJKLMNOPQRSTUVWX"  # 24 chars
-	GameSettings.player_name = long_name
-	GameSettings.save_settings()
-	GameSettings.player_name = ""
-	GameSettings.load_settings()
-	assert_eq(GameSettings.player_name, long_name, "24-char name should survive save/load")
-	GameSettings.player_name = saved
-	GameSettings.save_settings()
+	ClientSettings.player_name = long_name
+	ClientSettings.save_settings()
+	ClientSettings.player_name = ""
+	ClientSettings.load_settings()
+	assert_eq(ClientSettings.player_name, long_name, "24-char name should survive save/load")
+	ClientSettings.player_name = saved
+	ClientSettings.save_settings()
 
 # ── StartMenu: button guard ────────────────────────────────────────────────────
 
@@ -124,12 +124,14 @@ func before_each() -> void:
 	LobbyManager.reset()
 
 func test_register_player_local_stores_provided_name() -> void:
-	LobbyManager.register_player_local(1, "TestPlayer")
+	# register_player_local was removed — Python now owns registration.
+	# Seed the player dict directly to verify name storage contract.
+	LobbyManager.players[1] = {"name": "TestPlayer", "team": 0, "role": -1, "ready": false, "avatar_char": ""}
 	var info: Dictionary = LobbyManager.players.get(1, {})
-	assert_eq(info.get("name", ""), "TestPlayer", "register_player_local should store the name")
+	assert_eq(info.get("name", ""), "TestPlayer", "Player dict should store the name")
 
 func test_register_player_local_name_differs_from_old_default() -> void:
-	LobbyManager.register_player_local(1, "ActualName")
+	LobbyManager.players[1] = {"name": "ActualName", "team": 0, "role": -1, "ready": false, "avatar_char": ""}
 	var info: Dictionary = LobbyManager.players.get(1, {})
-	assert_ne(info.get("name", ""), "Host", "Name should no longer be the hardcoded 'Host' default")
-	assert_ne(info.get("name", ""), "Player", "Name should no longer be the hardcoded 'Player' default")
+	assert_ne(info.get("name", ""), "Host", "Name should not be the hardcoded 'Host' default")
+	assert_ne(info.get("name", ""), "Player", "Name should not be the hardcoded 'Player' default")

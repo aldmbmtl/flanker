@@ -110,7 +110,7 @@ func test_active_used_sets_grey_border() -> void:
 # ── Death / respawn visibility ────────────────────────────────────────────────
 
 func test_bar_fades_out_on_death() -> void:
-	GameSync.player_died.emit(PEER_ID)
+	GameSync.player_died.emit(PEER_ID, 10.0)
 	await wait_seconds(0.5)
 	assert_almost_eq(_bar._root.modulate.a, 0.0, 0.05)
 
@@ -124,7 +124,7 @@ func test_bar_fades_in_on_respawn() -> void:
 	assert_almost_eq(_bar._root.modulate.a, 1.0, 0.05)
 
 func test_death_ignores_other_peer() -> void:
-	GameSync.player_died.emit(PEER_ID + 1)
+	GameSync.player_died.emit(PEER_ID + 1, 10.0)
 	await wait_seconds(0.1)
 	assert_almost_eq(_bar._root.modulate.a, 1.0, 0.01)
 

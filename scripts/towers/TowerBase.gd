@@ -280,17 +280,19 @@ func _set_model_alpha(t: float) -> void:
 # ── Attack loop ───────────────────────────────────────────────────────────────
 
 func _process(delta: float) -> void:
-	if NetworkManager._peer != null and not multiplayer.is_server():
+	if not BridgeClient.is_host():
 		return
-	if _dead or _area == null:
+	if _dead:
 		return
-	# ── Build phase ────────────────────────────────────────────────────────────
+	# ── Build phase (runs even for passive towers with no _area) ───────────────
 	if _build_timer > 0.0:
 		_build_timer -= delta
 		if _build_timer <= 0.0:
 			_build_timer = 0.0
 		return
-	# ── Attack phase ───────────────────────────────────────────────────────────
+	# ── Attack phase (passive towers have no _area — skip) ────────────────────
+	if _area == null:
+		return
 	_attack_timer -= delta
 	if _attack_timer > 0.0:
 		return
@@ -323,32 +325,32 @@ func _find_target() -> Node3D:
 			best = body
 
 	# Direct group scan — catches players whose ghosts haven't entered the Area3D yet
-	if multiplayer.has_multiplayer_peer():
-		for player in get_tree().get_nodes_in_group("players"):
-			if not player.has_method("take_damage"):
-				continue
-			var body_team: int = _get_body_team(player)
-			if body_team < 0 or body_team == team:
-				continue
-			var d: float = global_position.distance_to(player.global_position)
-			if d < best_dist and d <= attack_range and _has_line_of_sight(player):
-				best_dist = d
-				best = player
-		for ghost in get_tree().get_nodes_in_group("remote_players"):
-			var pid: int = ghost.get("peer_id") as int
-			var body_team: int = GameSync.get_player_team(pid)
-			if body_team < 0 or body_team == team:
-				continue
-			var d: float = global_position.distance_to(ghost.global_position)
-			# Use HitBody (StaticBody3D) for LOS so get_rid() is valid;
-			# fall back to skipping LOS check if HitBody is absent.
-			var hit_body: Node3D = ghost.get_node_or_null("HitBody")
-			var los_target: Node3D = hit_body if hit_body != null else null
-			if los_target == null:
-				continue
-			if d < best_dist and d <= attack_range and _has_line_of_sight(los_target):
-				best_dist = d
-				best = ghost
+	for player in get_tree().get_nodes_in_group("players"):
+		if not player.has_method("take_damage"):
+			continue
+		var body_team: int = _get_body_team(player)
+		if body_team < 0 or body_team == team:
+			continue
+		var d: float = global_position.distance_to(player.global_position)
+		if d < best_dist and d <= attack_range and _has_line_of_sight(player):
+			best_dist = d
+			best = player
+	for ghost in get_tree().get_nodes_in_group("remote_players"):
+		var pid: int = ghost.get("peer_id") as int
+		if GameSync.player_dead.get(pid, false):
+			continue
+		var body_team: int = GameSync.get_player_team(pid)
+		if body_team <0 or body_team == team:
+			continue
+		var d: float = global_position.distance_to(ghost.global_position)
+		# Use HitBody (StaticBody3D) for LOS so get_rid() is valid;
+		# fall back to skipping LOS check if HitBody is absent.
+		var hit_body: Node = ghost.get_node_or_null("HitBody")
+		if hit_body == null:
+			continue
+		if d < best_dist and d <= attack_range and _has_line_of_sight(hit_body):
+			best_dist = d
+			best = ghost
 
 	return best
 
@@ -404,11 +406,11 @@ func _do_attack(target: Node3D) -> void:
 
 ## Shared helper for ballistic-arc towers (Cannon, Mortar).
 ## Instantiates proj_scene, sets damage/source/team/spawner, adds to scene root,
-## plays sound, and calls rpc_callable on the server peer.
-## rpc_callable signature: (spawn_pos, aim_pos, dmg, team)
+## plays sound, then relays visual spawn through the bridge.
+## source_tag must be "cannonball" or "mortar" to match BridgeClient visual dispatch.
 func _fire_ballistic(proj_scene: PackedScene, dmg: float, source_tag: String,
 		snd: String, snd_vol: float, pitch_min: float, pitch_max: float,
-		target: Node3D, rpc_callable: Callable) -> void:
+		target: Node3D) -> void:
 	var spawn_pos: Vector3 = get_fire_position()
 	var aim_pos: Vector3 = target.global_position + Vector3(0.0, 0.5, 0.0)
 	var proj: Node3D = proj_scene.instantiate()
@@ -420,8 +422,14 @@ func _fire_ballistic(proj_scene: PackedScene, dmg: float, source_tag: String,
 	proj.position = spawn_pos   # before add_child so _ready() sees origin
 	VfxUtils.get_scene_root(self).add_child(proj)
 	SoundManager.play_3d(snd, spawn_pos, snd_vol, randf_range(pitch_min, pitch_max))
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		rpc_callable.rpc(spawn_pos, aim_pos, dmg, team)
+	BridgeClient.send("fire_projectile", {
+		"visual_type": source_tag,
+		"params": {
+			"pos_x": spawn_pos.x, "pos_y": spawn_pos.y, "pos_z": spawn_pos.z,
+			"target_x": aim_pos.x, "target_y": aim_pos.y, "target_z": aim_pos.z,
+			"damage": dmg, "team": team,
+		},
+	})
 
 ## Called by _process after _turret_pivot.look_at() when the pivot actually moved.
 ## Override in subclasses that need to broadcast the new yaw to remote peers.
@@ -454,13 +462,14 @@ func take_damage(amount: float, _source: String, source_team: int = -1, shooter_
 		return
 	if source_team == team:
 		return   # friendly fire — ignore
-	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+	if not BridgeClient.is_host():
 		return   # clients never apply damage; server is authoritative
 	_killer_peer_id = shooter_peer_id
 	_health -= amount
+	# Only flash hit locally — Python echo will NOT re-flash on host
 	_flash_hit()
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		LobbyManager.notify_tower_hit.rpc(name)
+	# Send hit visual to non-host clients only (host already flashed)
+	BridgeClient.send("tower_hit_visual", {"name": str(name), "health": _health, "host_only": false})
 	if _health <= 0.0:
 		_die()
 
@@ -469,33 +478,28 @@ func _die() -> void:
 		return
 	_dead = true
 
-	# XP award (server-authoritative)
+	# XP award (server-authoritative) — only on host, only if Python is connected
 	var xp: int = xp_on_death if xp_on_death > 0 else LevelSystem.XP_TOWER
-	if _killer_peer_id > 0:
-		LevelSystem.award_xp(_killer_peer_id, xp)
-	else:
-		# No known killer — award to local player (peer id 1 in SP, no-op in MP)
-		LevelSystem.award_xp(1, xp)
+	if BridgeClient.is_host():
+		if _killer_peer_id > 0:
+			if not BridgeClient.is_connected_to_server():
+				# Singleplayer: award XP locally
+				LevelSystem.award_xp(_killer_peer_id, xp)
+			else:
+				# Multiplayer: let Python handle XP authoritatively
+				BridgeClient.send("award_xp", {"peer_id": _killer_peer_id, "amount": xp})
+		# Note: when _killer_peer_id <= 0, no XP is awarded (consistent with minion death)
 
-	# ── Tower-kill streak: send free ram minion(s) to the killer's team ──────
-	# Only runs server/singleplayer; only when a player landed the killing blow.
-	if _killer_peer_id > 0 and (multiplayer.is_server() or not multiplayer.has_multiplayer_peer()):
-		var killer_team: int = GameSync.get_player_team(_killer_peer_id)
-		if killer_team >= 0 and _lane_index >= 0:
-			var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
-			if spawner != null and spawner.has_method("spawn_free_ram"):
-				# Increment tower kill streak
-				var streak: int = GameSync.player_tower_kill_streak.get(_killer_peer_id, 0) + 1
-				GameSync.player_tower_kill_streak[_killer_peer_id] = streak
-				# tier: 0 at kill 1, 1 at kill 2, 2 at kill 3+
-				var ram_tier: int = mini(streak - 1, 2)
-				# ram count: 1 for kills 1-3, then +1 per kill beyond 3
-				var ram_count: int = 1 if streak <= 3 else (streak - 2)
-				for _i in ram_count:
-					spawner.spawn_free_ram(killer_team, ram_tier, _lane_index)
-
-	# Broadcast despawn to all peers (call_local — runs locally in SP too)
-	LobbyManager.despawn_tower.rpc(name)
+	# Python broadcasts tower_despawned which BridgeClient handles by calling
+	# LobbyManager.despawn_tower locally — no local despawn needed here.
+	# Add a fallback timer to queue_free if bridge never responds.
+	BridgeClient.send("tower_destroyed", {"name": str(name), "killer_peer_id": _killer_peer_id})
+	# Fallback: if bridge doesn't respond within 5s, free the node anyway
+	get_tree().create_timer(5.0).timeout.connect(func() -> void:
+		if is_instance_valid(self) and not is_queued_for_deletion():
+			printerr("[TowerBase] %s: bridge did not confirm despawn, freeing anyway" % name)
+			queue_free()
+	)
 
 # ── Hit flash ─────────────────────────────────────────────────────────────────
 

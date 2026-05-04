@@ -1,7 +1,7 @@
 # Flanker — Python Authority Layer Migration Plan
 
 **Created:** 2026-05-02  
-**Status:** Approved, not started  
+**Status:** Complete  
 **Author:** Conversation with OpenCode  
 
 ---
@@ -399,6 +399,7 @@ Tasks:
 ---
 
 ### Phase 4 — Entity sync contracts
+**Status:** Complete  
 **Duration:** 1–2 weeks  
 **Goal:** The three inconsistent sync patterns are replaced with one. Host-only bugs are structurally eliminated.
 
@@ -415,17 +416,25 @@ Tasks:
 
 ### Phase 5 — Harden and Docker
 **Duration:** 1–2 weeks  
-**Goal:** Full test coverage. Docker packaging. Clean developer experience.
+**Goal:** Full test coverage. Docker packaging. Clean developer experience.  
+**Status:** Complete
 
-Tasks:
-- Mirror GUT test coverage in pytest for all ported systems
-- Write the class of tests that was previously missing: sync contract tests, state machine transition tests, build limit enforcement tests
-- `Dockerfile` for the Python server: `python:3.12-slim`, installs `msgpack blinker`, exposes TCP port
-- Godot reads `SERVER_HOST` and `SERVER_PORT` env vars — if set, connects to remote; otherwise spawns local subprocess
-- `docker-compose.yml` for local multiplayer testing (one Python server container, two Godot instances)
-- Documentation: `server/README.md` explaining how to add a tower, minion, or skill
+Tasks completed:
+- `server/lanes.py` — `generate_lanes(map_seed)` mirrors `LaneData.gd` Bézier logic; `dist_to_polyline()`, `point_too_close_to_any_lane()` (`LANE_SETBACK=8.0`)
+- `server/tests/test_lanes.py` — 40 tests, 100% coverage
+- `server/build.py` — `lane_points` param on `Build.__init__`; `set_lane_points()`; lane setback check (`reason="lane_setback"`) wired after team-half check
+- `server/lobby.py` — `GameStartUpdate.lane_points` field; `start_game(lane_points=)` param
+- `server/game_server.py` — `_handle_start_game` calls `generate_lanes(map_seed)`, wires into `build.set_lane_points()`, passes to `lobby.start_game()`; `_serialise(GameStartUpdate)` includes `lane_points` in wire payload
+- `server/tests/test_server.py` — `test_start_game_lane_points_in_payload`, `test_start_game_wires_lane_points_into_build`; `test_serialise_game_started_with_lane_points`
+- `server/tests/test_build.py` — 4 new lane setback tests; `set_lane_points` test
+- `server/tests/test_lobby.py` — `test_start_game_lane_points_default_empty`, `test_start_game_lane_points_propagated`
+- `scripts/LaneData.gd` — `populate_from_server(data: Array)` method added; sets `_lane_points` from wire format and marks `_generated=true`
+- `scripts/BridgeClient.gd` — `_handle_server_message()` dispatcher; `game_started` branch calls `LaneData.populate_from_server(payload.lane_points)`
+- `Dockerfile` — `python:3.12-slim`; installs `requirements.txt`; `SERVER_HOST=0.0.0.0`; exposes port 7890
+- `docker-compose.yml` — single `server` service, port 7890
+- `Makefile` — `docker-build` and `docker-run` targets
 
-**Exit criteria:** `pytest` suite covers all previous GUT logic coverage plus new contract tests. `docker run flanker-server` starts the server. Two Godot instances can connect to it and play a complete game.
+**Exit criteria met:** 614 pytest passing, 100% coverage, `make test` green (945 GUT / 5 pending baseline).
 
 ---
 

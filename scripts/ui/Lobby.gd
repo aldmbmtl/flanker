@@ -11,6 +11,7 @@ var _player_count_label: Label
 var _seed_label: Label
 var _ready_btn: Button
 var _start_btn: Button
+var _actions_bar: HBoxContainer  # stored so host button can be injected after lobby_state arrives
 
 # Settings overlay (host only)
 var _settings_overlay: Control
@@ -27,13 +28,12 @@ const TITLE_COLOR  := Color(1.0, 0.35, 0.1, 1.0)
 const LABEL_COLOR  := Color(0.55, 0.45, 0.35, 1.0)
 
 func _ready() -> void:
-	_my_peer_id = multiplayer.get_unique_id()
-	_is_host = NetworkManager.is_host()
+	_my_peer_id = BridgeClient.get_peer_id()
+	_is_host = BridgeClient.is_host()
 
 	_build_ui()
 
 	LobbyManager.lobby_updated.connect(_on_lobby_updated)
-	LobbyManager.game_start_requested.connect(_on_game_start_requested)
 
 	call_deferred("_on_lobby_updated")
 
@@ -151,6 +151,7 @@ func _build_ui() -> void:
 	actions.alignment = BoxContainer.ALIGNMENT_CENTER
 	actions.add_theme_constant_override("separation", 12)
 	vbox.add_child(actions)
+	_actions_bar = actions
 
 	_ready_btn = Button.new()
 	_ready_btn.text = "READY"
@@ -178,10 +179,7 @@ func _build_ui() -> void:
 	switch_btn.pressed.connect(func() -> void:
 		var current_team: int = LobbyManager.players.get(_my_peer_id, {}).get("team", 0)
 		var new_team: int = 1 - current_team
-		if _is_host:
-			LobbyManager.set_team(new_team)
-		else:
-			LobbyManager.set_team.rpc_id(1, new_team)
+		BridgeClient.send("set_team", {"team": new_team})
 	)
 	actions.add_child(switch_btn)
 
@@ -201,6 +199,26 @@ func _build_ui() -> void:
 	vbox.add_child(_status_label)
 
 func _on_lobby_updated() -> void:
+	# Re-read peer identity on every update — the first lobby_state from Python
+	# assigns our peer_id and host flag (BridgeClient._local_peer_id starts at 0).
+	if BridgeClient.get_peer_id() != 0:
+		_my_peer_id = BridgeClient.get_peer_id()
+		_is_host = BridgeClient.is_host()
+	# If we just learned we are the host and the start button hasn't been built
+	# yet (because _build_ui() ran before the first lobby_state arrived), create it now.
+	if _is_host and _start_btn == null and _actions_bar != null:
+		var ui_theme: Theme = load("res://assets/ui_theme.tres")
+		_start_btn = Button.new()
+		_start_btn.text = "START WAR"
+		_start_btn.custom_minimum_size = Vector2(160, 50)
+		_start_btn.theme = ui_theme
+		_start_btn.pressed.connect(_on_start_pressed)
+		_actions_bar.add_child(_start_btn)
+		# Move to front so it appears before the Ready/Switch/Leave buttons
+		_actions_bar.move_child(_start_btn, 0)
+		if _settings_overlay == null:
+			_settings_overlay = _build_settings_overlay(ui_theme)
+			add_child(_settings_overlay)
 	_refresh_player_list()
 	_update_my_status()
 	_check_can_start()
@@ -238,7 +256,7 @@ func _make_player_entry(id: int, info: Dictionary, ui_theme: Theme) -> HBoxConta
 	var row := HBoxContainer.new()
 
 	var name_lbl := Label.new()
-	name_lbl.text = info.name
+	name_lbl.text = info.get("name", "")
 	name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	name_lbl.add_theme_font_size_override("font_size", 15)
@@ -249,11 +267,12 @@ func _make_player_entry(id: int, info: Dictionary, ui_theme: Theme) -> HBoxConta
 	row.add_child(name_lbl)
 
 	var ready_lbl := Label.new()
-	ready_lbl.text = "READY" if info.ready else "—"
+	var is_ready: bool = info.get("ready", false)
+	ready_lbl.text = "READY" if is_ready else "—"
 	ready_lbl.custom_minimum_size.x = 48.0
 	ready_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ready_lbl.add_theme_font_size_override("font_size", 12)
-	if info.ready:
+	if is_ready:
 		ready_lbl.add_theme_color_override("font_color", Color(0.3, 1.0, 0.3, 1.0))
 	else:
 		ready_lbl.add_theme_color_override("font_color", Color(0.35, 0.30, 0.25, 1.0))
@@ -274,7 +293,8 @@ func _update_my_status() -> void:
 		_status_label.text = "Connecting..."
 		return
 
-	_my_ready = info.ready
+	_my_ready = info.get("ready", false)
+	print("[Lobby] _update_my_status: peer=", _my_peer_id, " ready=", _my_ready)
 
 	if _my_ready:
 		_status_label.text = "You are ready."
@@ -423,13 +443,11 @@ func _on_settings_confirmed() -> void:
 	else:
 		map_seed = randi_range(1, 2147483647)
 	var chosen_time: int = TIME_VALUES[_settings_time_idx]
-	LobbyManager.start_game("res://scenes/Main.tscn", map_seed, chosen_time)
+	BridgeClient.send("start_game", {"seed": map_seed, "time_seed": chosen_time})
 
 func _on_ready_pressed() -> void:
-	if _is_host:
-		LobbyManager.set_ready(not _my_ready)
-	else:
-		LobbyManager.set_ready.rpc_id(1, not _my_ready)
+	print("[Lobby] _on_ready_pressed: sending set_ready=", not _my_ready, " connected=", BridgeClient.is_connected_to_server())
+	BridgeClient.send("set_ready", {"ready": not _my_ready})
 
 func _on_start_pressed() -> void:
 	if not _is_host:
@@ -438,10 +456,7 @@ func _on_start_pressed() -> void:
 	_settings_select_time(0)
 	_settings_overlay.visible = true
 
-func _on_game_start_requested() -> void:
-	queue_free()
-
 func _on_leave_pressed() -> void:
-	NetworkManager.close_connection()
+	BridgeClient.send("player_left", {})
 	queue_free()
 	get_tree().change_scene_to_file("res://scenes/ui/StartMenu.tscn")

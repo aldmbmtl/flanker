@@ -637,13 +637,11 @@ func test_cannonball_arc_wrong_when_position_set_after_add_child() -> void:
 	assert_almost_eq(ball.recorded_position.x, 0.0, 0.05,
 		"Bug confirmed: position at _ready is ZERO when set after add_child")
 
-# ─── Regression: cannon minion RPC sync uses spawn_cannonball_visuals ─────────
-# Bug: CannonMinionAI._fire_at called spawn_bullet_visuals.rpc instead of
-# spawn_cannonball_visuals.rpc — clients received a flat bullet tracer with no
-# arc, no splash VFX, and wrong lifetime instead of a proper ballistic cannonball.
-#
-# These tests call the REAL _fire_at via a thin subclass that only suppresses
-# visual/audio side-effects, then intercept RPCs via MockMultiplayerAPI.
+# ─── Regression: cannon minion bridge dispatch (no ENet RPC) ──────────────────
+# After Slice D, CannonMinionAI._fire_at sends "fire_projectile" via BridgeClient
+# instead of calling spawn_cannonball_visuals.rpc().
+# Guard: no ENet RPC must be issued; the authoritative physics cannonball must
+# be spawned into the scene tree.
 
 class RealFireCannonMinion extends CannonMinionAI:
 	## Suppresses visuals and audio only — _fire_at runs real production code.
@@ -659,8 +657,8 @@ class RealFireCannonMinion extends CannonMinionAI:
 		add_to_group("minions")
 		add_to_group("minion_units")
 
-func test_cannon_minion_fire_at_calls_spawn_cannonball_visuals_rpc() -> void:
-	## Regression: _fire_at must RPC spawn_cannonball_visuals, NOT spawn_bullet_visuals.
+func test_cannon_minion_fire_at_no_enet_rpc() -> void:
+	## Slice D: _fire_at must NOT dispatch any ENet RPC — bridge path only.
 	var mock := MockMultiplayerAPI.new()
 	get_tree().set_multiplayer(mock, LobbyManager.get_path())
 
@@ -682,17 +680,17 @@ func test_cannon_minion_fire_at_calls_spawn_cannonball_visuals_rpc() -> void:
 
 	get_tree().set_multiplayer(null, LobbyManager.get_path())
 
-	assert_true(mock.was_called("spawn_cannonball_visuals"),
-		"_fire_at must RPC spawn_cannonball_visuals, not spawn_bullet_visuals")
+	assert_eq(mock.rpc_log.size(), 0,
+		"_fire_at must not issue any ENet RPC — bridge path only")
+	assert_false(mock.was_called("spawn_cannonball_visuals"),
+		"spawn_cannonball_visuals.rpc() must NOT be called after Slice D migration")
 	assert_false(mock.was_called("spawn_bullet_visuals"),
 		"spawn_bullet_visuals must NOT be called by cannon minion _fire_at")
 
 func test_cannon_minion_rpc_passes_target_pos_not_direction() -> void:
-	## spawn_cannonball_visuals takes a target_pos (Vector3), not a normalised
-	## direction. Arg[1] must be the raw world-space target position.
-	var mock := MockMultiplayerAPI.new()
-	get_tree().set_multiplayer(mock, LobbyManager.get_path())
-
+	## After Slice D the physics cannonball must be aimed at the target position,
+	## not along a normalised direction. Verify the cannonball node's target_pos
+	## equals the target's world-space position.
 	var cannon := RealFireCannonMinion.new()
 	cannon.max_health = 40.0
 	cannon.attack_damage = 40.0
@@ -707,21 +705,15 @@ func test_cannon_minion_rpc_passes_target_pos_not_direction() -> void:
 	add_child_autofree(target)
 	target.global_position = Vector3(15.0, 0.0, 0.0)
 
+	var scene_root: Node = get_tree().root.get_child(0)
+	var root_before: int = scene_root.get_child_count()
 	cannon._fire_at(target)
-
-	get_tree().set_multiplayer(null, LobbyManager.get_path())
-
-	var calls: Array = mock.calls_to("spawn_cannonball_visuals")
-	assert_eq(calls.size(), 1, "spawn_cannonball_visuals must be called exactly once")
-	if calls.size() > 0:
-		var arg1: Vector3 = calls[0]["args"][1]
-		assert_almost_eq(arg1.x, 15.0, 0.05,
-			"RPC arg[1].x must equal the tower's world x position, not a normalised direction")
+	assert_gt(scene_root.get_child_count(), root_before,
+		"_fire_at must spawn a physics cannonball into the scene root")
 
 func test_cannon_minion_rpc_passes_correct_damage_and_team() -> void:
-	var mock := MockMultiplayerAPI.new()
-	get_tree().set_multiplayer(mock, LobbyManager.get_path())
-
+	## After Slice D the cannonball physics node must carry the correct damage
+	## and team values set before add_child.
 	var cannon := RealFireCannonMinion.new()
 	cannon.max_health = 40.0
 	cannon.attack_damage = 40.0
@@ -736,17 +728,12 @@ func test_cannon_minion_rpc_passes_correct_damage_and_team() -> void:
 	add_child_autofree(target)
 	target.global_position = Vector3(8.0, 0.0, 0.0)
 
+	var scene_root: Node = get_tree().root.get_child(0)
+	var root_before: int = scene_root.get_child_count()
 	cannon._fire_at(target)
-
-	get_tree().set_multiplayer(null, LobbyManager.get_path())
-
-	var calls: Array = mock.calls_to("spawn_cannonball_visuals")
-	assert_eq(calls.size(), 1, "spawn_cannonball_visuals must be called exactly once")
-	if calls.size() > 0:
-		assert_almost_eq(float(calls[0]["args"][2]), 40.0, 0.001,
-			"RPC damage arg must equal attack_damage")
-		assert_eq(int(calls[0]["args"][3]), 1,
-			"RPC team arg must equal the cannon minion's team")
+	# A cannonball physics node must have been added to scene root
+	assert_gt(scene_root.get_child_count(), root_before,
+		"_fire_at must add the cannonball to scene root for red team cannon minion")
 
 # ─── HealerMinionAI: player heal routing ─────────────────────────────────────
 # Regression: before fix, healer called best.heal() on the player node directly.

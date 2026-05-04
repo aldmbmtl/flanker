@@ -23,6 +23,7 @@ var _pm:    Node         = null
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 func before_each() -> void:
+	BridgeClient._local_peer_id = 1
 	# Stub world node — puppets are spawned here.
 	_world = Node.new()
 	_world.name = "StubWorld"
@@ -35,6 +36,7 @@ func before_each() -> void:
 	_world.add_child(_pm)  # triggers _ready()
 
 func after_each() -> void:
+	BridgeClient._local_peer_id = 0
 	if is_instance_valid(_pm):
 		_pm.queue_free()
 	if is_instance_valid(_world):
@@ -102,14 +104,14 @@ func test_pm5_player_died_calls_set_alive_false() -> void:
 	_emit_transform(2)
 	var p: Node = _players()[2]
 	p.visible = true
-	GameSync.player_died.emit(2)
+	GameSync.player_died.emit(2, 10.0)
 	assert_true(p.visible,
 		"puppet must stay visible after player_died signal")
 
 # ── PM6: player_died before spawn does not crash ─────────────────────────────
 
 func test_pm6_player_died_before_spawn_no_crash() -> void:
-	GameSync.player_died.emit(2)
+	GameSync.player_died.emit(2, 10.0)
 	assert_false(_players().has(2),
 		"player_died before spawn must not crash and must not create a phantom entry")
 
@@ -154,7 +156,7 @@ func test_pm10_invalid_player_reference_no_crash() -> void:
 	p.queue_free()
 	await wait_frames(2)
 	# Firing player_died with a stale entry must not crash.
-	GameSync.player_died.emit(2)
+	GameSync.player_died.emit(2, 10.0)
 	assert_true(true, "player_died with freed puppet must not crash")
 
 # ── PM11: update_transform called on existing player moves target ─────────────

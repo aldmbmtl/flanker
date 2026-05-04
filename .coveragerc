@@ -1,0 +1,6 @@
+[run]
+source = server
+omit = server/tests/*
+
+[report]
+fail_under = 100

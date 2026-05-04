@@ -27,20 +27,20 @@ func _ready() -> void:
 
 func _load_from_settings() -> void:
 	_loading = true
-	fog_toggle.button_pressed = GraphicsSettings.fog_enabled
-	fog_slider.value = GraphicsSettings.fog_density_multiplier
-	fog_slider.editable = GraphicsSettings.fog_enabled
-	fog_value_label.text = "%.2f×" % GraphicsSettings.fog_density_multiplier
+	fog_toggle.button_pressed = ClientSettings.fog_enabled
+	fog_slider.value = ClientSettings.fog_density_multiplier
+	fog_slider.editable = ClientSettings.fog_enabled
+	fog_value_label.text = "%.2f×" % ClientSettings.fog_density_multiplier
 
-	dof_toggle.button_pressed = GraphicsSettings.dof_enabled
-	dof_slider.value = GraphicsSettings.dof_blur_amount
-	dof_slider.editable = GraphicsSettings.dof_enabled
-	dof_value_label.text = "%.3f" % GraphicsSettings.dof_blur_amount
+	dof_toggle.button_pressed = ClientSettings.dof_enabled
+	dof_slider.value = ClientSettings.dof_blur_amount
+	dof_slider.editable = ClientSettings.dof_enabled
+	dof_value_label.text = "%.3f" % ClientSettings.dof_blur_amount
 
-	shadow_option.selected = GraphicsSettings.shadow_quality
-	tree_shadow_option.selected = GraphicsSettings.tree_shadow_distance
+	shadow_option.selected = ClientSettings.shadow_quality
+	tree_shadow_option.selected = ClientSettings.tree_shadow_distance
 
-	lives_spin.value = GameSettings.lives_per_team
+	lives_spin.value = ClientSettings.lives_per_team
 	_loading = false
 
 
@@ -73,7 +73,7 @@ func _on_dof_slider_value_changed(value: float) -> void:
 
 
 func _apply() -> void:
-	GraphicsSettings.apply(
+	ClientSettings.apply(
 		fog_toggle.button_pressed,
 		fog_slider.value,
 		dof_toggle.button_pressed,
@@ -96,7 +96,7 @@ func _on_tree_shadow_option_item_selected(_index: int) -> void:
 
 
 func _on_restore_defaults_pressed() -> void:
-	GraphicsSettings.restore_defaults()
+	ClientSettings.restore_defaults()
 	_load_from_settings()
 
 
@@ -107,5 +107,5 @@ func _on_back_pressed() -> void:
 func _on_lives_spin_value_changed(value: float) -> void:
 	if _loading:
 		return
-	GameSettings.lives_per_team = int(value)
-	GameSettings.save_settings()
+	ClientSettings.lives_per_team = int(value)
+	ClientSettings.save_settings()

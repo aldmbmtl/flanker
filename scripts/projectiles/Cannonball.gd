@@ -30,7 +30,7 @@ func _on_hit(pos: Vector3, collider: Object) -> void:
 		SoundManager.play_3d(SND_WOOD, pos, 0.0, randf_range(0.9, 1.1))
 		return
 
-	var is_server: bool = not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
+	var is_server: bool = BridgeClient.is_host()
 	if is_server:
 		if not _handle_ghost_hit(collider, damage):
 			if CombatUtils.should_damage(collider, shooter_team):

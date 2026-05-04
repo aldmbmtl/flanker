@@ -240,7 +240,7 @@ func _on_active_used(peer_id: int, node_id: String) -> void:
 			sd.cool_lbl.visible = true
 			sd.sweep.queue_redraw()
 
-func _on_player_died(peer_id: int) -> void:
+func _on_player_died(peer_id: int, _respawn_time: float) -> void:
 	if peer_id != _peer_id:
 		return
 	if _root == null:

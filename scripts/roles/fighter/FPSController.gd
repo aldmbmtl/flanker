@@ -153,7 +153,7 @@ func _ready() -> void:
 	super._ready()
 	_base_cam_y = camera.position.y
 	camera.far = 250.0
-	var my_id := multiplayer.get_unique_id()
+	var my_id := BridgeClient.get_peer_id()
 	is_local = (name == "FPSPlayer_%d" % my_id)
 	peer_id = name.substr(10).to_int() if name.begins_with("FPSPlayer_") else my_id
 
@@ -174,8 +174,6 @@ func _ready() -> void:
 		GameSync.player_died.connect(_on_game_sync_died)
 		GameSync.player_respawned.connect(_on_game_sync_respawned)
 		GameSync.player_health_changed.connect(_on_game_sync_health_changed)
-		if not multiplayer.is_server():
-			LobbyManager.register_player_team.rpc_id(1, peer_id, player_team)
 		# Reconnect level bonuses when attributes are spent
 		LevelSystem.attribute_spent.connect(_on_level_attribute_spent)
 
@@ -186,7 +184,7 @@ func _ready() -> void:
 	call_deferred("_init_slow_trail")
 	if is_local:
 		call_deferred("_apply_dof_settings")
-		GraphicsSettings.settings_changed.connect(_apply_dof_settings)
+		ClientSettings.settings_changed.connect(_apply_dof_settings)
 		# VISIBILITY-CRITICAL: broadcast initial position unconditionally so remote
 		# peers spawn our ghost immediately, even if we stand still after loading in.
 		# The movement-threshold guard in _physics_process suppresses all subsequent
@@ -197,7 +195,7 @@ func _ready() -> void:
 func _apply_dof_settings() -> void:
 	if camera.attributes == null:
 		return
-	camera.attributes.dof_blur_far_enabled = GraphicsSettings.dof_enabled
+	camera.attributes.dof_blur_far_enabled = ClientSettings.dof_enabled
 	camera.attributes.dof_blur_near_enabled = false  # re-controlled per-frame when zoomed
 
 func _broadcast_initial_transform() -> void:
@@ -216,7 +214,7 @@ func _broadcast_initial_transform() -> void:
 	_last_sent_rot = cam_rot
 	print("[FPS] _broadcast_initial_transform peer_id=", peer_id,
 		" pos=", global_position, " rot=", cam_rot)
-	LobbyManager.report_initial_transform.rpc_id(1, global_position, cam_rot, player_team)
+	LobbyManager.report_initial_transform(global_position, cam_rot, player_team)
 
 func _init_slow_trail() -> void:
 	var p := GPUParticles3D.new()
@@ -246,7 +244,7 @@ func _init_slow_trail() -> void:
 	p.position = Vector3(0.0, 0.5, 0.0)
 	add_child(p)
 	_slow_trail = p
-	camera.attributes.dof_blur_amount = GraphicsSettings.dof_blur_amount
+	camera.attributes.dof_blur_amount = ClientSettings.dof_blur_amount
 
 func _on_level_attribute_spent(p_peer_id: int, _attr: String, _new_attrs: Dictionary) -> void:
 	if p_peer_id != peer_id:
@@ -328,15 +326,7 @@ func take_damage(amount: float, _source: String, _killer_team: int = -1, killer_
 		var awarding_team: int = _killer_team if _killer_team >= 0 else 1
 		TeamData.add_points(awarding_team, 50)
 		_update_points_label()
-		# Singleplayer: award XP to killer
-		if killer_peer_id > 0 and not multiplayer.has_multiplayer_peer():
-			LevelSystem.award_xp(killer_peer_id, LevelSystem.XP_PLAYER)
-			# killstreak_heal: heal killer
-			var heal_amt: float = SkillTree.get_passive_bonus(killer_peer_id, "killstreak_heal")
-			if heal_amt > 0.0:
-				var killer_node: Node = get_tree().root.get_node_or_null("Main/FPSPlayer_%d" % killer_peer_id)
-				if killer_node != null and killer_node.has_method("heal"):
-					killer_node.heal(heal_amt)
+		# Python awards XP via level_up message; no local award needed.
 
 func _get_max_hp() -> float:
 	return (DEFAULT_HP * player_health_mult) + LevelSystem.get_bonus_hp(peer_id)
@@ -420,13 +410,11 @@ func respawn(spawn_pos: Vector3) -> void:
 		]
 	_update_health_bar()
 	_update_ammo_hud()
-	_report_ammo_to_server()
 	if reload_bar:
 		reload_bar.visible = false
 	if reload_prompt:
 		reload_prompt.visible = false
 	col_shape.disabled = false
-	$PlayerBody.visible = true
 	# Re-seed position on all clients via the reliable RPC so the respawned
 	# player is visible even if the unreliable per-frame broadcast is dropped.
 	# Uses call_deferred so global_position is committed before broadcasting.
@@ -442,7 +430,6 @@ func pick_up_weapon(w: WeaponData) -> void:
 			_slot_ammo[i][1] = min(reserve + w.reserve_ammo, max_reserve)
 			if i == active_slot:
 				_update_ammo_hud()
-			_report_ammo_to_server()
 			return
 
 	# New weapon — fill slot 1 if empty, else replace active slot
@@ -456,7 +443,6 @@ func pick_up_weapon(w: WeaponData) -> void:
 	_refresh_viewmodel()
 	_update_weapon_label()
 	_update_ammo_hud()
-	_report_ammo_to_server()
 	emit_signal("weapon_changed", active_slot, w)
 
 func _on_death() -> void:
@@ -465,7 +451,10 @@ func _on_death() -> void:
 	active        = false
 	camera.current = false
 	col_shape.disabled = true
-	$PlayerBody.visible = false
+	# Move the local player body underground so it is not visible while dead.
+	# The RTS camera is already taking over; position is restored by respawn().
+	if is_inside_tree():
+		global_position = DEAD_POSITION
 	emit_signal("died")
 
 func _update_health_bar() -> void:
@@ -520,16 +509,6 @@ func _update_ammo_hud() -> void:
 		else:
 			reload_prompt.visible = false
 
-func _report_ammo_to_server() -> void:
-	var w: WeaponData = _current_weapon()
-	var wname: String = w.weapon_name if w != null else ""
-	var total: int = _slot_ammo[0][1] + _slot_ammo[1][1]
-	if multiplayer.has_multiplayer_peer():
-		if multiplayer.is_server():
-			GameSync.set_player_reserve_ammo(peer_id, total, wname)
-		else:
-			LobbyManager.report_ammo.rpc_id(1, total, wname)
-
 func _refresh_viewmodel() -> void:
 	# Remove old model children
 	for child in weapon_model.get_children():
@@ -578,9 +557,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_use_skill_active(0)
 	if event.is_action_pressed("skill_active_2"):
 		_use_skill_active(1)
-	# DEBUG: F9 = force-unlock dash + assign to slot 0 (singleplayer only)
+	# DEBUG: F9 = force-unlock dash + assign to slot 0
 	if OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo:
-		if event.physical_keycode == KEY_F9 and not multiplayer.has_multiplayer_peer():
+		if event.physical_keycode == KEY_F9:
 			var needed: int = 1 - SkillTree.get_skill_pts(peer_id)
 			if needed > 0:
 				SkillTree.debug_grant_pts(peer_id, needed)
@@ -591,10 +570,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _use_skill_active(slot: int) -> void:
 	if not is_local:
 		return
-	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
-		SkillTree.request_use_active.rpc_id(1, slot)
-	else:
-		SkillTree.use_active_local(peer_id, slot)
+	SkillTree.request_use_active(slot)
 
 func _select_slot(slot: int) -> void:
 	if slot == active_slot:
@@ -699,7 +675,7 @@ func _physics_process(delta: float) -> void:
 	# Depth of Field — focus tracks whatever the crosshair is pointing at.
 	# Tune constants DOF_FOCUS_MAX / DOF_FOCUS_LERP / DOF_TRANSITION_* at the top of this file.
 	# dof_blur_amount lives in assets/fps_camera_attributes.tres (overridden by GraphicsSettings).
-	if camera.attributes != null and GraphicsSettings.dof_enabled:
+	if camera.attributes != null and ClientSettings.dof_enabled:
 		var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 		var focus_dist: float = DOF_FOCUS_MAX
 		if space != null:
@@ -859,10 +835,8 @@ func _physics_process(delta: float) -> void:
 			if pos_delta_sq >= _TRANSFORM_POS_THRESHOLD_SQ or rot_delta >= _TRANSFORM_ROT_THRESHOLD:
 				_last_sent_pos = global_position
 				_last_sent_rot = cam_rot
-				# report_player_transform is call_local — works for both host and clients.
-				# Host calls rpc_id(1, ...) which executes locally (call_local), then
-				# broadcast_player_transform.rpc() fans out to all clients exactly once.
-				LobbyManager.report_player_transform.rpc_id(1, global_position, cam_rot, player_team)
+				# Call report_player_transform directly — it sends via BridgeClient, no RPC needed.
+				LobbyManager.report_player_transform(global_position, cam_rot, player_team)
 
 func _set_crouch(crouch: bool) -> void:
 	_crouching = crouch
@@ -913,13 +887,17 @@ func _shoot() -> void:
 		rocket.velocity       = dir * w.bullet_speed
 		VfxUtils.get_scene_root(self).add_child(rocket)
 		rocket.global_position = shoot_from.global_position
-		# Multiplayer: server broadcasts rocket spawn to all clients
-		if multiplayer.has_multiplayer_peer():
-			if multiplayer.is_server():
-				LobbyManager.spawn_bullet_visuals.rpc(shoot_from.global_position, dir, w.damage, player_team, peer_id, "rocket")
-			else:
-				var rocket_hit_info: Dictionary = _local_raycast_hit(shoot_from.global_position, dir)
-				LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, peer_id, rocket_hit_info, "rocket")
+		if BridgeClient.is_connected_to_server():
+			BridgeClient.send("fire_projectile", {
+				"visual_type": "rocket",
+				"params": {
+					"pos": [shoot_from.global_position.x, shoot_from.global_position.y, shoot_from.global_position.z],
+					"dir": [dir.x, dir.y, dir.z],
+					"damage": w.damage * player_damage_mult * _get_level_damage_mult(),
+					"shooter_team": player_team,
+					"shooter_peer_id": peer_id,
+				}
+			})
 	else:
 		var bullet: Node3D = BulletScene.instantiate()
 		bullet.damage        = w.damage * player_damage_mult * _get_level_damage_mult()
@@ -928,18 +906,31 @@ func _shoot() -> void:
 		bullet.set_meta("shooter_peer_id", peer_id)
 		bullet.set("shooter_peer_id", peer_id)
 		bullet.velocity      = dir * w.bullet_speed
+		bullet.spawner_rid   = get_rid()
 		VfxUtils.get_scene_root(self).add_child(bullet)
 		bullet.global_position = shoot_from.global_position
 		var main: Node = get_tree().root.get_node("Main")
 		if main.has_method("_on_bullet_hit_something") and bullet.shooter_peer_id == peer_id:
 			bullet.hit_something.connect(main._on_bullet_hit_something)
-		# Send to host for authoritative validation + broadcast to other clients
-		if multiplayer.has_multiplayer_peer():
-			if multiplayer.is_server():
-				LobbyManager.spawn_bullet_visuals.rpc(shoot_from.global_position, dir, w.damage, player_team, peer_id)
-			else:
-				var hit_info: Dictionary = _local_raycast_hit(shoot_from.global_position, dir)
-				LobbyManager.validate_shot.rpc_id(1, shoot_from.global_position, dir, w.damage * player_damage_mult * _get_level_damage_mult(), player_team, peer_id, hit_info)
+		if BridgeClient.is_connected_to_server():
+			var hit_info: Dictionary = _local_raycast_hit(shoot_from.global_position, dir)
+			BridgeClient.send("fire_projectile", {
+				"visual_type": "bullet",
+				"params": {
+					"pos": [shoot_from.global_position.x, shoot_from.global_position.y, shoot_from.global_position.z],
+					"dir": [dir.x, dir.y, dir.z],
+					"damage": w.damage * player_damage_mult * _get_level_damage_mult(),
+					"shooter_team": player_team,
+					"shooter_peer_id": peer_id,
+				}
+			})
+			if hit_info.has("peer_id"):
+				BridgeClient.send("damage_player", {
+					"peer_id": hit_info["peer_id"],
+					"amount": w.damage * player_damage_mult * _get_level_damage_mult(),
+					"source_team": player_team,
+					"killer_peer_id": peer_id
+				})
 
 	_update_ammo_hud()
 	_play_kick_animation()
@@ -1064,7 +1055,6 @@ func _finish_reload() -> void:
 	if reload_bar:
 		reload_bar.visible = false
 	_update_ammo_hud()
-	_report_ammo_to_server()
 
 func _update_reload_bar() -> void:
 	if reload_bar == null:
@@ -1088,7 +1078,7 @@ func _update_points_label() -> void:
 	var red_pts: int = TeamData.get_points(1)
 	points_label.text = "BLUE: $%d | RED: $%d" % [blue_pts, red_pts]
 
-func _on_game_sync_died(p_peer_id: int) -> void:
+func _on_game_sync_died(p_peer_id: int, _respawn_time: float) -> void:
 	if p_peer_id != peer_id:
 		return
 	# Fallback — health_changed handler handles death now, but keep as safety net.
@@ -1131,9 +1121,4 @@ func _fire_ping() -> void:
 	query.collision_mask = 1
 	var result: Dictionary = space.intersect_ray(query)
 	var world_pos: Vector3 = result.get("position", origin + dir * 100.0) as Vector3
-	if multiplayer.is_server():
-		print("[PING-FPS] is_server=true")
-		LobbyManager.request_ping(world_pos, player_team)
-	else:
-		print("[PING-FPS] client path, rpc to server")
-		LobbyManager.request_ping.rpc_id(1, world_pos, player_team)
+	LobbyManager.request_ping(world_pos, player_team)

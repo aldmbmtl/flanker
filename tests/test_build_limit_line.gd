@@ -84,19 +84,5 @@ func test_should_draw_enemy_reads_correct_enemy_team_for_team1() -> void:
 	LaneControl.push_level[0] = 0
 	assert_false(_line._should_draw_enemy(), "enemy team 0 at level 0 → false")
 
-# ── Rollback bar progress ratio ───────────────────────────────────────────────
-
-func test_rollback_bar_ratio_zero_when_timer_zero() -> void:
-	LaneControl.rollback_timer[1] = 0.0
-	var ratio: float = LaneControl.rollback_timer[1] / LaneControl.ROLLBACK_TIME
-	assert_almost_eq(ratio, 0.0, 0.001)
-
-func test_rollback_bar_ratio_half_at_midpoint() -> void:
-	LaneControl.rollback_timer[1] = LaneControl.ROLLBACK_TIME * 0.5
-	var ratio: float = LaneControl.rollback_timer[1] / LaneControl.ROLLBACK_TIME
-	assert_almost_eq(ratio, 0.5, 0.001)
-
-func test_rollback_bar_ratio_one_at_full() -> void:
-	LaneControl.rollback_timer[1] = LaneControl.ROLLBACK_TIME
-	var ratio: float = LaneControl.rollback_timer[1] / LaneControl.ROLLBACK_TIME
-	assert_almost_eq(ratio, 1.0, 0.001)
+# Rollback bar ratio tests removed — rollback_timer and ROLLBACK_TIME are now
+# Python-authoritative and no longer mirrored in LaneControl.

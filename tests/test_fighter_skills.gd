@@ -41,6 +41,8 @@ func _make_player(peer_id: int, team_id: int, pos: Vector3 = Vector3.ZERO) -> Fa
 	return p
 
 func before_each() -> void:
+	BridgeClient._is_host = true
+	BridgeClient._local_peer_id = PEER_ID
 	# Remove any existing Main node from prior tests
 	var old_main: Node = get_tree().root.get_node_or_null("Main")
 	if old_main != null:
@@ -52,6 +54,8 @@ func before_each() -> void:
 	_caster = _make_player(PEER_ID, 0, Vector3.ZERO)
 
 func after_each() -> void:
+	BridgeClient._is_host = false
+	BridgeClient._local_peer_id = 0
 	if is_instance_valid(_main):
 		_main.free()
 	GameSync.reset()
@@ -211,23 +215,15 @@ func test_rocket_barrage_skips_friendly_towers() -> void:
 	assert_eq(_main.get_child_count(), children_before,
 		"Friendly tower must be skipped — no rockets spawned")
 
-# ── f_deploy_mg (singleplayer path) ──────────────────────────────────────────
+# ── f_deploy_mg ──────────────────────────────────────────────────────────────
 
-func test_deploy_mg_singleplayer_spawns_node() -> void:
-	# Force singleplayer path by temporarily clearing the multiplayer peer.
-	# OfflineMultiplayerPeer makes has_multiplayer_peer() return true, which
-	# would send the multiplayer RPC path instead of the singleplayer branch.
-	var mg_scene: PackedScene = load("res://scenes/towers/MachineGunTower.tscn")
-	if mg_scene == null:
-		push_warning("MachineGunTower.tscn not loadable — skipping")
-		return
-	multiplayer.set_multiplayer_peer(null)
+func test_deploy_mg_no_crash_with_player() -> void:
+	# With BridgeClient not connected (test context), deploy_mg sends to bridge
+	# (which is a no-op) and must not crash or spawn local nodes.
 	var children_before: int = _main.get_child_count()
 	FighterSkills.execute("f_deploy_mg", PEER_ID)
-	# Restore OfflineMultiplayerPeer so subsequent tests run correctly.
-	multiplayer.set_multiplayer_peer(OfflineMultiplayerPeer.new())
-	assert_gt(_main.get_child_count(), children_before,
-		"Singleplayer deploy_mg must add a MachineGun node to Main")
+	assert_eq(_main.get_child_count(), children_before,
+		"deploy_mg must not spawn local nodes — Python is authoritative")
 
 # ── Regression: heal delivery via LobbyManager.heal_player_broadcast ─────────
 # Previously all heal calls used player.heal() directly — failed silently on
@@ -287,40 +283,8 @@ func test_rapid_fire_weapon_meta_empty_when_no_gamesync_entry() -> void:
 	assert_eq(str(_caster.get_meta("rapid_fire_weapon")), "",
 		"rapid_fire_weapon meta must be empty string when no GameSync entry")
 
-# ── Regression: Iron Skin sets GameSync shield state ─────────────────────────
-# Previously only set metas on the local node. damage_player() never saw the
-# shield, so incoming damage was not absorbed. Fixed: GameSync.set_player_shield
-# is called; damage_player drains shield before HP.
-
-func test_iron_skin_sets_gamesync_shield_hp() -> void:
-	FighterSkills.execute("f_iron_skin", PEER_ID)
-	assert_almost_eq(GameSync.get_player_shield_hp(PEER_ID), FighterSkills.IRON_SKIN_HP, 0.01,
-		"Iron Skin must store shield HP in GameSync")
-
-func test_damage_player_drains_shield_before_hp() -> void:
-	GameSync.set_player_health(PEER_ID, 100.0)
-	GameSync.set_player_shield(PEER_ID, 60.0, 8.0)
-	GameSync.damage_player(PEER_ID, 30.0, 1)  # enemy team
-	assert_almost_eq(GameSync.get_player_health(PEER_ID), 100.0, 0.01,
-		"HP must be untouched when damage is fully absorbed by shield")
-	assert_almost_eq(GameSync.get_player_shield_hp(PEER_ID), 30.0, 0.01,
-		"Shield must be reduced by the absorbed amount")
-
-func test_damage_player_bleeds_through_shield_to_hp() -> void:
-	GameSync.set_player_health(PEER_ID, 100.0)
-	GameSync.set_player_shield(PEER_ID, 20.0, 8.0)
-	GameSync.damage_player(PEER_ID, 50.0, 1)
-	assert_almost_eq(GameSync.get_player_health(PEER_ID), 70.0, 0.01,
-		"Damage exceeding shield must bleed through to HP")
-	assert_almost_eq(GameSync.get_player_shield_hp(PEER_ID), 0.0, 0.01,
-		"Shield must be exhausted after bleed-through")
-
-func test_damage_player_clears_shield_when_exhausted() -> void:
-	GameSync.set_player_health(PEER_ID, 100.0)
-	GameSync.set_player_shield(PEER_ID, 20.0, 8.0)
-	GameSync.damage_player(PEER_ID, 20.0, 1)
-	assert_false(GameSync.player_shield_hp.has(PEER_ID),
-		"Shield entry must be cleared from dict when fully depleted")
+# Iron Skin shield tests removed — set_player_shield, get_player_shield_hp, and
+# damage_player are now Python-authoritative and no longer exist in GameSync.gd.
 
 # ── Regression: Rally Cry applies buff to caster ─────────────────────────────
 # Previously get_ally_players() excluded the caster and caster was never given

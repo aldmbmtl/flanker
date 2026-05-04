@@ -81,15 +81,16 @@ func _try_heal_nearby() -> bool:
 		# Minions can be healed directly (server-authoritative, is_puppet guard in MinionBase).
 		best.heal(heal_amount)
 	elif best.get("player_team") != null:
-		# FPSController nodes on remote clients lack heal() on this peer.
-		# Route via RPC so the target peer's local controller applies the HP.
 		var target_peer: int = int(best.get("peer_id") if best.get("peer_id") != null else -1)
 		if target_peer > 0:
-			if multiplayer.has_multiplayer_peer():
-				LobbyManager.heal_player_broadcast(target_peer, heal_amount)
+			if BridgeClient.is_connected_to_server():
+				# Multiplayer: route through Python authority.
+				BridgeClient.send("heal_player", {"peer_id": target_peer, "amount": heal_amount})
 			else:
-				# Singleplayer: best IS the local FPSController — call directly.
-				best.call("heal", heal_amount)
+				# Singleplayer: update GameSync directly; FPS node heals via signal or direct call.
+				var max_hp: float = GameSync.PLAYER_MAX_HP + LevelSystem.get_bonus_hp(target_peer)
+				var cur_hp: float = GameSync.player_healths.get(target_peer, 0.0)
+				GameSync.set_player_health(target_peer, minf(cur_hp + heal_amount, max_hp))
 	return true
 
 ## Legacy explicit pulse — kept so existing test helpers that call _pulse_heal()

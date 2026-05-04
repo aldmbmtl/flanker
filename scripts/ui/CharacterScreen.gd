@@ -292,25 +292,16 @@ func _on_fire_rate_pressed() -> void:
 	_spend_attr("tower_fire_rate")
 
 func _spend_attr(attr: String) -> void:
-	if _is_mp and multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
-		LevelSystem.request_spend_point.rpc_id(1, attr)
-	else:
-		LevelSystem.spend_point_local(_peer_id, attr)
+	LevelSystem.request_spend_point(attr)
 	_refresh_attrs()
 
 # ── Skill unlock / assign ─────────────────────────────────────────────────────
 
 func _on_unlock_requested(node_id: String) -> void:
-	if _is_mp and not multiplayer.is_server():
-		SkillTree.request_unlock.rpc_id(1, node_id)
-	else:
-		SkillTree.unlock_node_local(_peer_id, node_id)
+	SkillTree.request_unlock(node_id)
 
 func _on_assign_active_requested(node_id: String, slot: int) -> void:
-	if _is_mp and not multiplayer.is_server():
-		SkillTree.request_assign_active.rpc_id(1, slot, node_id)
-	else:
-		SkillTree.assign_active_slot(_peer_id, slot, node_id)
+	SkillTree.request_assign_active(slot, node_id)
 
 # ── Signal handlers ───────────────────────────────────────────────────────────
 

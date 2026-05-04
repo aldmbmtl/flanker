@@ -163,7 +163,7 @@ func _impact(pos: Vector3) -> void:
 		_exhaust.emitting = false
 
 	# Apply damage server-side (or singleplayer)
-	var is_server: bool = not multiplayer.has_multiplayer_peer() or multiplayer.is_server()
+	var is_server: bool = BridgeClient.is_host()
 	if is_server:
 		_apply_blast_damage(pos)
 
@@ -207,14 +207,7 @@ func _request_destroy_trees_in_radius(pos: Vector3) -> void:
 	]
 	for off in offsets:
 		var p: Vector3 = pos + off
-		if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-			LobbyManager.sync_destroy_tree.rpc(p)
-		elif multiplayer.has_multiplayer_peer():
-			LobbyManager.request_destroy_tree.rpc_id(1, p)
-		else:
-			var tp: Node = get_tree().root.get_node_or_null("Main/World/TreePlacer")
-			if tp != null:
-				tp.clear_trees_at(p, blast_radius * 0.6)
+		LobbyManager.request_destroy_tree(p)
 
 # ── Massive explosion VFX ─────────────────────────────────────────────────────
 

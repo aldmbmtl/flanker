@@ -157,13 +157,7 @@ func _on_slots_changed(peer_id: int, _slots: Array) -> void:
 	_refresh_slot_labels()
 
 func _on_unlock_requested(node_id: String) -> void:
-	if _is_mp and not multiplayer.is_server():
-		SkillTree.request_unlock.rpc_id(1, node_id)
-	else:
-		SkillTree.unlock_node_local(_peer_id, node_id)
+	SkillTree.request_unlock(node_id)
 
 func _on_assign_active_requested(node_id: String, slot: int) -> void:
-	if _is_mp and not multiplayer.is_server():
-		SkillTree.request_assign_active.rpc_id(1, slot, node_id)
-	else:
-		SkillTree.assign_active_slot(_peer_id, slot, node_id)
+	SkillTree.request_assign_active(slot, node_id)

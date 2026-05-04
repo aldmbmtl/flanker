@@ -55,6 +55,11 @@ var _visuals_initialized: bool = false  # set true when _init_visuals() runs
 const FALLBACK_CHAR  := "a"
 const GLB_BASE_PATH  := "res://assets/kenney_blocky-characters/Models/GLB format/character-%s.glb"
 
+## Position used to hide a dead player model. Far below the map so it is never
+## visible to cameras or raycasts. The model is moved here instantly on death
+## and relocated to spawn_pos when the server confirms respawn.
+const DEAD_POSITION  := Vector3(0.0, -500.0, 0.0)
+
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
 ## Call this BEFORE add_child so _ready() sees the correct values.
@@ -161,21 +166,30 @@ func update_transform(pos: Vector3, rot: Vector3) -> void:
 # ── Visibility / hitbox ───────────────────────────────────────────────────────
 
 ## Toggle hitbox collision layers and fire lifecycle hooks.
-## Players are ALWAYS visible — this no longer sets visible=false on death.
+## On death: model is moved to DEAD_POSITION (underground) so it is not visible.
+## On respawn: position is restored by update_transform(spawn_pos) called by
+## PlayerManager immediately after _set_alive(true), so no explicit reset here.
 ## Called by PlayerManager on player_died / player_respawned signals.
 ## Override _on_died() / _on_respawned() for additional effects.
 func _set_alive(alive: bool) -> void:
-	print("[BP] _set_alive peer_id=", peer_id, " alive=", alive,
-		" (visible stays true)")
 	var hit_body: StaticBody3D = get_node_or_null("HitBody")
 	if hit_body != null:
 		hit_body.set_collision_layer(1 if alive else 0)
 		hit_body.set_collision_mask(0)
 		print("[BP] _set_alive peer_id=", peer_id,
+			" alive=", alive,
 			" HitBody.collision_layer=", hit_body.get_collision_layer())
 	if alive:
-		_on_respawned(global_position if is_inside_tree() else Vector3.ZERO)
+		# _on_respawned receives the actual spawn position from PlayerManager,
+		# which calls update_transform(spawn_pos) AFTER _set_alive(true).
+		# Do NOT use global_position here (it may still be DEAD_POSITION).
+		_on_respawned(Vector3.ZERO)
 	else:
+		# Move model underground immediately so the dead body is not visible.
+		if is_inside_tree():
+			global_position = DEAD_POSITION
+			_target_position = DEAD_POSITION
+		print("[BP] _set_alive peer_id=", peer_id, " died — moved to DEAD_POSITION")
 		_on_died()
 
 ## Overridable hook — fired when this player is marked dead.
@@ -263,11 +277,6 @@ func _load_model(char: String) -> void:
 	model.scale = Vector3(0.667, 0.667, 0.667)
 	model.rotate_y(PI)
 
-	# Local player: render avatar on layer 2 only so the FPS camera (cull_mask
-	# excludes layer 2) never sees its own body, but all other cameras do.
-	if is_local:
-		_set_layers_recursive(model, 2)
-
 	char_mesh_node.add_child(model)
 	char_mesh_node.visible = true
 
@@ -285,17 +294,10 @@ func _load_model(char: String) -> void:
 
 	# Re-assert visibility after GLB import: Godot's deferred import machinery
 	# can fire visibility_changed and silently set the root CharacterBody3D
-	# visible=false during model instantiation. Puppet nodes (is_local=false)
-	# must always be visible — re-assert here to cancel any such internal change.
-	if not is_local:
-		visible = true
-		print("[BP] _load_model peer_id=", peer_id, " re-asserted visible=true (puppet)")
-
-func _set_layers_recursive(node: Node, layer: int) -> void:
-	if node is VisualInstance3D:
-		(node as VisualInstance3D).layers = layer
-	for child in node.get_children():
-		_set_layers_recursive(child, layer)
+	# visible=false during model instantiation. All player nodes must always
+	# be visible — re-assert here to cancel any such internal change.
+	visible = true
+	print("[BP] _load_model peer_id=", peer_id, " re-asserted visible=true")
 
 func _find_anim_player(node: Node) -> AnimationPlayer:
 	if node is AnimationPlayer:

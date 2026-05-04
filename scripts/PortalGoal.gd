@@ -239,8 +239,8 @@ func _on_body_entered(body: Node3D) -> void:
 	if body_team == team or body_team == -1:
 		return
 
-	# Multiplayer: server-authoritative only
-	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
+	# Server-authoritative only
+	if not BridgeClient.is_host():
 		return
 
 	if body.has_method("force_die"):

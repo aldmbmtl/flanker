@@ -34,7 +34,7 @@ func _ready() -> void:
 	_join_btn  = $MenuPanel/VBox/JoinButton
 	_name_edit = $MenuPanel/VBox/NameEdit
 	# Pre-fill saved name and apply initial button state
-	_name_edit.text = GameSettings.player_name
+	_name_edit.text = ClientSettings.player_name
 	_update_name_buttons()
 	_name_edit.text_changed.connect(_on_name_changed)
 	# Only spawn the background simulation when we are the root scene.
@@ -47,8 +47,8 @@ func _ready() -> void:
 	_graphics_panel.back_pressed.connect(_on_graphics_settings_back)
 
 func _on_name_changed(new_text: String) -> void:
-	GameSettings.player_name = new_text.strip_edges()
-	GameSettings.save_settings()
+	ClientSettings.player_name = new_text.strip_edges()
+	ClientSettings.save_settings()
 	_update_name_buttons()
 
 func _update_name_buttons() -> void:
@@ -59,10 +59,10 @@ func _update_name_buttons() -> void:
 func _build_dialogs() -> void:
 	var ui_theme: Theme = load("res://assets/ui_theme.tres")
 
-	_host_overlay = _build_overlay("HOST GAME", ["Port:"], ["8910"], ["PortEdit"], "Host", _on_host_confirmed, ui_theme)
+	_host_overlay = _build_overlay("HOST GAME", ["Port:"], ["7890"], ["PortEdit"], "Host", _on_host_confirmed, ui_theme)
 	add_child(_host_overlay)
 
-	_join_overlay = _build_overlay("JOIN GAME", ["Host IP Address:", "Port:"], ["127.0.0.1", "8910"], ["AddressEdit", "PortEdit"], "Join", _on_join_confirmed, ui_theme)
+	_join_overlay = _build_overlay("JOIN GAME", ["Host IP Address:", "Port:"], ["127.0.0.1", "7890"], ["AddressEdit", "PortEdit"], "Join", _on_join_confirmed, ui_theme)
 	add_child(_join_overlay)
 
 func _build_overlay(
@@ -231,8 +231,16 @@ func _spawn_menu_world() -> void:
 func _start_simulation_when_ready(terrain: Node, trees: Node, world: Node3D) -> void:
 	if not terrain.get("generation_done"):
 		await terrain.done
+	# Guard: if StartMenu was freed by a scene change while the coroutine was
+	# suspended (e.g. host clicked Start War before terrain finished), abort.
+	# get_tree() returns null for nodes that are no longer in the scene tree.
+	if not is_inside_tree():
+		return
 	if not trees.get("generation_done"):
 		await trees.done
+	# Guard again after the second await for the same reason.
+	if not is_inside_tree():
+		return
 	await get_tree().physics_frame
 	_on_menu_world_ready(trees, world)
 
@@ -307,21 +315,18 @@ func _on_graphics_settings_back() -> void:
 func _on_host_confirmed(overlay: Control) -> void:
 	var port_edit: LineEdit = overlay.find_child("PortEdit", true, false)
 	var port_text: String = port_edit.text.strip_edges() if port_edit else ""
-	var port: int = port_text.to_int() if port_text.is_valid_int() else NetworkManager.DEFAULT_PORT
-
-	var err: int = NetworkManager.start_host(port)
-	if err != OK:
-		_show_connection_status("Failed to host: port may be in use")
-		return
+	var port: int = port_text.to_int() if port_text.is_valid_int() else BridgeClient.DEFAULT_PORT
 
 	# Stop simulation synchronously so no more autoload mutations happen
 	_stop_menu_simulation()
 	# Reset sim-dirtied autoload state before entering the lobby
 	_reset_autoloads_for_new_game()
 	overlay.visible = false
-	# Host registers itself directly — no RPC needed, peer id 1 is always the server
-	LobbyManager.register_player_local(1, GameSettings.player_name)
-	_show_lobby()
+
+	BridgeClient.connect_to_server("127.0.0.1", port)
+	BridgeClient.connected_to_server.connect(_on_bridge_connected, CONNECT_ONE_SHOT)
+	BridgeClient.disconnected_from_server.connect(_on_connection_failed, CONNECT_ONE_SHOT)
+	_show_connection_status("Connecting...")
 
 func _on_join_confirmed(overlay: Control) -> void:
 	var address_edit: LineEdit = overlay.find_child("AddressEdit", true, false)
@@ -334,7 +339,7 @@ func _on_join_confirmed(overlay: Control) -> void:
 		_show_connection_status("Enter host IP address")
 		return
 
-	var port: int = port_text.to_int() if port_text.is_valid_int() else NetworkManager.DEFAULT_PORT
+	var port: int = port_text.to_int() if port_text.is_valid_int() else BridgeClient.DEFAULT_PORT
 
 	# Stop simulation synchronously so no more autoload mutations happen
 	_stop_menu_simulation()
@@ -342,18 +347,14 @@ func _on_join_confirmed(overlay: Control) -> void:
 	_reset_autoloads_for_new_game()
 	overlay.visible = false
 	_show_connection_status("Connecting...")
-	var err: int = NetworkManager.join_game(address, port)
-	if err != OK:
-		_show_connection_status("Failed to connect")
-		return
 
-	NetworkManager.connected_to_server.connect(_on_connected_to_lobby, CONNECT_ONE_SHOT)
-	NetworkManager.connection_failed.connect(_on_connection_failed, CONNECT_ONE_SHOT)
+	BridgeClient.connect_to_server(address, port)
+	BridgeClient.connected_to_server.connect(_on_bridge_connected, CONNECT_ONE_SHOT)
+	BridgeClient.disconnected_from_server.connect(_on_connection_failed, CONNECT_ONE_SHOT)
 
-func _on_connected_to_lobby() -> void:
-	# Send the player's chosen name to the server
-	LobbyManager.register_player.rpc_id(1, GameSettings.player_name)
+func _on_bridge_connected() -> void:
 	_show_lobby()
+	BridgeClient.send("register_player", {"name": ClientSettings.player_name})
 
 func _on_connection_failed() -> void:
 	_show_connection_status("Connection failed")

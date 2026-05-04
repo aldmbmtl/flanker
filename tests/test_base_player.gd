@@ -1,6 +1,6 @@
 extends GutTest
 
-## test_base_player.gd — P1–P30
+## test_base_player.gd — P1–P34
 ## Tier 1: OfflineMultiplayerPeer. Tests cover setup(), group membership,
 ## HitBody wiring, HitShape local disable, puppet lerp (position + rotation),
 ## _set_alive() hooks, _build_visuals() hook, take_damage no-op, update_transform,
@@ -487,3 +487,69 @@ func test_p33_load_model_reasserts_visible_true_on_puppet() -> void:
 	assert_true(p.visible,
 		"_load_model must re-assert visible=true on puppet (is_local=false) " +
 		"to counter Godot GLB import visibility_changed side-effect")
+
+# ── P34: _load_model does NOT put local player model on render layer 2 ────────
+#
+# Regression guard: previously _load_model called _set_layers_recursive(model, 2)
+# for is_local=true, isolating the local avatar to render layer 2 so the FPS
+# camera (cull_mask bit-1 cleared) could not see its own body.  This caused the
+# local player's body to appear invisible to their own FPS camera.  The fix is to
+# leave all models on the default render layer (1) so every camera sees every body.
+
+func test_p34_load_model_does_not_use_render_layer_2() -> void:
+	var p := _make_player()
+	p.setup(1, 0, true, "a")  # is_local = true
+	add_child_autofree(p)
+	await wait_frames(2)
+	var char_mesh: Node3D = p.get_node_or_null("PlayerBody/CharacterMesh")
+	assert_not_null(char_mesh, "CharacterMesh must exist")
+	# Walk every VisualInstance3D under CharacterMesh and verify none are on layer 2.
+	var _check_layers: Callable = func(node: Node) -> void:
+		pass  # placeholder; real walk below
+	var any_on_layer_2: bool = false
+	var stack: Array = char_mesh.get_children()
+	while stack.size() > 0:
+		var n: Node = stack.pop_back()
+		if n is VisualInstance3D:
+			if (n as VisualInstance3D).layers == 2:
+				any_on_layer_2 = true
+		for c in n.get_children():
+			stack.append(c)
+	assert_false(any_on_layer_2,
+		"_load_model must not assign render layer 2 to any VisualInstance3D — " +
+		"all models stay on default layer 1 so all cameras see them")
+
+# ── P35: _set_alive(false) moves the puppet to DEAD_POSITION ─────────────────
+#
+# Regression guard: when a remote puppet is marked dead it must be teleported to
+# BasePlayer.DEAD_POSITION (y=-500) so the model is not visible in the world.
+
+func test_p35_set_alive_false_moves_to_dead_position() -> void:
+	var p := _make_player()
+	p.setup(2, 0, false, "a")
+	add_child_autofree(p)
+	# Place the puppet somewhere visible first.
+	p.global_position = Vector3(10.0, 2.0, 20.0)
+	p._set_alive(false)
+	assert_almost_eq(p.global_position.y, BasePlayer.DEAD_POSITION.y, 0.01,
+		"_set_alive(false) must move puppet to DEAD_POSITION (underground)")
+	assert_almost_eq(p._target_position.y, BasePlayer.DEAD_POSITION.y, 0.01,
+		"_set_alive(false) must also update _target_position to DEAD_POSITION")
+
+# ── P36: _set_alive(true) does not re-teleport to DEAD_POSITION ──────────────
+#
+# After respawn, _set_alive(true) must not move the player underground.
+# Position restoration comes from PlayerManager calling update_transform(spawn_pos).
+
+func test_p36_set_alive_true_does_not_move_to_dead_position() -> void:
+	var p := _make_player()
+	p.setup(3, 0, false, "a")
+	add_child_autofree(p)
+	p.global_position = Vector3(0.0, 2.0, 82.0)
+	p._set_alive(false)
+	# Simulate respawn: update_transform sets the new spawn position first,
+	# then _set_alive(true) fires the _on_respawned hook.
+	p.update_transform(Vector3(0.0, 2.0, 82.0), Vector3.ZERO)
+	p._set_alive(true)
+	assert_gt(p._target_position.y, BasePlayer.DEAD_POSITION.y + 10.0,
+		"after _set_alive(true), target position must not be at DEAD_POSITION")

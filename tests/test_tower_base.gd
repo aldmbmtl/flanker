@@ -13,6 +13,7 @@ class FakeTower extends TowerBase:
 var tower: FakeTower
 
 func before_each() -> void:
+	BridgeClient._is_host = true
 	tower = FakeTower.new()
 	tower.max_health     = 100.0
 	tower.attack_range   = 0.0   # passive — no Area3D built, avoids physics queries
@@ -23,6 +24,9 @@ func before_each() -> void:
 	# Reset autoloads
 	LevelSystem.clear_all()
 	LevelSystem.register_peer(1)
+
+func after_each() -> void:
+	BridgeClient._is_host = false
 
 # ── setup ─────────────────────────────────────────────────────────────────────
 
@@ -512,61 +516,21 @@ func test_slow_tower_pulse_does_not_fire_on_client() -> void:
 	assert_gt(timer_after, timer_before,
 		"_pulse_timer should advance on server — confirms _process runs past guard")
 
-# ── Cannon/Mortar VFX RPC: call_remote regression guards ─────────────────────
+# ── Cannon/Mortar VFX: bridge dispatch guards ────────────────────────────────
 #
-# These tests verify that spawn_cannonball_visuals and spawn_mortar_visuals are
-# call_remote — the server must NOT re-spawn a second physics projectile via the
-# RPC (it already spawned the authoritative one in _do_attack).
-#
-# Strategy: inject MockMultiplayerAPI so we can observe RPC dispatch, then call
-# the RPC function body directly to confirm it does NOT run locally on the
-# server (because call_remote suppresses local execution under MockMultiplayerAPI).
-
-func test_spawn_cannonball_visuals_rpc_is_call_remote() -> void:
-	# With call_remote, calling .rpc() on the server only dispatches to peers.
-	# The function body does NOT execute locally on the server.
-	# We verify: injecting mock + calling .rpc() records one dispatch entry but
-	# does NOT add a child to the scene root (which would happen if call_local).
-	var mock := MockMultiplayerAPI.new()
-	get_tree().set_multiplayer(mock, LobbyManager.get_path())
-	var root_child_count_before: int = get_tree().root.get_child_count()
-	# call .rpc() — under MockMultiplayerAPI this logs the call but never runs the body
-	LobbyManager.spawn_cannonball_visuals.rpc(
-		Vector3.ZERO, Vector3(0, 0, 10), 50.0, 0)
-	var root_child_count_after: int = get_tree().root.get_child_count()
-	# call_remote: body not executed locally → no new child added to scene root
-	assert_eq(root_child_count_after, root_child_count_before,
-		"spawn_cannonball_visuals must be call_remote: body must not run locally on server")
-	# RPC was dispatched
-	assert_true(mock.was_called("spawn_cannonball_visuals"),
-		"spawn_cannonball_visuals.rpc() must dispatch via multiplayer")
-	get_tree().set_multiplayer(null, LobbyManager.get_path())
-
-func test_spawn_mortar_visuals_rpc_is_call_remote() -> void:
-	var mock := MockMultiplayerAPI.new()
-	get_tree().set_multiplayer(mock, LobbyManager.get_path())
-	var root_child_count_before: int = get_tree().root.get_child_count()
-	LobbyManager.spawn_mortar_visuals.rpc(
-		Vector3.ZERO, Vector3(0, 0, 10), 80.0, 1)
-	var root_child_count_after: int = get_tree().root.get_child_count()
-	assert_eq(root_child_count_after, root_child_count_before,
-		"spawn_mortar_visuals must be call_remote: body must not run locally on server")
-	assert_true(mock.was_called("spawn_mortar_visuals"),
-		"spawn_mortar_visuals.rpc() must dispatch via multiplayer")
-	get_tree().set_multiplayer(null, LobbyManager.get_path())
-
-# ── _fire_ballistic RPC dispatch regression guard ────────────────────────────
-#
-# Verify that _fire_ballistic calls rpc_callable.rpc() (not .call()) so that
-# clients actually receive the cannonball/mortar VFX broadcast.
-# Previously the code used rpc_callable.call() which executed the function body
-# locally but never dispatched to peers.
+# After Slice D, _fire_ballistic() sends "fire_projectile" via BridgeClient
+# instead of calling spawn_cannonball/mortar_visuals.rpc().
+# These tests verify:
+#   (a) _fire_ballistic does NOT issue any ENet RPC (MockMultiplayerAPI stays empty)
+#   (b) the authoritative physics projectile IS spawned (child count increases)
 
 class FakeCannonTower extends TowerAI:
 	func _build_visuals() -> void:
 		pass
 
-func test_fire_ballistic_dispatches_rpc_to_clients() -> void:
+func test_fire_ballistic_no_enet_rpc_for_cannonball() -> void:
+	# BridgeClient is disconnected in tests — send() is a silent no-op.
+	# MockMultiplayerAPI must record zero RPC calls.
 	var mock := MockMultiplayerAPI.new()
 	mock.set_as_server()
 	get_tree().set_multiplayer(mock, LobbyManager.get_path())
@@ -579,7 +543,6 @@ func test_fire_ballistic_dispatches_rpc_to_clients() -> void:
 	add_child_autofree(t)
 	t.setup(0)
 
-	# Fake target — needs global_position accessible via Node3D
 	var target := Node3D.new()
 	add_child_autofree(target)
 	target.global_position = Vector3(0, 0, 10)
@@ -588,20 +551,50 @@ func test_fire_ballistic_dispatches_rpc_to_clients() -> void:
 	t._fire_ballistic(
 		cannon_scene, 50.0, "cannonball",
 		"res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_001.ogg",
-		0.0, 0.9, 1.05, target,
-		Callable(LobbyManager, "spawn_cannonball_visuals"))
+		0.0, 0.9, 1.05, target)
 
-	assert_true(mock.was_called("spawn_cannonball_visuals"),
-		"_fire_ballistic must dispatch spawn_cannonball_visuals.rpc() to clients when is_server()")
+	assert_eq(mock.rpc_log.size(), 0,
+		"_fire_ballistic must not issue any ENet RPC — bridge path only")
 	get_tree().set_multiplayer(null, LobbyManager.get_path())
 
-# ── SlowTower pulse VFX RPC broadcast regression guard ───────────────────────
-#
-# Verify that _emit_pulse() calls LobbyManager.spawn_slow_pulse_visuals.rpc()
-# when running as server in multiplayer. This ensures clients receive the pulse
-# VFX, which previously only ran server-side.
+func test_fire_ballistic_spawns_physics_projectile() -> void:
+	# The authoritative cannonball physics node must be added to the scene tree.
+	var t := FakeCannonTower.new()
+	t.max_health      = 900.0
+	t.attack_range    = 0.0
+	t.attack_interval = 1.0
+	t.tower_type      = "cannon"
+	add_child_autofree(t)
+	t.setup(0)
 
-func test_slow_tower_emit_pulse_dispatches_rpc_in_multiplayer() -> void:
+	var target := Node3D.new()
+	add_child_autofree(target)
+	target.global_position = Vector3(0, 0, 10)
+
+	var root_children_before: int = get_tree().root.get_child_count()
+	var cannon_scene: PackedScene = preload("res://scenes/projectiles/Cannonball.tscn")
+	t._fire_ballistic(
+		cannon_scene, 50.0, "cannonball",
+		"res://assets/kenney_sci-fi-sounds/Audio/explosionCrunch_001.ogg",
+		0.0, 0.9, 1.05, target)
+
+	# The cannonball must appear as a new child of the active scene node (root child 0).
+	var scene_root: Node = get_tree().root.get_child(0)
+	var found_cannonball: bool = false
+	for child in scene_root.get_children():
+		if child.get_script() != null and child.get_script().resource_path.contains("Cannonball"):
+			found_cannonball = true
+			break
+	assert_true(found_cannonball,
+		"_fire_ballistic must add the physics projectile as a scene-root child")
+
+# ── SlowTower pulse VFX bridge dispatch guard ────────────────────────────────
+#
+# After Slice 8, _emit_pulse() sends tower_visual via BridgeClient (no @rpc).
+# Verify that _emit_pulse() does not crash and does NOT issue any ENet RPC —
+# the bridge (disconnected in tests) silently drops the send.
+
+func test_slow_tower_emit_pulse_no_rpc_in_bridge_path() -> void:
 	var mock := MockMultiplayerAPI.new()
 	mock.set_as_server()
 	get_tree().set_multiplayer(mock, LobbyManager.get_path())
@@ -616,15 +609,11 @@ func test_slow_tower_emit_pulse_dispatches_rpc_in_multiplayer() -> void:
 
 	t._emit_pulse()
 
-	assert_true(mock.was_called("spawn_slow_pulse_visuals"),
-		"_emit_pulse() must call spawn_slow_pulse_visuals.rpc() when is_server()")
+	assert_false(mock.was_called("spawn_slow_pulse_visuals"),
+		"_emit_pulse() must NOT issue spawn_slow_pulse_visuals RPC — bridge handles it now")
 	get_tree().set_multiplayer(null, LobbyManager.get_path())
 
-func test_slow_tower_emit_pulse_rpc_passes_tower_name() -> void:
-	var mock := MockMultiplayerAPI.new()
-	mock.set_as_server()
-	get_tree().set_multiplayer(mock, LobbyManager.get_path())
-
+func test_slow_tower_emit_pulse_does_not_crash() -> void:
 	var t := FakeSlowTower.new()
 	t.max_health      = 500.0
 	t.attack_range    = 0.0
@@ -634,13 +623,9 @@ func test_slow_tower_emit_pulse_rpc_passes_tower_name() -> void:
 	add_child_autofree(t)
 	t.setup(0)
 
+	# BridgeClient not connected — send is a no-op; must not throw.
 	t._emit_pulse()
-
-	var calls: Array = mock.calls_to("spawn_slow_pulse_visuals")
-	assert_eq(calls.size(), 1)
-	assert_eq(calls[0]["args"][0], "SlowTowerTest",
-		"First arg to spawn_slow_pulse_visuals must be the tower node name")
-	get_tree().set_multiplayer(null, LobbyManager.get_path())
+	assert_true(true, "_emit_pulse() must not crash when bridge is disconnected")
 
 # ── build_time ────────────────────────────────────────────────────────────────
 

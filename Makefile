@@ -5,7 +5,11 @@ HOST_LOG   := /tmp/flankers_host.log
 CLIENT_LOG := /tmp/flankers_client.log
 
 TEST_LOG      := /tmp/flankers_tests.log
+PYTHON_TEST_LOG := /tmp/flankers_python_tests.log
 COVERAGE_LOG  := /tmp/flankers_coverage.txt
+
+VENV       := $(PROJECT)/.venv
+PYTEST     := $(VENV)/bin/pytest
 
 GUT_VERSION  := v9.6.0
 GUT_ZIP_URL  := https://github.com/bitwes/Gut/zipball/$(GUT_VERSION)
@@ -15,7 +19,7 @@ GUT_SENTINEL := $(GUT_DEST)/gut_cmdln.gd
 
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || date +%Y.%m.%d)
 
-.PHONY: run stop restart logs host client hlogs clogs clean-symlink clean build test coverage install-gut release
+.PHONY: run stop restart logs host client hlogs clogs clean-symlink clean build test lint fmt coverage install-gut release venv docker-build docker-run
 
 .DEFAULT_GOAL := restart
 
@@ -72,7 +76,26 @@ install-gut:
 		echo "GUT $(GUT_VERSION) installed at $(GUT_DEST)."; \
 	fi
 
-test: install-gut
+venv:
+	@python3 -m venv $(VENV)
+	@$(VENV)/bin/pip install -q -r $(PROJECT)/requirements.txt
+
+lint: venv
+	@echo "--- Ruff format check ---"
+	$(VENV)/bin/ruff format --check server/
+	@echo "--- Ruff lint ---"
+	$(VENV)/bin/ruff check server/
+
+fmt: venv
+	@echo "--- Ruff format ---"
+	$(VENV)/bin/ruff format server/
+	@echo "--- Ruff fix ---"
+	$(VENV)/bin/ruff check --fix server/
+
+test: install-gut venv lint
+	@echo "--- Python tests ---"
+	$(PYTEST) server/tests/ -v --cov=server --cov-config=.coveragerc --cov-report=term-missing --cov-fail-under=100 2>&1 | tee $(PYTHON_TEST_LOG); test $${PIPESTATUS[0]} -eq 0
+	@echo "--- GUT tests ---"
 	DISPLAY=:0 $(GODOT) --headless --import --path $(PROJECT) > /dev/null 2>&1
 	$(GODOT) --headless -s addons/gut/gut_cmdln.gd --path $(PROJECT) -gconfig=.gutconfig.json 2>&1 | tee $(TEST_LOG)
 
@@ -96,3 +119,9 @@ release: build
 		--title "Flanker $(VERSION)" \
 		--notes "Automated release build"
 	@echo "Release $(VERSION) created!"
+
+docker-build:
+	docker build -t flanker-server .
+
+docker-run: docker-build
+	docker run --rm -p 7890:7890 flanker-server

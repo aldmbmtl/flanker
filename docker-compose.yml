@@ -1,0 +1,14 @@
+services:
+  server:
+    build: .
+    image: flanker-server
+    ports:
+      - "7890:7890"
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    environment:
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "7890"
+      LOG_FILE: "/app/logs/server.log"
+    restart: unless-stopped

@@ -59,7 +59,13 @@ func _fire_at(target: Node3D) -> void:
 	ball.position      = fire_pos   # set BEFORE add_child so _ready() / init_ballistic_arc sees correct origin
 	VfxUtils.get_scene_root(self).add_child(ball)
 
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		LobbyManager.spawn_cannonball_visuals.rpc(fire_pos, target_pos, attack_damage, team)
+	BridgeClient.send("fire_projectile", {
+		"visual_type": "cannonball",
+		"params": {
+			"pos_x": fire_pos.x, "pos_y": fire_pos.y, "pos_z": fire_pos.z,
+			"target_x": target_pos.x, "target_y": target_pos.y, "target_z": target_pos.z,
+			"damage": attack_damage, "team": team,
+		},
+	})
 
 	shoot_audio.play()

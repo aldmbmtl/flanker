@@ -56,10 +56,10 @@ static func _mass_heal(peer_id: int) -> void:
 			continue
 		if m.has_method("heal"):
 			m.heal(30.0)
-	# Heal friendly players via authoritative broadcast so remote clients receive HP.
+	# Heal friendly players via Python bridge so all clients receive HP.
 	for pid in GameSync.player_teams:
 		if GameSync.get_player_team(pid) != team:
 			continue
 		if GameSync.player_dead.get(pid, false):
 			continue
-		LobbyManager.heal_player_broadcast(pid, 30.0)
+		BridgeClient.send("heal_player", {"peer_id": pid, "amount": 30.0})

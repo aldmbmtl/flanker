@@ -72,11 +72,4 @@ func _on_body_entered(body: Node3D) -> void:
 		if body_team != team:
 			return
 	body.heal(HEAL_AMOUNT)
-	if multiplayer.has_multiplayer_peer():
-		if multiplayer.is_server():
-			# rpc_id(1,...) from the server to itself is a no-op — call directly
-			LobbyManager.despawn_drop.rpc(name)
-		else:
-			LobbyManager.notify_drop_picked_up.rpc_id(1, name)
-	else:
-		queue_free()
+	BridgeClient.send("drop_picked_up", {"name": str(name)})

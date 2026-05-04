@@ -31,6 +31,9 @@ var game_over    := false
 var fps_mode     := true
 var _respawning  := false
 var _respawn_timer: float = 0.0
+## Stores the server-provided respawn time from the player_died signal so that
+## _on_player_died() can seed the countdown from the authoritative value.
+var _server_respawn_time: float = 0.0
 var player_start_team: int = 0
 var player_role: Role = Role.FIGHTER
 var time_seed: int = 1  # 0=sunrise 1=noon 2=sunset 3=night
@@ -44,7 +47,7 @@ var _pickup_sound: AudioStream = null
 var _pending_respawns: Dictionary = {}
 
 const FPSPlayerScene := preload("res://scenes/roles/FPSPlayer.tscn")
-const MinionAI := preload("res://scripts/minions/MinionAI.gd")
+const MinionAI := preload("res://scripts/minions/MinionBase.gd")
 const RoleSelectDialogScene := preload("res://scenes/ui/RoleSelectDialog.tscn")
 const SupporterHUDScene := preload("res://scenes/ui/SupporterHUD.tscn")
 const LauncherHUDScript := preload("res://scripts/ui/LauncherHUD.gd")
@@ -137,8 +140,8 @@ func _ready() -> void:
 	$MinionSpawner.set_process(false)
 	$MinionSpawner.set_physics_process(false)
 	_setup_game()
-	GraphicsSettings.settings_changed.connect(_apply_fog_settings)
-	GraphicsSettings.settings_changed.connect(_apply_shadow_settings)
+	ClientSettings.settings_changed.connect(_apply_fog_settings)
+	ClientSettings.settings_changed.connect(_apply_shadow_settings)
 	TeamLives.life_lost.connect(_on_life_lost)
 	TeamLives.game_over.connect(_on_team_lives_game_over)
 
@@ -155,8 +158,6 @@ func _on_kicked_from_server() -> void:
 	get_tree().change_scene_to_file("res://scenes/ui/StartMenu.tscn")
 
 func _spawn_remote_player_manager() -> void:
-	if not multiplayer.has_multiplayer_peer():
-		return
 	var mgr_script := load("res://scripts/network/PlayerManager.gd")
 	var mgr: Node = Node.new()
 	mgr.set_script(mgr_script)
@@ -164,7 +165,7 @@ func _spawn_remote_player_manager() -> void:
 	add_child(mgr)
 
 func _spawn_local_player() -> void:
-	var my_id := multiplayer.get_unique_id()
+	var my_id := BridgeClient.get_peer_id()
 	fps_player = FPSPlayerScene.instantiate()
 	fps_player.name = "FPSPlayer_%d" % my_id
 	fps_player.setup(my_id, player_start_team, true, _player_avatar_char)
@@ -177,7 +178,7 @@ func _spawn_local_player() -> void:
 
 func _start_multiplayer_game() -> void:
 	# Resolve team from lobby
-	var my_id := multiplayer.get_unique_id()
+	var my_id := BridgeClient.get_peer_id()
 	var info: Dictionary = LobbyManager.players.get(my_id, {})
 	player_start_team = info.team if info.has("team") else 0
 
@@ -200,15 +201,12 @@ func _start_multiplayer_game() -> void:
 
 	var selected_role: int = await _role_dialog.role_selected
 
-	# Send claim to server — server validates and broadcasts
-	if multiplayer.is_server():
-		LobbyManager.set_role_ingame(selected_role)
-		# Server fires _sync_role_slots synchronously — no await needed
-	else:
-		LobbyManager.set_role_ingame.rpc_id(1, selected_role)
-		# Wait for server's _sync_role_slots RPC to arrive before reading result.
-		# One process frame is not enough — RTT can be >16ms.
-		await LobbyManager.role_slots_updated
+	# Send claim to server — server validates and broadcasts result.
+	# In the bridge path both server and client send via BridgeClient and must
+	# await role_slots_updated for the Python reply to arrive before reading
+	# the result (role_accepted / role_rejected updates supporter_claimed).
+	LobbyManager.set_role_ingame(selected_role)
+	await LobbyManager.role_slots_updated
 
 	LobbyManager.role_slots_updated.disconnect(_role_dialog.on_slots_updated)
 	_role_dialog.visible = false
@@ -224,23 +222,20 @@ func _start_multiplayer_game() -> void:
 		_role_dialog.visible = true
 		selected_role = await _role_dialog.role_selected
 		# Fighter is always available — send final claim
-		if multiplayer.is_server():
-			LobbyManager.set_role_ingame(selected_role)
-		else:
-			LobbyManager.set_role_ingame.rpc_id(1, selected_role)
-			await LobbyManager.role_slots_updated
+		LobbyManager.set_role_ingame(selected_role)
+		await LobbyManager.role_slots_updated
 		_role_dialog.visible = false
 
 	player_role = selected_role as Role
 	rts_camera.player_role = player_role
 	game_state = GameState.PLAYING
 	_setup_event_feed()
-	_register_skill_tree_peer(multiplayer.get_unique_id(), player_role)
+	_register_skill_tree_peer(BridgeClient.get_peer_id(), player_role)
 
-	# Spawn AI Supporters for any team without a human Supporter (server only).
-	# Done asynchronously so role selection doesn't block the server player's own
+	# Spawn AI Supporters for any team without a human Supporter (host only).
+	# Done asynchronously so role selection doesn't block the host player's own
 	# game setup. Waits up to 30s for all peers to confirm before spawning.
-	if multiplayer.is_server():
+	if BridgeClient.is_host():
 		LobbyManager.human_supporter_claimed.connect(_on_human_supporter_claimed)
 		_spawn_ai_supporters_when_ready()
 
@@ -318,11 +313,11 @@ func _start_multiplayer_game() -> void:
 	call_deferred("_spawn_weapon_pickups")
 	call_deferred("_setup_lane_data")
 
-	# World generation is complete by the time the multiplayer game scene loads
+	# World generation is complete by the time the game scene loads
 	# (the loading screen awaits terrain/trees/walls before transitioning).
-	# Mirror the singleplayer path: enable the spawner so wave timer ticks.
-	# MinionSpawner._process and _physics_process both guard on is_server()
-	# so enabling on all peers is safe — non-servers return early each frame.
+	# Enable the spawner so the wave timer ticks.
+	# MinionSpawner._process and _physics_process both guard on BridgeClient.is_host()
+	# so enabling on all peers is safe — non-hosts return early each frame.
 	$MinionSpawner.set_process(true)
 	$MinionSpawner.set_physics_process(true)
 
@@ -359,11 +354,14 @@ func _setup_hud_for_player() -> void:
 	fps_player.weapon_slot1_icon  = weapon_slot1_icon
 	fps_player.weapon_slot2_icon  = weapon_slot2_icon
 	fps_player.connect("died", _on_player_died)
+	# Capture the server-authoritative respawn_time from the bridge so that
+	# _on_player_died() can seed the countdown accurately.
+	GameSync.player_died.connect(_on_game_sync_player_died)
 	# Force icon population now that refs are wired
 	fps_player._update_weapon_label()
 	# Skill bar — Fighter only
 	if player_role == Role.FIGHTER:
-		var peer_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+		var peer_id: int = BridgeClient.get_peer_id()
 		var skill_bar := CanvasLayer.new()
 		skill_bar.set_script(FighterSkillBarScript)
 		skill_bar.name = "FighterSkillBar"
@@ -373,7 +371,7 @@ func _setup_hud_for_player() -> void:
 	_setup_level_hud()
 
 func _setup_level_hud() -> void:
-	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_peer: int = BridgeClient.get_peer_id()
 	LevelSystem.xp_gained.connect(_on_xp_gained)
 	LevelSystem.level_up.connect(_on_level_up_signal)
 	pending_button.pressed.connect(_on_pending_button_pressed)
@@ -393,7 +391,7 @@ func _refresh_xp_bar(peer_id: int) -> void:
 func _refresh_pending_button() -> void:
 	if pending_button == null:
 		return
-	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_peer: int = BridgeClient.get_peer_id()
 	var attr_pts: int  = LevelSystem.get_unspent_points(my_peer)
 	var skill_pts: int = SkillTree.get_skill_pts(my_peer)
 	var total: int     = attr_pts + skill_pts
@@ -410,7 +408,7 @@ func _toggle_attributes_dialog() -> void:
 	pass
 
 func _on_xp_gained(peer_id: int, _amount: int, new_xp: int, xp_needed: int) -> void:
-	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_peer: int = BridgeClient.get_peer_id()
 	if peer_id != my_peer:
 		return
 	if xp_bar == null:
@@ -420,7 +418,7 @@ func _on_xp_gained(peer_id: int, _amount: int, new_xp: int, xp_needed: int) -> v
 	level_label.text = "Lv.%d" % LevelSystem.get_level(peer_id)
 
 func _on_level_up_signal(peer_id: int, _new_level: int) -> void:
-	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_peer: int = BridgeClient.get_peer_id()
 	if peer_id != my_peer:
 		return
 	_refresh_xp_bar(peer_id)
@@ -460,7 +458,7 @@ func _register_skill_tree_peer(peer_id: int, role: Role) -> void:
 	if _char_screen == null:
 		_char_screen = CharacterScreenScene.instantiate()
 		$HUD.add_child(_char_screen)
-		_char_screen.setup(peer_id, multiplayer.has_multiplayer_peer())
+		_char_screen.setup(peer_id, true)
 		_char_screen.set_role(role == Role.FIGHTER)
 		_char_screen.connect("opened", _on_char_screen_opened)
 		_char_screen.connect("closed", _on_char_screen_closed)
@@ -479,7 +477,7 @@ func _on_char_screen_closed() -> void:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
 
 func _on_skill_pts_changed(peer_id: int, _pts: int) -> void:
-	var my_peer: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var my_peer: int = BridgeClient.get_peer_id()
 	if peer_id != my_peer:
 		return
 	_refresh_pending_button()
@@ -487,7 +485,7 @@ func _on_skill_pts_changed(peer_id: int, _pts: int) -> void:
 func _team_name(team: int) -> String:
 	return "Blue" if team == 0 else "Red"
 
-func _on_event_player_died(peer_id: int) -> void:
+func _on_event_player_died(peer_id: int, _respawn_time: float) -> void:
 	var killed_team: int = GameSync.get_player_team(peer_id)
 	if killed_team == -1:
 		return  # unknown team, skip
@@ -557,19 +555,19 @@ func _apply_fog_settings() -> void:
 		return
 	var env: Environment = world_env.environment
 	# Fog enabled only when in FPS mode AND GraphicsSettings allows it
-	var want_fog: bool = _is_fps_mode and GraphicsSettings.fog_enabled
+	var want_fog: bool = _is_fps_mode and ClientSettings.fog_enabled
 	env.fog_enabled = want_fog
 	env.volumetric_fog_enabled = want_fog
 	if want_fog:
-		env.fog_density = GraphicsSettings.get_fog_density(time_seed)
-		env.volumetric_fog_density = GraphicsSettings.get_vol_fog_density(time_seed)
+		env.fog_density = ClientSettings.get_fog_density(time_seed)
+		env.volumetric_fog_density = ClientSettings.get_vol_fog_density(time_seed)
 
 
 func _apply_shadow_settings() -> void:
 	var sun: DirectionalLight3D = get_node_or_null("World/SunLight")
 	if sun == null:
 		return
-	match GraphicsSettings.shadow_quality:
+	match ClientSettings.shadow_quality:
 		0: # Off
 			sun.shadow_enabled = false
 		1: # Low — orthogonal, 60 m
@@ -589,14 +587,7 @@ func _pick_minion_characters() -> void:
 	_player_avatar_char = shuffled[2]
 	MinionAI.set_model_characters(_blue_minion_char, _red_minion_char)
 	# Send avatar char to server so all peers can look it up via LobbyManager.players
-	if multiplayer.has_multiplayer_peer():
-		if multiplayer.is_server():
-			var my_id: int = multiplayer.get_unique_id()
-			if LobbyManager.players.has(my_id):
-				LobbyManager.players[my_id]["avatar_char"] = _player_avatar_char
-				LobbyManager.sync_lobby_state.rpc(LobbyManager.players)
-		else:
-			LobbyManager.report_avatar_char.rpc_id(1, _player_avatar_char)
+	LobbyManager.report_avatar_char(_player_avatar_char)
 
 func _setup_lane_data() -> void:
 	var terrain: Node = $World/Terrain
@@ -605,7 +596,7 @@ func _setup_lane_data() -> void:
 		LaneData.set_secret_paths(secret_paths)
 
 func _process(delta: float) -> void:
-	if _respawning and game_state == GameState.PLAYING:
+	if _respawning:
 		_respawn_timer -= delta
 		if _respawn_timer <= 0.0:
 			_do_respawn()
@@ -747,9 +738,8 @@ func _on_quit_from_menu() -> void:
 	get_tree().quit()
 
 func leave_game() -> void:
-	# Always use close_connection() so the ENet socket is properly closed
-	# and the port is freed for re-use (avoids "port in use" on next host).
-	NetworkManager.close_connection()
+	# Disconnect from the Python server and free the TCP connection.
+	BridgeClient.disconnect_from_server()
 	# Reset all autoload state so the start menu simulation and next game
 	# start from a clean slate — no stale healths, pings, points, etc.
 	GameSync.reset()
@@ -870,7 +860,7 @@ func _on_life_lost(_team: int, _remaining: int) -> void:
 func _update_lives_bars() -> void:
 	if blue_lives_bar == null or red_lives_bar == null:
 		return
-	var max_lives: int = GameSettings.lives_per_team
+	var max_lives: int = ClientSettings.lives_per_team
 	blue_lives_bar.max_value = max_lives
 	red_lives_bar.max_value  = max_lives
 	blue_lives_bar.value = TeamLives.get_lives(0)
@@ -892,12 +882,25 @@ func show_wave_announcement(wave_num: int) -> void:
 	tween.tween_property(wave_announce_panel, "modulate:a", 0.0, 1.0)
 	tween.tween_callback(func(): wave_announce_panel.visible = false)
 
+func _on_game_sync_player_died(peer_id: int, respawn_time: float) -> void:
+	# Store the server-provided respawn time so _on_player_died() can use it
+	# to seed the countdown label with the authoritative value.
+	if peer_id == BridgeClient.get_peer_id():
+		_server_respawn_time = respawn_time
+
 func _on_player_died() -> void:
 	if game_over:
 		return
 	if player_role != Role.FIGHTER:
 		return
-	var respawn_time: float = LobbyManager.get_respawn_time(multiplayer.get_unique_id())
+	# respawn_time is now seeded via _on_game_sync_died which receives the
+	# server-authoritative value from the player_died signal. This method
+	# is the "died" signal from the FPS player node (local path). Use the
+	# last value stored in _server_respawn_time if available, otherwise fall
+	# back to LobbyManager.
+	var respawn_time: float = _server_respawn_time if _server_respawn_time > 0.0 \
+		else LobbyManager.get_respawn_time(BridgeClient.get_peer_id())
+	_server_respawn_time = 0.0
 	_respawning     = true
 	_respawn_timer  = respawn_time
 	respawn_label.visible = true
@@ -912,7 +915,7 @@ func _do_respawn() -> void:
 	if fps_player:
 		var spawn_pos: Vector3 = BLUE_SPAWN if fps_player.player_team == 0 else RED_SPAWN
 		fps_player.respawn(spawn_pos)
-	SkillTree.reset_per_life(multiplayer.get_unique_id())
+	SkillTree.reset_per_life(BridgeClient.get_peer_id())
 	_set_mode(true)
 
 func _spawn_weapon_pickups() -> void:
@@ -1000,6 +1003,8 @@ func _place_pickup(pos: Vector3, pickup_sound: AudioStream) -> void:
 	add_child(pickup)
 	pickup.add_to_group("weapon_pickups")
 	(pickup as Node).connect("weapon_picked_up", _on_weapon_pickup)
+	if BridgeClient.is_connected_to_server():
+		BridgeClient.send("register_drop", {"name": str(pickup.name), "team": 0})
 
 # ── AI Supporter spawning ─────────────────────────────────────────────────────
 
@@ -1010,15 +1015,14 @@ func _spawn_ai_supporters_multiplayer() -> void:
 			_spawn_ai_supporter(t)
 
 # Async wrapper: waits for all peers to confirm roles (up to 30s) then spawns.
+# Python sends "all_roles_confirmed" via bridge which emits LobbyManager.all_roles_confirmed.
+# Timeout guard ensures we never hang if a peer disconnects before picking a role.
 func _spawn_ai_supporters_when_ready() -> void:
-	if LobbyManager._roles_pending > 0:
-		var _timeout_timer := get_tree().create_timer(30.0)
-		_timeout_timer.timeout.connect(func() -> void:
-			if LobbyManager._roles_pending > 0:
-				LobbyManager._roles_pending = 0
-				LobbyManager.all_roles_confirmed.emit()
-		)
-		await LobbyManager.all_roles_confirmed
+	var _timeout_timer := get_tree().create_timer(30.0)
+	_timeout_timer.timeout.connect(func() -> void:
+		LobbyManager.all_roles_confirmed.emit()
+	)
+	await LobbyManager.all_roles_confirmed
 	_spawn_ai_supporters_multiplayer()
 
 func _spawn_ai_supporter(t: int) -> void:
@@ -1056,10 +1060,52 @@ func apply_recon_reveal(target_pos: Vector3, reveal_radius: float, reveal_durati
 		fog.call("add_timed_reveal", target_pos, reveal_radius, reveal_duration)
 
 	# Shockwave VFX — visible to FPS players in range
-	var vfx_script := load("res://scripts/ReconStrikeVFX.gd")
-	if vfx_script == null:
-		return
-	var vfx := Node3D.new()
-	vfx.set_script(vfx_script)
-	VfxUtils.get_scene_root(self).add_child(vfx)
-	vfx.global_position = Vector3(target_pos.x, target_pos.y + 5.0, target_pos.z)
+	_spawn_recon_vfx(Vector3(target_pos.x, target_pos.y + 5.0, target_pos.z))
+
+# ── Recon Strike VFX (inlined from ReconStrikeVFX.gd) ────────────────────────
+func _spawn_recon_vfx(pos: Vector3) -> void:
+	var root: Node = VfxUtils.get_scene_root(self)
+
+	# 1. Expanding torus shockwave ring
+	var mesh_inst := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.5
+	torus.outer_radius = 1.0
+	torus.rings = 16
+	torus.ring_segments = 64
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.albedo_color = Color(0.4, 0.8, 1.0, 0.65)
+	ring_mat.emission_enabled = true
+	ring_mat.emission = Color(0.3, 0.7, 1.0, 1.0)
+	ring_mat.emission_energy_multiplier = 3.0
+	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	torus.material = ring_mat
+	mesh_inst.mesh = torus
+	mesh_inst.scale = Vector3(0.01, 0.01, 0.01)
+	root.add_child(mesh_inst)
+	mesh_inst.global_position = pos
+	var tw: Tween = mesh_inst.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(mesh_inst, "scale", Vector3(40.0, 40.0, 40.0), 1.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_method(func(a: float) -> void: ring_mat.albedo_color = Color(0.4, 0.8, 1.0, a),
+		0.65, 0.0, 1.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	get_tree().create_timer(1.7).timeout.connect(mesh_inst.queue_free)
+
+	# 2. Pulse light
+	VfxUtils.spawn_flash_light(root, pos, {
+		"color": Color(0.5, 0.8, 1.0), "energy": 12.0, "range": 50.0,
+		"duration": 1.0, "offset": Vector3(0.0, -2.0, 0.0)
+	})
+
+	# 3. Particle burst
+	VfxUtils.spawn_particles(root, pos, {
+		"amount": 30, "lifetime": 1.2, "explosiveness": 1.0,
+		"emission_shape": ParticleProcessMaterial.EMISSION_SHAPE_SPHERE,
+		"emission_radius": 0.5, "spread": 180.0,
+		"vel_min": 5.0, "vel_max": 10.0, "gravity": Vector3(0.0, -1.5, 0.0),
+		"scale_min": 0.15, "scale_max": 0.35,
+		"color": Color(0.5, 0.9, 1.0, 1.0),
+		"emission_enabled": true, "emission_color": Color(0.4, 0.8, 1.0), "emission_energy": 5.0,
+	})

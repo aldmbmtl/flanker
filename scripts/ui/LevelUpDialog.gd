@@ -79,9 +79,6 @@ func _on_damage_pressed() -> void:
 	_spend("damage")
 
 func _spend(attr: String) -> void:
-	if _is_mp and multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
-		LevelSystem.request_spend_point.rpc_id(1, attr)
-	else:
-		LevelSystem.spend_point_local(_peer_id, attr)
+	LevelSystem.request_spend_point(attr)
 	point_spent.emit(attr)
 	_refresh()

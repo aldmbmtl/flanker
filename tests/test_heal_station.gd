@@ -6,6 +6,12 @@ extends GutTest
 
 const HealStationScript := preload("res://scripts/HealStation.gd")
 
+func before_each() -> void:
+	BridgeClient._is_host = true
+
+func after_each() -> void:
+	BridgeClient._is_host = false
+
 func _make_station(team: int = 0) -> StaticBody3D:
 	var hs := StaticBody3D.new()
 	hs.set_script(HealStationScript)

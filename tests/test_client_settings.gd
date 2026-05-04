@@ -10,7 +10,7 @@ var gs: Node
 func before_each() -> void:
 	# Instantiate a fresh GraphicsSettings node (not the autoload singleton)
 	# so tests are isolated and don't touch the user's saved config.
-	gs = load("res://scripts/ui/GraphicsSettings.gd").new()
+	gs = load("res://scripts/ClientSettings.gd").new()
 	# Override SAVE_PATH to a temp location so tests never write real config.
 	# We skip load_settings() side-effects by not calling _ready().
 	add_child_autofree(gs)

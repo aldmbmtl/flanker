@@ -475,7 +475,7 @@ func _update_ghost() -> void:
 	var normal: Vector3 = result.normal
 	var on_flat_enough: bool = normal.dot(Vector3.UP) >= build_system.SLOPE_THRESHOLD
 
-	var placer_id: int = multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 1
+	var placer_id: int = BridgeClient.get_peer_id()
 	var valid: bool = on_flat_enough and build_system.can_place_item(snapped, _player_team, _selected_type, placer_id)
 	if valid != _ghost_valid:
 		_ghost_valid = valid
@@ -528,19 +528,14 @@ func _try_place_item(_screen_pos: Vector2) -> void:
 		return
 	if build_system == null or not _ghost_valid:
 		return
-	if multiplayer.is_server():
-		var my_id: int = multiplayer.get_unique_id()
-		var assigned_name: String = build_system.place_item(_ghost_world_pos, _player_team, _selected_type, _selected_subtype, my_id)
-		if assigned_name != "":
-			LobbyManager.spawn_item_visuals.rpc(_ghost_world_pos, _player_team, _selected_type, _selected_subtype, assigned_name)
-			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
-			LobbyManager.item_spawned.emit(_selected_type, _player_team)
-			if _selected_type in ["weapon", "healthpack"]:
-				LobbyManager.broadcast_ping.rpc(_ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
-	else:
-		LobbyManager.request_place_item.rpc_id(1, _ghost_world_pos, _player_team, _selected_type, _selected_subtype)
-		if _selected_type in ["weapon", "healthpack"]:
-			LobbyManager.request_ping.rpc_id(1, _ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
+	# All placement is now routed through BridgeClient → Python authority layer.
+	# Both host and remote clients send the same message; Python validates,
+	# deducts points, and broadcasts tower_spawned + team_points back to everyone.
+	var my_id: int = BridgeClient.get_peer_id()
+	build_system.place_item(_ghost_world_pos, _player_team, _selected_type, _selected_subtype, my_id)
+	# Optimistic ping for weapon/healthpack drops (visual only, no authority needed)
+	if _selected_type in ["weapon", "healthpack"]:
+		LobbyManager.request_ping(_ghost_world_pos, _player_team, _get_item_ping_color(_selected_type))
 
 func _try_fire_missile(screen_pos: Vector2) -> void:
 	if _launcher_hud == null or not is_instance_valid(_launcher_hud):
@@ -559,46 +554,10 @@ func _try_fire_missile(screen_pos: Vector2) -> void:
 	_launcher_hud.confirm_target(result.position)
 
 func _on_fire_requested(launcher_name: String, launcher_type: String, target_pos: Vector3) -> void:
-	# Find the launcher node to get its fire position
-	var launcher: Node = get_tree().root.get_node_or_null("Main/" + launcher_name)
-	if launcher == null:
-		return
-	var fire_pos: Vector3 = launcher.get_fire_position() if launcher.has_method("get_fire_position") else launcher.global_position + Vector3(0.0, 6.0, 0.0)
-
-	if multiplayer.has_multiplayer_peer():
-		if multiplayer.is_server():
-			_server_spawn_missile(fire_pos, target_pos, _player_team, launcher_type)
-			LobbyManager.spawn_missile_visuals.rpc(fire_pos, target_pos, _player_team, launcher_type)
-			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
-		else:
-			LobbyManager.request_fire_missile.rpc_id(1, launcher_name, target_pos, _player_team, launcher_type)
-	else:
-		_server_spawn_missile(fire_pos, target_pos, _player_team, launcher_type)
-
-func _server_spawn_missile(fire_pos: Vector3, target_pos: Vector3, team: int, launcher_type: String) -> void:
-	var def: Dictionary = LauncherDefs.DEFS.get(launcher_type, {})
-	if def.is_empty():
-		return
-	var missile_scene: PackedScene = load(LauncherDefs.get_missile_scene(launcher_type)) as PackedScene
-	if missile_scene == null:
-		return
-	var missile: Node3D = missile_scene.instantiate() as Node3D
-	missile.configure(def, team, fire_pos, target_pos, launcher_type)
-	VfxUtils.get_scene_root(self).add_child(missile)
-	missile.global_position = fire_pos
+	LobbyManager.request_fire_missile(launcher_name, target_pos, _player_team, launcher_type)
 
 func _on_reveal_requested(target_pos: Vector3, reveal_radius: float, reveal_duration: float) -> void:
-	if multiplayer.has_multiplayer_peer():
-		if multiplayer.is_server():
-			LobbyManager.broadcast_recon_reveal.rpc(target_pos, reveal_radius, reveal_duration, _player_team)
-			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
-		else:
-			LobbyManager.request_recon_reveal.rpc_id(1, target_pos, reveal_radius, reveal_duration, _player_team)
-	else:
-		# Singleplayer — apply directly via Main
-		var main: Node = get_node_or_null("/root/Main")
-		if main != null and main.has_method("apply_recon_reveal"):
-			main.apply_recon_reveal(target_pos, reveal_radius, reveal_duration)
+	LobbyManager.request_recon_reveal(target_pos, reveal_radius, reveal_duration, _player_team)
 
 # ── Fog of war ───────────────────────────────────────────────────────────────
 
@@ -609,6 +568,9 @@ func _restore_fog() -> void:
 		if is_instance_valid(node):
 			node.visible = true
 	for node in get_tree().get_nodes_in_group("minions"):
+		if is_instance_valid(node):
+			node.visible = true
+	for node in get_tree().get_nodes_in_group("remote_players"):
 		if is_instance_valid(node):
 			node.visible = true
 
@@ -672,31 +634,19 @@ func _update_fog() -> void:
 	_apply_fog_to_group(all_towers, allied_player_positions, friendly_minion_positions, tower_data)
 	_apply_fog_to_group(all_minions, allied_player_positions, friendly_minion_positions, tower_data)
 
-	# Hide/show enemy remote player ghosts based on fog visibility
+	# All remote player ghosts are always visible — no fog gating on players.
 	for ghost in get_tree().get_nodes_in_group("remote_players"):
 		if not is_instance_valid(ghost):
 			continue
-		var pid: int = ghost.get("peer_id") if ghost.get("peer_id") != null else 0
-		var t: int = GameSync.get_player_team(pid)
-		if t < 0:
-			var info: Dictionary = LobbyManager.players.get(pid, {})
-			if info.has("team"):
-				t = info["team"]
-		if t == _player_team:
-			ghost.visible = true
-		else:
-			ghost.visible = _is_visible_to_sources(ghost.global_position, allied_player_positions, friendly_minion_positions, tower_data)
+		ghost.visible = true
 
 
 func _apply_fog_to_group(nodes: Array, allied_player_positions: Array, friendly_minion_positions: PackedVector3Array, friendly_tower_data: Array) -> void:
 	for node in nodes:
 		if not is_instance_valid(node):
 			continue
-		var node_team: int = node.get("team") if node.get("team") != null else -1
-		if node_team == _player_team:
-			node.visible = true
-			continue
-		node.visible = _is_visible_to_sources(node.global_position, allied_player_positions, friendly_minion_positions, friendly_tower_data)
+		# All towers and minions are always visible — no fog gating on entities.
+		node.visible = true
 
 
 func _is_visible_to_sources(world_pos: Vector3, allied_player_positions: Array, friendly_minion_positions: PackedVector3Array, friendly_tower_data: Array) -> bool:
@@ -729,7 +679,4 @@ func _fire_ping(screen_pos: Vector2) -> void:
 	if result.is_empty():
 		return
 	var world_pos: Vector3 = result.position as Vector3
-	if multiplayer.is_server():
-		LobbyManager.request_ping(world_pos, _player_team)
-	else:
-		LobbyManager.request_ping.rpc_id(1, world_pos, _player_team)
+	LobbyManager.request_ping(world_pos, _player_team)

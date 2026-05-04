@@ -448,17 +448,7 @@ func _on_ram_lane_pressed(li: int) -> void:
 	if TeamData.get_points(_player_team) < cost * lanes_n:
 		return
 
-	# Add passive income (+1 per ram sent)
-	TeamData.add_passive_income(_player_team, 1)
-
-	if multiplayer.is_server():
-		var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
-		if spawner == null:
-			return
-		if spawner.request_ram_minion(_player_team, _ram_tier, lane_i):
-			LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
-	else:
-		LobbyManager.request_ram_minion.rpc_id(1, _ram_tier, _player_team, lane_i)
+	LobbyManager.request_ram_minion(_ram_tier, _player_team, lane_i)
 
 func _on_boost_pressed(slot_i: int) -> void:
 	if TeamData.get_points(_player_team) < BOOST_COST:
@@ -467,25 +457,4 @@ func _on_boost_pressed(slot_i: int) -> void:
 	var slot: Dictionary = _SLOTS[slot_i]
 	var lane_i: int = slot["lane_i"]
 
-	# If we are the server (singleplayer or multiplayer host), call directly.
-	# The server path also calls sync_lane_boosts.rpc so all clients update.
-	if multiplayer.is_server():
-		var spawner: Node = get_tree().root.get_node_or_null("Main/MinionSpawner")
-		if spawner == null:
-			return
-		if not TeamData.spend_points(_player_team, BOOST_COST):
-			return
-		# Add passive income (+1 per boost sent)
-		TeamData.add_passive_income(_player_team, 1)
-		if lane_i == -1:
-			spawner.boost_all_lanes(_player_team)
-		else:
-			spawner.boost_lane(_player_team, lane_i, LobbyManager.LANE_BOOST_AMOUNT)
-		var b: Array = spawner.get("_lane_boosts") as Array
-		LobbyManager.sync_lane_boosts.rpc(b[0], b[1])
-		LobbyManager.sync_team_points.rpc(TeamData.get_points(0), TeamData.get_points(1))
-	else:
-		# Multiplayer client: RPC to server.
-		# Server will validate, spend points, boost, then broadcast sync_lane_boosts
-		# and sync_team_points back to all peers — no optimistic update needed here.
-		LobbyManager.request_lane_boost.rpc_id(1, lane_i, _player_team)
+	LobbyManager.request_lane_boost(lane_i, _player_team)

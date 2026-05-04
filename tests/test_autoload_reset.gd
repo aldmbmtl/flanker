@@ -15,12 +15,10 @@ func test_game_sync_reset_clears_teams() -> void:
 	GameSync.reset()
 	assert_true(GameSync.player_teams.is_empty(), "player_teams cleared after reset")
 
-func test_game_sync_reset_clears_dead_and_countdown() -> void:
+func test_game_sync_reset_clears_dead() -> void:
 	GameSync.player_dead[1] = true
-	GameSync.respawn_countdown[1] = 3.0
 	GameSync.reset()
 	assert_true(GameSync.player_dead.is_empty(), "player_dead cleared after reset")
-	assert_true(GameSync.respawn_countdown.is_empty(), "respawn_countdown cleared after reset")
 
 func test_game_sync_reset_clears_ammo_and_weapon() -> void:
 	GameSync.player_reserve_ammo[1] = 30
@@ -57,8 +55,8 @@ func test_team_lives_reset_restores_lives() -> void:
 	TeamLives.blue_lives = 0
 	TeamLives.red_lives  = 0
 	TeamLives.reset()
-	assert_eq(TeamLives.blue_lives, GameSettings.lives_per_team, "blue lives restored")
-	assert_eq(TeamLives.red_lives,  GameSettings.lives_per_team, "red lives restored")
+	assert_eq(TeamLives.blue_lives, ClientSettings.lives_per_team, "blue lives restored")
+	assert_eq(TeamLives.red_lives,  ClientSettings.lives_per_team, "red lives restored")
 
 # ── LobbyManager.reset() ─────────────────────────────────────────────────────
 
@@ -89,10 +87,10 @@ func test_lobby_manager_reset_clears_ai_supporter_teams() -> void:
 	LobbyManager.reset()
 	assert_true(LobbyManager.ai_supporter_teams.is_empty(), "ai_supporter_teams cleared after reset")
 
-func test_lobby_manager_reset_clears_roles_pending() -> void:
-	LobbyManager._roles_pending = 3
+func test_lobby_manager_reset_clears_can_start() -> void:
+	LobbyManager._can_start = true
 	LobbyManager.reset()
-	assert_eq(LobbyManager._roles_pending, 0, "_roles_pending reset to 0")
+	assert_false(LobbyManager._can_start, "_can_start reset to false")
 
 # ── after_each: restore clean state for other test files ──────────────────────
 

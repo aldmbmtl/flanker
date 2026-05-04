@@ -31,21 +31,22 @@ func _add_glow_light() -> void:
 
 func _on_body_entered(body: Node3D) -> void:
 	if body.has_method("pick_up_weapon") and weapon_data != null:
-		# Supporter-placed drops sync despawn to all peers
+		# Supporter-placed drops sync despawn to all peers via Python bridge.
 		if get_meta("supporter_placed", false):
 			body.pick_up_weapon(weapon_data)
-			if multiplayer.is_server():
-				LobbyManager.notify_drop_picked_up(name)
-			else:
-				LobbyManager.notify_drop_picked_up.rpc_id(1, name)
+			BridgeClient.send("drop_picked_up", {"name": str(name)})
 			return
-		# Natural pickup path — emit signal for Main.gd respawn timer, then free
+		# Natural pickup path — emit signal for Main.gd respawn timer, then free.
+		# Detach audio before sending drop_picked_up so the node can queue_free
+		# when drop_despawned arrives without cutting the sound short.
 		weapon_picked_up.emit(global_position)
 		body.pick_up_weapon(weapon_data)
 		if has_node("AudioStreamPlayer3D"):
 			var asp: AudioStreamPlayer3D = $AudioStreamPlayer3D
 			asp.play()
 			call_deferred("_detach_and_finish", asp)
+		if BridgeClient.is_connected_to_server():
+			BridgeClient.send("drop_picked_up", {"name": str(name)})
 		else:
 			queue_free()
 

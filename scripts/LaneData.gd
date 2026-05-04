@@ -33,6 +33,18 @@ func regenerate_for_new_game() -> void:
 	_lane_points.clear()
 	_generate_if_needed()
 
+# Called by BridgeClient when the Python server sends game_started with lane_points.
+# data is an Array of 3 lanes; each lane is an Array of [x, z] float pairs.
+# Sets _lane_points directly and marks _generated so _generate_if_needed() is a no-op.
+func populate_from_server(data: Array) -> void:
+	_lane_points.clear()
+	for lane in data:
+		var pts: Array[Vector2] = []
+		for pair in lane:
+			pts.append(Vector2(float(pair[0]), float(pair[1])))
+		_lane_points.append(pts)
+	_generated = true
+
 func _generate_if_needed() -> void:
 	if _generated:
 		return

@@ -1,0 +1,14 @@
+[gd_resource type="ParticleProcessMaterial" format=3]
+
+[resource]
+emission_shape = 3
+emission_box_extents = Vector3(35, 6, 35)
+direction = Vector3(1, 0, 0.3)
+spread = 8.0
+initial_velocity_min = 6.3
+initial_velocity_max = 11.7
+gravity = Vector3(0, 0, 0)
+damping_min = 0.2
+damping_max = 0.5
+scale_min = 0.45
+scale_max = 0.9

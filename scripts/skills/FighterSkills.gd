@@ -46,6 +46,16 @@ static func execute(node_id: String, peer_id: int) -> void:
 static func _resolve(peer_id: int) -> Node:
 	return SkillTree.get_player(peer_id)
 
+## Heal a player by peer_id. Routes through Python bridge in multiplayer;
+## falls back to direct GameSync update in singleplayer / test context.
+static func _heal_player(peer_id: int, amount: float) -> void:
+	if BridgeClient.is_connected_to_server():
+		BridgeClient.send("heal_player", {"peer_id": peer_id, "amount": amount})
+	else:
+		var max_hp: float = GameSync.PLAYER_MAX_HP + LevelSystem.get_bonus_hp(peer_id)
+		var cur_hp: float = GameSync.player_healths.get(peer_id, 0.0)
+		GameSync.set_player_health(peer_id, minf(cur_hp + amount, max_hp))
+
 # ── Guardian branch ───────────────────────────────────────────────────────────
 
 static func _field_medic(peer_id: int) -> void:
@@ -53,8 +63,8 @@ static func _field_medic(peer_id: int) -> void:
 	if caster == null:
 		return
 	var team: int = SkillTree.get_player_team(peer_id)
-	# Heal self via authoritative broadcast (works for both local and remote casters).
-	LobbyManager.heal_player_broadcast(peer_id, FIELD_MEDIC_HEAL)
+	# Heal self.
+	_heal_player(peer_id, FIELD_MEDIC_HEAL)
 	# Heal nearby allies
 	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
@@ -63,21 +73,23 @@ static func _field_medic(peer_id: int) -> void:
 		if dist <= FIELD_MEDIC_RANGE:
 			var ally_pid: int = _peer_id_from_node(ally)
 			if ally_pid > 0:
-				LobbyManager.heal_player_broadcast(ally_pid, FIELD_MEDIC_HEAL)
+				_heal_player(ally_pid, FIELD_MEDIC_HEAL)
 
 static func _rally_cry(peer_id: int) -> void:
 	var caster: Node = _resolve(peer_id)
 	if caster == null:
 		return
 	var team: int = SkillTree.get_player_team(peer_id)
-	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
-	var is_mp_server: bool = _mp.has_multiplayer_peer() and _mp.is_server()
-
 	# Apply to caster first (get_ally_players excludes caster).
 	caster.set_meta("rally_speed_bonus", RALLY_CRY_BONUS)
 	caster.set_meta("rally_cry_timer",   RALLY_CRY_DURATION)
-	if is_mp_server and peer_id != _mp.get_unique_id() and _mp.get_peers().has(peer_id):
-		SkillTree.apply_rally_cry.rpc_id(peer_id, RALLY_CRY_BONUS, RALLY_CRY_DURATION)
+	if BridgeClient.is_connected_to_server():
+		BridgeClient.send("apply_skill_effect", {
+			"target_peer_id": peer_id,
+			"effect": "rally_cry",
+			"bonus": RALLY_CRY_BONUS,
+			"duration": RALLY_CRY_DURATION,
+		})
 
 	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
@@ -87,11 +99,14 @@ static func _rally_cry(peer_id: int) -> void:
 			ally.set_meta("rally_speed_bonus", RALLY_CRY_BONUS)
 			ally.set_meta("rally_cry_timer", RALLY_CRY_DURATION)
 			# Deliver to the owning client of this ally.
-			if is_mp_server:
-				var ally_peer_id: int = _peer_id_from_node(ally)
-				if ally_peer_id > 0 and ally_peer_id != _mp.get_unique_id() \
-						and _mp.get_peers().has(ally_peer_id):
-					SkillTree.apply_rally_cry.rpc_id(ally_peer_id, RALLY_CRY_BONUS, RALLY_CRY_DURATION)
+			var ally_peer_id: int = _peer_id_from_node(ally)
+			if ally_peer_id > 0 and BridgeClient.is_connected_to_server():
+				BridgeClient.send("apply_skill_effect", {
+					"target_peer_id": ally_peer_id,
+					"effect": "rally_cry",
+					"bonus": RALLY_CRY_BONUS,
+					"duration": RALLY_CRY_DURATION,
+				})
 
 ## Extract peer_id from a node named "FPSPlayer_<id>" or "RemotePlayer_<id>".
 static func _peer_id_from_node(node: Node) -> int:
@@ -108,8 +123,8 @@ static func _revive_pulse(peer_id: int) -> void:
 	if caster == null:
 		return
 	var team: int = SkillTree.get_player_team(peer_id)
-	# Full self-heal via authoritative broadcast (capped at max HP inside heal_player_broadcast).
-	LobbyManager.heal_player_broadcast(peer_id, 999.0)
+	# Full self-heal (server caps at max HP).
+	_heal_player(peer_id, 999.0)
 	# Heal allies within range
 	for ally in SkillTree.get_ally_players(team, peer_id):
 		if not (ally is Node3D):
@@ -118,7 +133,7 @@ static func _revive_pulse(peer_id: int) -> void:
 		if dist <= REVIVE_PULSE_RANGE:
 			var ally_pid: int = _peer_id_from_node(ally)
 			if ally_pid > 0:
-				LobbyManager.heal_player_broadcast(ally_pid, REVIVE_PULSE_ALLY)
+				_heal_player(ally_pid, REVIVE_PULSE_ALLY)
 
 # ── DPS branch ────────────────────────────────────────────────────────────────
 
@@ -183,11 +198,15 @@ static func _dash(peer_id: int) -> void:
 	cb.set_meta("dash_duration",  DASH_DURATION)
 	cb.set_meta("dash_effect",    effect)
 
-	# Deliver dash metas to the owning client so FPSController can read them locally.
-	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
-	if _mp.has_multiplayer_peer() and _mp.is_server() and peer_id != _mp.get_unique_id() \
-			and _mp.get_peers().has(peer_id):
-		SkillTree.apply_dash.rpc_id(peer_id, cb.global_position, target, 0.0, DASH_DURATION)
+	if BridgeClient.is_connected_to_server():
+		BridgeClient.send("apply_skill_effect", {
+			"target_peer_id": peer_id,
+			"effect": "dash",
+			"origin": [cb.global_position.x, cb.global_position.y, cb.global_position.z],
+			"target": [target.x, target.y, target.z],
+			"elapsed": 0.0,
+			"duration": DASH_DURATION,
+		})
 
 	# Auto-cleanup timer (failsafe if the player dies mid-dash)
 	# Captures only peer_id (int) — no Node references — to avoid freed-capture errors.
@@ -213,60 +232,18 @@ static func _rapid_fire(peer_id: int) -> void:
 	player.set_meta("rapid_fire_timer",  RAPID_FIRE_DURATION)
 	player.set_meta("rapid_fire_weapon", weapon_type)
 	# Deliver to owning client.
-	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
-	if _mp.has_multiplayer_peer() and _mp.is_server() and peer_id != _mp.get_unique_id() \
-			and _mp.get_peers().has(peer_id):
-		SkillTree.apply_rapid_fire.rpc_id(peer_id, RAPID_FIRE_DURATION, weapon_type)
+	if BridgeClient.is_connected_to_server():
+		BridgeClient.send("apply_skill_effect", {
+			"target_peer_id": peer_id,
+			"effect": "rapid_fire",
+			"duration": RAPID_FIRE_DURATION,
+			"weapon_type": weapon_type,
+		})
 
 static func _rocket_barrage(peer_id: int) -> void:
-	var player: Node = _resolve(peer_id)
-	if player == null or not (player is Node3D):
-		return
-	var caster_pos: Vector3 = (player as Node3D).global_position
-	var team: int = SkillTree.get_player_team(peer_id)
-
-	# Collect enemy towers within range
-	var targets: Array = []
-	for tower in Engine.get_main_loop().get_nodes_in_group("towers"):
-		if not (tower is Node3D):
-			continue
-		var tower_team: int = tower.get("team") if tower.get("team") != null else -1
-		if tower_team == team or tower_team == -1:
-			continue  # skip friendly and unknown
-		var dist: float = (tower as Node3D).global_position.distance_to(caster_pos)
-		if dist <= BARRAGE_RANGE:
-			targets.append(tower)
-
-	if targets.is_empty():
-		return  # no valid targets — no effect
-
-	# Sort by distance, cap at max targets
-	targets.sort_custom(func(a: Node3D, b: Node3D) -> bool:
-		return a.global_position.distance_to(caster_pos) < b.global_position.distance_to(caster_pos))
-	if targets.size() > BARRAGE_MAX_TARGETS:
-		targets = targets.slice(0, BARRAGE_MAX_TARGETS)
-
-	var rocket_scene: PackedScene = load("res://scenes/projectiles/Rocket.tscn")
-	if rocket_scene == null:
-		return
-	var scene_root: Node = Engine.get_main_loop().root.get_child(0)
-	var fire_pos: Vector3 = caster_pos + Vector3(0.0, 1.2, 0.0)
-	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
-	var is_mp_server: bool = _mp.has_multiplayer_peer() and _mp.is_server()
-
-	for target in targets:
-		var rocket: Node3D = rocket_scene.instantiate()
-		var dir: Vector3 = ((target as Node3D).global_position - fire_pos).normalized()
-		rocket.set("damage",          80.0)
-		rocket.set("source",          "f_rocket_barrage")
-		rocket.set("shooter_team",    -1)   # player-fired, same as FPSController rockets
-		rocket.set("shooter_peer_id", peer_id)
-		rocket.set("velocity",        dir * 49.0)
-		scene_root.add_child(rocket)
-		rocket.global_position = fire_pos
-		# Sync rocket visuals to all clients.
-		if is_mp_server:
-			LobbyManager.spawn_bullet_visuals.rpc(fire_pos, dir, 80.0, -1, peer_id, "rocket")
+	# Python is authoritative — delegate targeting and rocket spawning to server.
+	# Visual rockets are spawned via spawn_visual bridge messages on all clients.
+	BridgeClient.send("use_skill_direct", {"node_id": "f_rocket_barrage", "peer_id": peer_id})
 
 # ── Tank branch ───────────────────────────────────────────────────────────────
 
@@ -274,23 +251,24 @@ static func _adrenaline(peer_id: int) -> void:
 	var player: Node = _resolve(peer_id)
 	if player == null:
 		return
-	LobbyManager.heal_player_broadcast(peer_id, ADRENALINE_HEAL)
+	_heal_player(peer_id, ADRENALINE_HEAL)
 
 static func _iron_skin(peer_id: int) -> void:
 	var player: Node = _resolve(peer_id)
 	if player == null:
 		return
-	# Set shield state in GameSync first (server-authoritative) — damage_player()
-	# will drain shield before HP, eliminating the RPC ordering race condition.
-	GameSync.set_player_shield(peer_id, IRON_SKIN_HP, IRON_SKIN_DURATION)
-	# Also set metas on the server-side node for any server-path reads.
+	# Set shield metas on the server-side node for any server-path reads.
+	# Python is authoritative for shield state — no GameSync.set_player_shield call.
 	player.set_meta("shield_hp",    IRON_SKIN_HP)
 	player.set_meta("shield_timer", IRON_SKIN_DURATION)
 	# Deliver to owning client so FPSController can show local shield feedback.
-	var _mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
-	if _mp.has_multiplayer_peer() and _mp.is_server() and peer_id != _mp.get_unique_id() \
-			and _mp.get_peers().has(peer_id):
-		SkillTree.apply_iron_skin.rpc_id(peer_id, IRON_SKIN_HP, IRON_SKIN_DURATION)
+	if BridgeClient.is_connected_to_server():
+		BridgeClient.send("apply_skill_effect", {
+			"target_peer_id": peer_id,
+			"effect": "iron_skin",
+			"hp": IRON_SKIN_HP,
+			"timer": IRON_SKIN_DURATION,
+		})
 
 static func _deploy_mg(peer_id: int) -> void:
 	var player: Node = _resolve(peer_id)
@@ -298,34 +276,10 @@ static func _deploy_mg(peer_id: int) -> void:
 		return
 	var team: int = SkillTree.get_player_team(peer_id)
 	var pos: Vector3 = (player as Node3D).global_position
-
-	var mp: MultiplayerAPI = Engine.get_main_loop().root.multiplayer
-	if mp.has_multiplayer_peer() and mp.is_server():
-		# Multiplayer: use spawn_item_visuals RPC so all clients see the turret
-		var forced_name: String = "DeployMG_%d_%d" % [peer_id, Time.get_ticks_msec()]
-		var build_sys: Node = Engine.get_main_loop().root.get_node_or_null("Main/BuildSystem")
-		if build_sys != null and build_sys.has_method("spawn_item_local"):
-			build_sys.spawn_item_local(pos, team, "machinegun", "", forced_name)
-		LobbyManager.spawn_item_visuals.rpc(pos, team, "machinegun", "", forced_name)
-		# Schedule despawn on all peers after lifetime
-		var despawn_timer: SceneTreeTimer = Engine.get_main_loop().create_timer(DEPLOY_MG_LIFETIME)
-		despawn_timer.timeout.connect(func() -> void:
-			LobbyManager.despawn_tower.rpc(forced_name))
-	else:
-		# Singleplayer
-		var mg_scene: PackedScene = load("res://scenes/towers/MachineGunTower.tscn")
-		if mg_scene == null:
-			return
-		var mg: Node = mg_scene.instantiate()
-		var main: Node = SkillTree.get_main()
-		if main == null:
-			return
-		main.add_child(mg)
-		mg.global_position = pos
-		if mg.has_method("setup"):
-			mg.setup(team)
-		# Schedule despawn
-		var despawn_timer: SceneTreeTimer = Engine.get_main_loop().create_timer(DEPLOY_MG_LIFETIME)
-		despawn_timer.timeout.connect(func() -> void:
-			if is_instance_valid(mg):
-				mg.queue_free())
+	# Python is authoritative — tell the server to spawn the MG tower.
+	BridgeClient.send("deploy_mg", {
+		"peer_id": peer_id,
+		"team": team,
+		"pos": [pos.x, pos.y, pos.z],
+		"lifetime": DEPLOY_MG_LIFETIME,
+	})

@@ -36,7 +36,7 @@ func _build_visuals() -> void:
 
 func _process(delta: float) -> void:
 	# Server-authoritative only — mirrors the guard in TowerBase._process.
-	if NetworkManager._peer != null and not multiplayer.is_server():
+	if not BridgeClient.is_host():
 		return
 	if _dead:
 		return
@@ -49,8 +49,13 @@ func _process(delta: float) -> void:
 
 func _emit_pulse() -> void:
 	_spawn_pulse_vfx()
-	if multiplayer.has_multiplayer_peer() and multiplayer.is_server():
-		LobbyManager.spawn_slow_pulse_visuals.rpc(name, global_position + Vector3(0.0, 0.3, 0.0))
+	if BridgeClient.is_host():
+		var origin: Vector3 = global_position + Vector3(0.0, 0.3, 0.0)
+		BridgeClient.send("tower_visual", {
+			"vtype": "slow_pulse",
+			"tower_name": name,
+			"origin": [origin.x, origin.y, origin.z],
+		})
 	if _area == null:
 		return
 	for body in _area.get_overlapping_bodies():
